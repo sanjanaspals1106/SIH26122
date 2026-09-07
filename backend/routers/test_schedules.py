@@ -1,11 +1,11 @@
 """API tests for the M1 Schedule API layer (backend.routers.schedules).
 
 These drive the FastAPI app through fastapi.testclient.TestClient and
-exercise the full path for each Phase 3 endpoint:
+exercise the full path for each M1 endpoint:
 
-    POST /api/v1/schedules -> Phase 1 parser/validator -> Phase 2 repository -> PostgreSQL
+    POST /api/v1/schedules -> parser -> repository -> PostgreSQL -> active FAISS index
     GET  /api/v1/schedules, /{schedule_id}, /{schedule_id}/activities,
-         /{schedule_id}/activities/{activity_id} -> PostgreSQL
+         /{schedule_id}/activities/{activity_id}, /{schedule_id}/dependencies -> PostgreSQL
 
 They require a reachable DATABASE_URL (see backend/.env.example) and are
 skipped automatically (when run via `python -m` directly) when the database
@@ -13,8 +13,11 @@ is not reachable — the same pattern used by
 backend/shared/test_schedule_repository_integration.py.
 
 Each test uses a schedule_id namespaced under "m1-api-test-" and deletes
-everything it wrote in a `finally` block, so runs never leave residue in the
-database, whether or not they pass.
+everything it wrote (database rows, including any dependencies) in a
+`finally` block, so runs never leave residue in the database whether or not
+they pass. The active FAISS index (in-memory only, see
+backend.shared.schedule_index) needs no cleanup — it is simply replaced by
+the next schedule that gets indexed.
 
 Run directly (requires a reachable DATABASE_URL):
     python backend/routers/test_schedules.py
@@ -69,6 +72,7 @@ def _database_available() -> bool:
 
 def _cleanup(schedule_id: str) -> None:
     with get_connection() as conn:
+        conn.execute("DELETE FROM schedule_dependencies WHERE schedule_id = %s", (schedule_id,))
         conn.execute("DELETE FROM schedule_activities WHERE schedule_id = %s", (schedule_id,))
         conn.execute("DELETE FROM schedules WHERE schedule_id = %s", (schedule_id,))
         conn.commit()
@@ -96,6 +100,9 @@ def test_create_and_read_schedule_end_to_end():
         assert body["data_date"] == "2026-08-14"
         assert body["source_format"] == "csv"
         assert body["activity_count"] == 2
+        assert body["dependency_count"] == 0
+        assert body["indexed"] is True
+        assert body["index_error"] is None
 
         list_resp = client.get("/api/v1/schedules")
         assert list_resp.status_code == 200
@@ -117,10 +124,51 @@ def test_create_and_read_schedule_end_to_end():
         one = one_resp.json()
         assert one["discipline"] == "Civil"
         assert one["planned_quantity"] == 40
+
+        deps_resp = client.get(f"/api/v1/schedules/{schedule_id}/dependencies")
+        assert deps_resp.status_code == 200
+        assert deps_resp.json() == []  # no dependency columns in this CSV
     finally:
         _cleanup(schedule_id)
 
     print("✓ POST creates a schedule end-to-end and GET endpoints retrieve it from PostgreSQL")
+
+
+def test_dependencies_are_parsed_persisted_and_retrievable():
+    schedule_id = _new_schedule_id()
+    csv_content = (
+        "L1,L2,L3,L4,L5 Activity ID,L6 Task ID,Discipline,Activity,Unit,"
+        "Planned Qty,Baseline Start,Baseline Finish,Predecessor Activity ID,Relationship Type\n"
+        "North Field,Pump Station 3,Civil Works,Trench,CIV-TR,{schedule_id}-01,Civil,"
+        "Excavate utility trench,m,40,2026-08-14,2026-08-16,,\n"
+        "North Field,Pump Station 3,Civil Works,Backfill,CIV-BF,{schedule_id}-02,Civil,"
+        "Backfill utility trench,m,40,2026-08-17,2026-08-18,{schedule_id}-01,FS\n"
+    ).format(schedule_id=schedule_id)
+
+    try:
+        create_resp = client.post(
+            "/api/v1/schedules",
+            json={
+                "schedule_id": schedule_id,
+                "project_name": "North Field Utility Corridor",
+                "csv_content": csv_content,
+            },
+        )
+        assert create_resp.status_code == 201, create_resp.text
+        assert create_resp.json()["dependency_count"] == 1
+
+        deps_resp = client.get(f"/api/v1/schedules/{schedule_id}/dependencies")
+        assert deps_resp.status_code == 200
+        deps = deps_resp.json()
+        assert len(deps) == 1
+        assert deps[0]["predecessor_activity_id"] == f"{schedule_id}-01"
+        assert deps[0]["successor_activity_id"] == f"{schedule_id}-02"
+        assert deps[0]["relationship_type"] == "FS"
+        assert deps[0]["schedule_id"] == schedule_id
+    finally:
+        _cleanup(schedule_id)
+
+    print("✓ dependency columns are parsed, persisted, and retrievable via the dependencies API")
 
 
 def test_duplicate_schedule_id_returns_409():
@@ -218,6 +266,7 @@ if __name__ == "__main__":
         )
     else:
         test_create_and_read_schedule_end_to_end()
+        test_dependencies_are_parsed_persisted_and_retrievable()
         test_duplicate_schedule_id_returns_409()
         test_invalid_csv_returns_422_with_row_errors_and_persists_nothing()
         test_get_unknown_schedule_returns_404()

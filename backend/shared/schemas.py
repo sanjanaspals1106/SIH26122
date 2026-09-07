@@ -26,6 +26,14 @@ class ScheduleActivity(BaseModel):
     baseline_pct_complete: float = Field(default=0.0, ge=0.0, le=100.0)
 
 
+class ScheduleDependency(BaseModel):
+    dependency_id: str
+    schedule_id: str
+    predecessor_activity_id: str
+    successor_activity_id: str
+    relationship_type: str = "FS"
+
+
 class ExecutionClaim(BaseModel):
     event_id: str
     schedule_id: str

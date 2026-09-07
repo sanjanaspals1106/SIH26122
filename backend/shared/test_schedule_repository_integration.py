@@ -23,6 +23,7 @@ from backend.shared.schedule import ScheduleParseResult, parse_schedule_csv
 from backend.shared.schedule_repository import (
     ScheduleAlreadyExistsError,
     SchedulePersistenceError,
+    list_schedule_dependencies,
     save_schedule,
 )
 from backend.shared.schemas import Schedule, ScheduleActivity
@@ -71,6 +72,7 @@ def _database_available() -> bool:
 
 def _cleanup(schedule_id: str) -> None:
     with get_connection() as conn:
+        conn.execute("DELETE FROM schedule_dependencies WHERE schedule_id = %s", (schedule_id,))
         conn.execute("DELETE FROM schedule_activities WHERE schedule_id = %s", (schedule_id,))
         conn.execute("DELETE FROM schedules WHERE schedule_id = %s", (schedule_id,))
         conn.commit()
@@ -185,6 +187,39 @@ def test_transaction_rolls_back_on_activity_failure():
     print("✓ a mid-import failure rolls back the schedule row and all activities")
 
 
+def test_persists_dependencies_and_they_are_retrievable():
+    schedule_id = _new_schedule_id()
+    csv_text = (
+        "L1,L2,L3,L4,L5 Activity ID,L6 Task ID,Discipline,Activity,Unit,"
+        "Planned Qty,Baseline Start,Baseline Finish,Predecessor Activity ID,Relationship Type\n"
+        "North Field Utility Corridor,Pump Station 3 Tie In,Civil Works,Trench and Foundations,"
+        "CIV-PS3-TR-0180,{activity_id}-01,Civil,Excavate utility trench,m,40,"
+        "2026-08-14,2026-08-15,,\n"
+        "North Field Utility Corridor,Pump Station 3 Tie In,Civil Works,Trench and Foundations,"
+        "CIV-PS3-BF-0180,{activity_id}-02,Civil,Backfill utility trench,m,40,"
+        "2026-08-16,2026-08-17,{activity_id}-01,FS\n"
+    ).format(activity_id=schedule_id)
+
+    parse_result = parse_schedule_csv(csv_text, schedule_id=schedule_id)
+    assert parse_result.is_valid, [e.describe() for e in parse_result.errors]
+    assert len(parse_result.dependencies) == 1
+    schedule = Schedule(schedule_id=schedule_id, project_name="North Field Utility Corridor")
+
+    try:
+        save_schedule(schedule, parse_result)
+
+        dependencies = list_schedule_dependencies(schedule_id)
+        assert len(dependencies) == 1
+        dep = dependencies[0]
+        assert dep.predecessor_activity_id == f"{schedule_id}-01"
+        assert dep.successor_activity_id == f"{schedule_id}-02"
+        assert dep.relationship_type == "FS"
+    finally:
+        _cleanup(schedule_id)
+
+    print("✓ dependencies are persisted transactionally with the schedule and retrievable from PostgreSQL")
+
+
 if __name__ == "__main__":
     print("Checking database availability (DATABASE_URL)...")
     if not _database_available():
@@ -197,5 +232,6 @@ if __name__ == "__main__":
         test_persists_schedule_and_activities_with_correct_field_mapping()
         test_duplicate_schedule_id_is_rejected()
         test_transaction_rolls_back_on_activity_failure()
+        test_persists_dependencies_and_they_are_retrievable()
 
         print("\nM1 schedule persistence integration tests passed.")

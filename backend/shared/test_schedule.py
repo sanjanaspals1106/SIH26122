@@ -219,6 +219,105 @@ def test_error_messages_identify_row_and_field():
     print("✓ validation errors identify the row number, activity_id, and field")
 
 
+_DEP_HEADER = _HEADER + ",Predecessor Activity ID,Relationship Type"
+
+
+def test_valid_dependency_is_parsed():
+    csv_text = (
+        _DEP_HEADER + "\n"
+        + _row(activity_id="A-1") + ",,\n"
+        + _row(activity_id="A-2", activity="Backfill trench") + ",A-1,SS\n"
+    )
+
+    result = parse_schedule_csv(csv_text, schedule_id="SCH-DEP")
+
+    assert result.is_valid, [e.describe() for e in result.errors]
+    assert len(result.dependencies) == 1
+    dep = result.dependencies[0]
+    assert dep.predecessor_activity_id == "A-1"
+    assert dep.successor_activity_id == "A-2"
+    assert dep.relationship_type == "SS"
+    assert dep.schedule_id == "SCH-DEP"
+
+    print("✓ a row with predecessor + relationship type columns produces a ScheduleDependency")
+
+
+def test_dependency_defaults_to_fs_when_relationship_type_omitted():
+    csv_text = (
+        _DEP_HEADER + "\n"
+        + _row(activity_id="A-1") + ",,\n"
+        + _row(activity_id="A-2", activity="Backfill trench") + ",A-1,\n"
+    )
+
+    result = parse_schedule_csv(csv_text, schedule_id="SCH-DEP")
+
+    assert result.is_valid, [e.describe() for e in result.errors]
+    assert result.dependencies[0].relationship_type == "FS"
+
+    print("✓ relationship_type defaults to FS when the column is blank")
+
+
+def test_dependency_referencing_unknown_activity_is_rejected():
+    csv_text = (
+        _DEP_HEADER + "\n"
+        + _row(activity_id="A-1") + ",DOES-NOT-EXIST,FS\n"
+    )
+
+    result = parse_schedule_csv(csv_text, schedule_id="SCH-DEP")
+
+    assert not result.is_valid
+    assert not result.dependencies
+    assert any(e.field_name == "predecessor_activity_id" for e in result.errors)
+
+    print("✓ a dependency referencing an activity_id outside this import is rejected, not silently created")
+
+
+def test_dependency_with_invalid_relationship_type_is_rejected():
+    csv_text = (
+        _DEP_HEADER + "\n"
+        + _row(activity_id="A-1") + ",,\n"
+        + _row(activity_id="A-2", activity="Backfill trench") + ",A-1,NOT_A_TYPE\n"
+    )
+
+    result = parse_schedule_csv(csv_text, schedule_id="SCH-DEP")
+
+    assert not result.is_valid
+    assert any(e.field_name == "relationship_type" for e in result.errors)
+
+    print("✓ an unrecognized relationship_type (not FS/SS/FF/SF) is rejected")
+
+
+def test_self_dependency_is_rejected():
+    csv_text = (
+        _DEP_HEADER + "\n"
+        + _row(activity_id="A-1") + ",A-1,FS\n"
+    )
+
+    result = parse_schedule_csv(csv_text, schedule_id="SCH-DEP")
+
+    assert not result.is_valid
+    assert any("cannot depend on itself" in e.message for e in result.errors)
+
+    print("✓ an activity cannot be its own predecessor")
+
+
+def test_activity_id_is_preserved_verbatim_in_dependency():
+    csv_text = (
+        _DEP_HEADER + "\n"
+        + _row(activity_id="A1000") + ",,\n"
+        + _row(activity_id="A1001", activity="Backfill trench") + ",A1000,FS\n"
+    )
+
+    result = parse_schedule_csv(csv_text, schedule_id="SCH-DEP")
+
+    assert result.is_valid, [e.describe() for e in result.errors]
+    assert {a.activity_id for a in result.activities} == {"A1000", "A1001"}
+    assert result.dependencies[0].predecessor_activity_id == "A1000"
+    assert result.dependencies[0].successor_activity_id == "A1001"
+
+    print("✓ source activity_ids (e.g. 'A1000') flow verbatim into dependency records, never a generated UUID")
+
+
 if __name__ == "__main__":
     test_parses_valid_rows()
     test_required_field_missing_produces_error()
@@ -231,5 +330,11 @@ if __name__ == "__main__":
     test_normalization_trims_whitespace_and_empty_strings()
     test_missing_schedule_id_raises()
     test_error_messages_identify_row_and_field()
+    test_valid_dependency_is_parsed()
+    test_dependency_defaults_to_fs_when_relationship_type_omitted()
+    test_dependency_referencing_unknown_activity_is_rejected()
+    test_dependency_with_invalid_relationship_type_is_rejected()
+    test_self_dependency_is_rejected()
+    test_activity_id_is_preserved_verbatim_in_dependency()
 
     print("\nM1 schedule ingestion tests passed.")

@@ -56,6 +56,33 @@ Deliberately NOT mapped:
     schedule_id                   - not a per-row column; it identifies the
                                      import batch and is supplied by the
                                      caller of parse_schedule_csv().
+
+Dependency columns (optional, per row)
+---------------------------------------
+Neither the empty sample_data/schedule.csv nor the read-only reference
+export above carries predecessor/successor columns, so their exact names
+are not fixed by any observed source file. Column names below are this
+module's own choice, documented here because they are otherwise
+undiscoverable:
+
+    Predecessor Activity ID -> this row's predecessor; the row's own
+                                (L6 Task ID -> activity_id) is the
+                                successor. One predecessor per row is
+                                supported — not a separate dependency
+                                section/file — matching this format's
+                                one-row-per-activity shape.
+    Relationship Type        -> one of FS, SS, FF, SF (case-insensitive);
+                                defaults to 'FS' (matching
+                                schedule_dependencies.relationship_type's
+                                DB default) when the column is absent or
+                                blank for a row that does declare a
+                                predecessor.
+
+Both columns are optional per row: a row with no predecessor value simply
+declares no dependency. A predecessor value that does not match any
+activity_id present in this same import is a validation error (never
+silently dropped or silently linked to a guessed activity) — see
+_resolve_dependencies().
 """
 
 from __future__ import annotations
@@ -68,7 +95,7 @@ from typing import Optional
 
 from pydantic import ValidationError
 
-from backend.shared.schemas import ScheduleActivity
+from backend.shared.schemas import ScheduleActivity, ScheduleDependency
 
 
 class ScheduleValidationError(Exception):
@@ -105,6 +132,7 @@ class ScheduleParseResult:
 
     schedule_id: str
     activities: list[ScheduleActivity] = field(default_factory=list)
+    dependencies: list[ScheduleDependency] = field(default_factory=list)
     errors: list[ScheduleValidationError] = field(default_factory=list)
 
     @property
@@ -127,6 +155,13 @@ _LOCATION_COLUMNS = ("l1", "l2")
 # Not present in the observed reference export; recognized for forward
 # compatibility if a future source provides a genuine baseline S-curve figure.
 _BASELINE_PCT_COLUMN = "baseline pct complete"
+
+# Dependency columns — see the module docstring's "Dependency columns" note
+# for why these names aren't sourced from an observed reference file.
+_PREDECESSOR_COLUMN = "predecessor activity id"
+_RELATIONSHIP_TYPE_COLUMN = "relationship type"
+_VALID_RELATIONSHIP_TYPES = {"FS", "SS", "FF", "SF"}
+_DEFAULT_RELATIONSHIP_TYPE = "FS"
 
 
 def _normalize_key(key: str) -> str:
@@ -210,6 +245,76 @@ def _build_location(
     return " / ".join(parts)
 
 
+def _resolve_dependencies(
+    schedule_id: str,
+    valid_activity_ids: set[str],
+    pending: list[tuple[int, str, str, Optional[str]]],
+    errors: list[ScheduleValidationError],
+) -> list[ScheduleDependency]:
+    """Turn (row_number, successor_activity_id, predecessor_raw, relationship_type_raw)
+    tuples collected while scanning rows into validated ScheduleDependency
+    records, once the full set of this import's activity_ids is known.
+
+    A predecessor that isn't one of this import's own activities, a
+    self-referencing row, or an unrecognized relationship_type is a
+    validation error appended to `errors` — never silently dropped and
+    never silently linked to the wrong activity.
+    """
+    dependencies: list[ScheduleDependency] = []
+
+    for row_number, successor_activity_id, predecessor_raw, relationship_type_raw in pending:
+        if predecessor_raw not in valid_activity_ids:
+            errors.append(
+                ScheduleValidationError(
+                    row_number,
+                    "predecessor_activity_id",
+                    f"references unknown activity_id {predecessor_raw!r} "
+                    "(not present in this schedule import)",
+                    successor_activity_id,
+                )
+            )
+            continue
+
+        if predecessor_raw == successor_activity_id:
+            errors.append(
+                ScheduleValidationError(
+                    row_number,
+                    "predecessor_activity_id",
+                    "an activity cannot depend on itself",
+                    successor_activity_id,
+                )
+            )
+            continue
+
+        relationship_type = _DEFAULT_RELATIONSHIP_TYPE
+        if relationship_type_raw:
+            candidate = relationship_type_raw.strip().upper()
+            if candidate not in _VALID_RELATIONSHIP_TYPES:
+                errors.append(
+                    ScheduleValidationError(
+                        row_number,
+                        "relationship_type",
+                        f"must be one of {sorted(_VALID_RELATIONSHIP_TYPES)}, "
+                        f"got {relationship_type_raw!r}",
+                        successor_activity_id,
+                    )
+                )
+                continue
+            relationship_type = candidate
+
+        dependencies.append(
+            ScheduleDependency(
+                dependency_id=f"{schedule_id}::{predecessor_raw}::{successor_activity_id}",
+                schedule_id=schedule_id,
+                predecessor_activity_id=predecessor_raw,
+                successor_activity_id=successor_activity_id,
+                relationship_type=relationship_type,
+            )
+        )
+
+    return dependencies
+
+
 def parse_schedule_csv(csv_text: str, schedule_id: str) -> ScheduleParseResult:
     """Parse baseline schedule CSV text into canonical ScheduleActivity records.
 
@@ -231,6 +336,7 @@ def parse_schedule_csv(csv_text: str, schedule_id: str) -> ScheduleParseResult:
     activities: list[ScheduleActivity] = []
     errors: list[ScheduleValidationError] = []
     first_seen_at: dict[str, int] = {}
+    pending_dependencies: list[tuple[int, str, str, Optional[str]]] = []
 
     for row_number, raw_row in enumerate(reader, start=2):  # header is row 1
         row = {
@@ -346,4 +452,15 @@ def parse_schedule_csv(csv_text: str, schedule_id: str) -> ScheduleParseResult:
 
         activities.append(activity)
 
-    return ScheduleParseResult(schedule_id=schedule_id, activities=activities, errors=errors)
+        predecessor_raw = _clean(row.get(_PREDECESSOR_COLUMN))
+        if predecessor_raw:
+            relationship_type_raw = _clean(row.get(_RELATIONSHIP_TYPE_COLUMN))
+            pending_dependencies.append((row_number, activity_id, predecessor_raw, relationship_type_raw))
+
+    dependencies = _resolve_dependencies(
+        schedule_id, {a.activity_id for a in activities}, pending_dependencies, errors
+    )
+
+    return ScheduleParseResult(
+        schedule_id=schedule_id, activities=activities, dependencies=dependencies, errors=errors
+    )

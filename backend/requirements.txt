@@ -3,3 +3,5 @@ uvicorn[standard]
 pydantic
 psycopg[binary]
 python-dotenv
+faiss-cpu
+sentence-transformers

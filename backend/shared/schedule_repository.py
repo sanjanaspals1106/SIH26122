@@ -2,13 +2,12 @@
 
 Writes a validated ScheduleParseResult (backend.shared.schedule) and its
 Schedule metadata (backend.shared.schemas.Schedule) into the existing
-`schedules` and `schedule_activities` tables (backend/models/schema.sql).
-Also provides the read-side lookups the M1 Schedule API layer
-(backend.routers.schedules) needs to serve baseline schedule data back out
-of PostgreSQL.
+`schedules`, `schedule_activities`, and `schedule_dependencies` tables
+(backend/models/schema.sql). Also provides the read-side lookups the M1
+Schedule API layer (backend.routers.schedules) needs to serve baseline
+schedule data back out of PostgreSQL.
 
 Reuses backend.shared.db.get_connection() — no second DB abstraction, no ORM.
-schedule_dependencies persistence is out of scope for this phase.
 """
 
 from __future__ import annotations
@@ -19,7 +18,7 @@ import psycopg
 
 from backend.shared.db import get_connection
 from backend.shared.schedule import ScheduleParseResult
-from backend.shared.schemas import Schedule, ScheduleActivity
+from backend.shared.schemas import Schedule, ScheduleActivity, ScheduleDependency
 
 
 class ScheduleAlreadyExistsError(Exception):
@@ -59,14 +58,27 @@ _INSERT_ACTIVITY_SQL = """
     )
 """
 
+_INSERT_DEPENDENCY_SQL = """
+    INSERT INTO schedule_dependencies (
+        dependency_id, schedule_id, predecessor_activity_id,
+        successor_activity_id, relationship_type
+    ) VALUES (
+        %(dependency_id)s, %(schedule_id)s, %(predecessor_activity_id)s,
+        %(successor_activity_id)s, %(relationship_type)s
+    )
+"""
+
 
 def save_schedule(schedule: Schedule, parse_result: ScheduleParseResult) -> int:
-    """Persist a schedule and its activities in a single transaction.
+    """Persist a schedule, its activities, and its dependencies in a single transaction.
 
     `parse_result` must already be valid (parse_result.is_valid) — this
     function re-validates nothing; validation is backend.shared.schedule's
-    job. All rows are written atomically: if any insert fails (including an
-    already-existing schedule_id), nothing is committed.
+    job (including that every dependency's predecessor/successor already
+    refer to activities in this same import). All rows are written
+    atomically: if any insert fails (including an already-existing
+    schedule_id), nothing is committed. Dependencies are optional — a
+    schedule with zero dependencies is perfectly valid.
 
     Returns the number of activities persisted.
 
@@ -104,6 +116,9 @@ def save_schedule(schedule: Schedule, parse_result: ScheduleParseResult) -> int:
 
             for activity in parse_result.activities:
                 conn.execute(_INSERT_ACTIVITY_SQL, activity.model_dump())
+
+            for dependency in parse_result.dependencies:
+                conn.execute(_INSERT_DEPENDENCY_SQL, dependency.model_dump())
 
             conn.commit()
     except ScheduleAlreadyExistsError:
@@ -177,3 +192,26 @@ def get_schedule_activity(schedule_id: str, activity_id: str) -> Optional[Schedu
         ).fetchone()
 
     return ScheduleActivity(**row) if row is not None else None
+
+
+_LIST_DEPENDENCIES_SQL = """
+    SELECT dependency_id, schedule_id, predecessor_activity_id,
+           successor_activity_id, relationship_type
+    FROM schedule_dependencies
+    WHERE schedule_id = %s
+    ORDER BY dependency_id
+"""
+
+
+def list_schedule_dependencies(schedule_id: str) -> list[ScheduleDependency]:
+    """List every dependency belonging to a schedule.
+
+    Returns an empty list both for a schedule with no dependencies and for
+    an unknown schedule_id — same convention as list_schedule_activities();
+    callers that need to distinguish the two should check get_schedule()
+    first.
+    """
+    with get_connection() as conn:
+        rows = conn.execute(_LIST_DEPENDENCIES_SQL, (schedule_id,)).fetchall()
+
+    return [ScheduleDependency(**row) for row in rows]
