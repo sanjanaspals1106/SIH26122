@@ -4,6 +4,13 @@ from typing import Optional
 from pydantic import BaseModel, Field
 
 
+class Schedule(BaseModel):
+    schedule_id: str
+    project_name: str
+    data_date: Optional[date] = None
+    source_format: Optional[str] = None
+
+
 class ScheduleActivity(BaseModel):
     schedule_id: str
     activity_id: str
