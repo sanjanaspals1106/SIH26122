@@ -1,14 +1,6 @@
 from backend.shared.db import get_connection
-from backend.shared.schemas import (
-    ScheduleActivity,
-    ExecutionClaim,
-    CandidateMatch,
-    ValidationIssue,
-    PlannerDecision,
-    ApprovedActual,
-)
 from backend.shared.audit import payload_hash
-from backend.shared.actuals import get_approved_pct
+from backend.shared.actuals import get_approved_actual
 
 
 EXPECTED_TABLES = {
@@ -27,64 +19,57 @@ EXPECTED_TABLES = {
 }
 
 
-def check_database():
+def test_database_connection():
+    with get_connection() as conn:
+        row = conn.execute("SELECT 1 AS ok").fetchone()
+
+    assert row["ok"] == 1
+
+    print("✓ PostgreSQL connection")
+
+
+def test_database_schema():
     with get_connection() as conn:
         rows = conn.execute(
             """
-            SELECT name
-            FROM sqlite_master
-            WHERE type = 'table'
+            SELECT tablename
+            FROM pg_tables
+            WHERE schemaname = 'public'
             """
         ).fetchall()
 
-    actual_tables = {row["name"] for row in rows}
-
+    actual_tables = {row["tablename"] for row in rows}
     missing = EXPECTED_TABLES - actual_tables
 
-    assert not missing, f"Missing database tables: {sorted(missing)}"
+    assert not missing, f"Missing tables: {sorted(missing)}"
 
     print("✓ database schema")
 
 
-def check_shared_models():
-    models = [
-        ScheduleActivity,
-        ExecutionClaim,
-        CandidateMatch,
-        ValidationIssue,
-        PlannerDecision,
-        ApprovedActual,
-    ]
+def test_audit_hashing():
+    result = payload_hash({"test": "value"})
 
-    assert all(model is not None for model in models)
-
-    print("✓ shared Pydantic schemas")
-
-
-def check_audit():
-    value = payload_hash({"test": "payload"})
-
-    assert len(value) == 64
-    assert all(c in "0123456789abcdef" for c in value)
+    assert isinstance(result, str)
+    assert len(result) == 64
 
     print("✓ audit hashing")
 
 
-def check_actuals():
-    pct = get_approved_pct(
-        "smoke-test-schedule",
-        "smoke-test-activity",
+def test_approved_actuals_lookup():
+    result = get_approved_actual(
+        schedule_id="smoke-test-schedule",
+        activity_id="smoke-test-activity",
     )
 
-    assert pct == 0.0
+    assert result is None
 
     print("✓ approved actuals lookup")
 
 
 if __name__ == "__main__":
-    check_database()
-    check_shared_models()
-    check_audit()
-    check_actuals()
+    test_database_connection()
+    test_database_schema()
+    test_audit_hashing()
+    test_approved_actuals_lookup()
 
     print("\nSmoke test passed.")

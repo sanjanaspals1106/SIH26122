@@ -1,21 +1,35 @@
+import os
 from pathlib import Path
-import sqlite3
+
+import psycopg
+from psycopg.rows import dict_row
+from dotenv import load_dotenv
 
 
 BASE_DIR = Path(__file__).resolve().parents[2]
-DB_PATH = BASE_DIR / "sih26122.db"
+
+load_dotenv(BASE_DIR / ".env")
+
+DATABASE_URL = os.getenv("DATABASE_URL")
 
 
-def get_connection() -> sqlite3.Connection:
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA foreign_keys = ON")
-    return conn
+def get_connection() -> psycopg.Connection:
+    if not DATABASE_URL:
+        raise RuntimeError(
+            "DATABASE_URL is not configured. "
+            "Add it to the project .env file."
+        )
+
+    return psycopg.connect(
+        DATABASE_URL,
+        row_factory=dict_row,
+    )
 
 
 def init_db() -> None:
     schema_path = BASE_DIR / "backend" / "models" / "schema.sql"
+    schema = schema_path.read_text()
 
     with get_connection() as conn:
-        conn.executescript(schema_path.read_text())
+        conn.execute(schema)
         conn.commit()
