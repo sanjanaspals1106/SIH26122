@@ -3,7 +3,7 @@
 Thin FastAPI wrapper over the Phase 1 parser/validator
 (backend.shared.schedule) and Phase 2 repository (backend.shared.schedule_repository):
 
-    POST /api/v1/schedules                                   request -> parser -> repository -> PostgreSQL -> active FAISS index
+    POST /api/v1/schedules                                   request -> generate schedule_id -> parser -> repository -> PostgreSQL -> active FAISS index
     GET  /api/v1/schedules                                    list schedules from PostgreSQL
     GET  /api/v1/schedules/{schedule_id}                       one schedule from PostgreSQL
     GET  /api/v1/schedules/{schedule_id}/activities             a schedule's activities from PostgreSQL
@@ -12,11 +12,18 @@ Thin FastAPI wrapper over the Phase 1 parser/validator
 
 No matching (EXACT_ID/EXACT_ASSET/HYBRID_FALLBACK/tiering), embeddings-as-a-
 service, OCR, or LLM extraction here — those belong to later phases.
+
+ID contract (per the project's non-negotiable "ID format" rule):
+schedule_id is a system-generated entity — a lowercase uuid.uuid4() string
+generated here, server-side, never accepted from the client. activity_id is
+the one exception in the whole system and is preserved verbatim from the
+uploaded CSV (see backend.shared.schedule).
 """
 
 from __future__ import annotations
 
 import logging
+import uuid
 from datetime import date
 from typing import Optional
 
@@ -48,7 +55,8 @@ def health():
 
 
 class ScheduleCreateRequest(BaseModel):
-    schedule_id: str
+    # No schedule_id field: schedule_id is a system-generated identifier
+    # (see module docstring) and is never accepted from the client.
     project_name: str
     data_date: Optional[date] = None
     source_format: Optional[str] = "csv"
@@ -83,7 +91,13 @@ def _parse_errors_detail(message: str, errors) -> dict:
 
 @router.post("", response_model=ScheduleCreateResponse, status_code=status.HTTP_201_CREATED)
 def create_schedule(request: ScheduleCreateRequest) -> ScheduleCreateResponse:
-    parse_result = parse_schedule_csv(request.csv_content, schedule_id=request.schedule_id)
+    # schedule_id is generated here, server-side — never accepted from the
+    # client. This is what makes duplicate-schedule protection operate on a
+    # genuinely system-assigned identity rather than one the caller could
+    # collide (accidentally or otherwise).
+    schedule_id = str(uuid.uuid4())
+
+    parse_result = parse_schedule_csv(request.csv_content, schedule_id=schedule_id)
 
     if not parse_result.is_valid:
         raise HTTPException(
@@ -98,7 +112,7 @@ def create_schedule(request: ScheduleCreateRequest) -> ScheduleCreateResponse:
         )
 
     schedule = Schedule(
-        schedule_id=request.schedule_id,
+        schedule_id=schedule_id,
         project_name=request.project_name,
         data_date=request.data_date,
         source_format=request.source_format,

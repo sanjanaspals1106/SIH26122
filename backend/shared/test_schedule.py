@@ -9,6 +9,8 @@ Run directly (matches the existing backend/smoke_test.py convention):
     python backend/shared/test_schedule.py
 """
 
+import uuid
+
 from backend.shared.schedule import parse_schedule_csv
 
 _HEADER = (
@@ -238,8 +240,10 @@ def test_valid_dependency_is_parsed():
     assert dep.successor_activity_id == "A-2"
     assert dep.relationship_type == "SS"
     assert dep.schedule_id == "SCH-DEP"
+    parsed_id = uuid.UUID(dep.dependency_id, version=4)  # system-generated uuid4, not a composite string
+    assert str(parsed_id) == dep.dependency_id  # canonical lowercase form
 
-    print("✓ a row with predecessor + relationship type columns produces a ScheduleDependency")
+    print("✓ a row with predecessor + relationship type columns produces a ScheduleDependency with a generated uuid4 dependency_id")
 
 
 def test_dependency_defaults_to_fs_when_relationship_type_omitted():

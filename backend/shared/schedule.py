@@ -89,6 +89,7 @@ from __future__ import annotations
 
 import csv
 import io
+import uuid
 from dataclasses import dataclass, field
 from datetime import date
 from typing import Optional
@@ -304,7 +305,10 @@ def _resolve_dependencies(
 
         dependencies.append(
             ScheduleDependency(
-                dependency_id=f"{schedule_id}::{predecessor_raw}::{successor_activity_id}",
+                # dependency_id is a system-generated entity per the project's
+                # ID-format contract — a fresh lowercase uuid4 per dependency,
+                # never derived from predecessor/successor/schedule_id.
+                dependency_id=str(uuid.uuid4()),
                 schedule_id=schedule_id,
                 predecessor_activity_id=predecessor_raw,
                 successor_activity_id=successor_activity_id,
