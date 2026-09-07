@@ -1,0 +1,17 @@
+{
+  "case_id": "EDGE-001",
+  "edge_case_type": "DELAYED_ACTIVITY",
+  "activity_id": "ELE-PS3-CBL-001",
+  "activity_name": "11kV Medium Voltage Cable Pulling",
+  "planned_start": "2026-08-12",
+  "planned_finish": "2026-08-18",
+  "reporting_date": "2026-08-20",
+  "planned_quantity": 500.0,
+  "cumulative_actual": 300.0,
+  "current_progress_pct": 60.0,
+  "unit": "m",
+  "delay_reason": "Cable drum delivery delayed at port",
+  "expected_status": "DELAYED",
+  "expected_slippage_days": 2,
+  "review_required": true
+}

@@ -1,0 +1,14 @@
+{
+  "case_id": "MATCH-002",
+  "scenario": "ASSET_TAG_MATCH",
+  "event_id": "EVT-TEST-M02",
+  "schedule_id": "SIH26122_NFU",
+  "event_date": "2026-08-14",
+  "raw_claim_text": "P-102 discharge line welding completed. Two field joints cleared by inspection team.",
+  "input_channel": "FIELD_NOTE",
+  "reported_activity_id": null,
+  "asset_tag": "P-102",
+  "discipline": "Piping",
+  "claimed_quantity": 2.0,
+  "claimed_uom": "joints"
+}
