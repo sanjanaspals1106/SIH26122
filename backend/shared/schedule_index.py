@@ -60,7 +60,7 @@ logger = logging.getLogger(__name__)
 
 # Model and text construction are fixed by the project spec, not chosen
 # here for convenience:
-#   text = "{activity_name} {discipline} {location} {asset_tag}"
+#   text = "{activity_id} {activity_name} {wbs_code} {discipline} {location} {asset_tag}"
 #   embeddings = sentence-transformers("all-MiniLM-L6-v2")
 #   index = FAISS IndexFlatIP
 EMBEDDING_MODEL_NAME = "all-MiniLM-L6-v2"
@@ -132,14 +132,15 @@ class IndexBuildResult:
 def build_searchable_text(activity: ScheduleActivity) -> str:
     """Deterministic searchable text for one activity.
 
-    Field selection and order are fixed by the project spec: activity_name,
-    discipline, location, asset_tag. A field that is None (asset_tag is
-    routinely None — see backend/shared/schedule.py's column mapping notes)
-    is omitted rather than fabricated or rendered as the literal word
-    "None".
+    Field selection and order are fixed by the project spec: activity_id,
+    activity_name, wbs_code, discipline, location, asset_tag. A field that is
+    None (wbs_code or asset_tag may be None) is omitted rather than fabricated
+    or rendered as the literal word "None".
     """
     parts = [
+        activity.activity_id,
         activity.activity_name,
+        activity.wbs_code,
         activity.discipline,
         activity.location,
         activity.asset_tag,

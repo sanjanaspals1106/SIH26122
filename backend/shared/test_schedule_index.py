@@ -84,10 +84,24 @@ def test_build_searchable_text_omits_missing_fields():
         "SCH", "A-1", "Excavate utility trench", "Civil", "North Field / Pump Station 3"
     )
     text = build_searchable_text(activity)
-    assert text == "Excavate utility trench Civil North Field / Pump Station 3"
-    assert "None" not in text  # asset_tag is None and must be omitted, not stringified
+    assert text == "A-1 Excavate utility trench Civil North Field / Pump Station 3"
+    assert "None" not in text  # wbs_code and asset_tag are None and must be omitted, not stringified
 
-    print("✓ searchable text uses only present fields, never the literal word 'None'")
+    activity_with_all = ScheduleActivity(
+        schedule_id="SCH",
+        activity_id="A-1",
+        activity_name="Excavate utility trench",
+        wbs_code="WBS-100",
+        discipline="Civil",
+        location="North Field / Pump Station 3",
+        asset_tag="TAG-99",
+        planned_start=date(2026, 8, 1),
+        planned_finish=date(2026, 8, 10),
+    )
+    text_all = build_searchable_text(activity_with_all)
+    assert text_all == "A-1 Excavate utility trench WBS-100 Civil North Field / Pump Station 3 TAG-99"
+
+    print("✓ searchable text includes all six fields when present, omitting missing fields without stringifying None")
 
 
 def test_build_index_and_search_returns_relevant_candidate():
