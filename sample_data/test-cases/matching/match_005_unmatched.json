@@ -1,0 +1,14 @@
+{
+  "case_id": "MATCH-005",
+  "scenario": "UNMATCHED",
+  "event_id": "EVT-TEST-M05",
+  "schedule_id": "SIH26122_NFU",
+  "event_date": "2026-08-16",
+  "raw_claim_text": "Temporary rain shelter installed at laydown area.",
+  "input_channel": "FIELD_NOTE",
+  "reported_activity_id": null,
+  "asset_tag": null,
+  "discipline": "General Works",
+  "claimed_quantity": 1.0,
+  "claimed_uom": "each"
+}

@@ -1,0 +1,6 @@
+Report Date,Activity ID,Task ID,Discipline,Work Description,Unit,Planned Qty,Prior Actual,Today Actual,Cumulative Actual,Progress Pct,Status,Evidence Reference,Remarks
+2026-08-11,CIV-PS3-FND-001,CIV-PS3-FND-001-01,Civil,Pump foundation excavation and blinding,m3,65.0,0.0,20.0,20.0,30.8,Ongoing,daily_progress_report_2026-08-11.txt,Blinding pour in progress
+2026-08-11,PIP-PS3-WLD-024,PIP-PS3-WLD-024-01,Piping,Field weld joints utility header,joints,24.0,0.0,6.0,6.0,25.0,Ongoing,daily_progress_report_2026-08-11.txt,Root pass welding started
+2026-08-11,PIP-PS3-SPO-015,PIP-PS3-SPO-015-01,Piping,Firewater underground spool installation,m,80.0,0.0,20.0,20.0,25.0,Ongoing,daily_progress_report_2026-08-11.txt,Spools strung in trench
+2026-08-11,ELE-PS3-CT-011,ELE-PS3-CT-011-02,Electrical,Place cable trench bedding at MCC-02,m,160.0,20.0,40.0,60.0,37.5,Ongoing,daily_progress_report_2026-08-11.txt,Sand bedding placement
+2026-08-11,HSE-PS3-IND-001,HSE-PS3-IND-001-01,HSE,Site safety induction and toolbox talk,days,10.0,0.0,1.0,1.0,10.0,Ongoing,daily_progress_report_2026-08-11.txt,Toolbox completed

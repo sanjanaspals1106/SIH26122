@@ -1,0 +1,25 @@
+{
+  "case_id": "EDGE-004",
+  "edge_case_type": "CROSS_FORMAT_MISMATCH",
+  "activity_id": "ELE-PS3-TR-005",
+  "activity_name": "Cable Tray Installation Piperack Tier 2",
+  "reporting_date": "2026-08-20",
+  "planned_quantity": 200.0,
+  "unit": "m",
+  "source_csv": {
+    "file": "input/progress-report-csv/daily_progress_2026-08-20.csv",
+    "cumulative_actual": 120.0,
+    "progress_pct": 60.0
+  },
+  "source_xlsx": {
+    "file": "input/discipline-report-xlsx/discipline_progress_2026-08-20.xlsx",
+    "sheet": "Electrical",
+    "cumulative_actual": 140.0,
+    "progress_pct": 70.0
+  },
+  "variance_percentage_points": 10.0,
+  "variance_quantity": 20.0,
+  "expected_status": "SOURCE_MISMATCH",
+  "review_required": true,
+  "mismatch_reason": "Cross-format reconciliation failure: CSV reports 120 m (60.0%) while XLSX reports 140 m (70.0%) for same reporting date 20-Aug-2026"
+}

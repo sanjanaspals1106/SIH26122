@@ -1,0 +1,12 @@
+{
+  "rollup_case_id": "ROLLUP-001",
+  "event_id": "EVT-ROLLUP-001",
+  "schedule_id": "SIH26122_NFU",
+  "event_date": "2026-08-19",
+  "reported_activity_id": "PIP-PS3-HDR-100-B",
+  "parent_activity_id": "PIP-PS3-HDR-100",
+  "raw_claim_text": "PIP-PS3-HDR-100-B: Utility header spool Section B fit-up and erection completed 18 m of 30 m planned.",
+  "claimed_completed_quantity": 18.0,
+  "claimed_uom": "m",
+  "child_progress_pct": 60.0
+}

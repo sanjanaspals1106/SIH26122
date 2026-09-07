@@ -1,0 +1,27 @@
+[
+  {
+    "conflict_id": "CONF-001",
+    "activity_id": "PIP-PS3-WLD-024",
+    "reporting_period": "2026-08-14",
+    "conflict": true,
+    "review_required": true,
+    "source_a": {
+      "document": "input/daily-report-txt/daily_progress_report_2026-08-14.txt",
+      "claimed_today": 2.0,
+      "cumulative": 22.0,
+      "uom": "joints",
+      "pct": 91.7
+    },
+    "source_b": {
+      "document": "test-cases/conflicts/conf_001_source_b_field_claim.json",
+      "claimed_today": 3.0,
+      "cumulative": 23.0,
+      "uom": "joints",
+      "pct": 95.8
+    },
+    "variance_quantity": 1.0,
+    "variance_pct": 4.17,
+    "status": "OPEN",
+    "planner_action_required": "Resolve quantity mismatch: Source A claims 2 joints vs Source B claims 3 joints on 14-Aug-2026"
+  }
+]

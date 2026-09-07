@@ -1,0 +1,37 @@
+[
+  {
+    "rollup_case_id": "ROLLUP-001",
+    "parent_activity_id": "PIP-PS3-HDR-100",
+    "parent_activity_name": "Above Ground Utility Header Fabrication",
+    "parent_planned_quantity": 100.0,
+    "parent_unit": "m",
+    "children": [
+      {
+        "child_activity_id": "PIP-PS3-HDR-100-A",
+        "planned_quantity": 40.0,
+        "current_completed_quantity": 0.0,
+        "progress_pct": 0.0
+      },
+      {
+        "child_activity_id": "PIP-PS3-HDR-100-B",
+        "planned_quantity": 30.0,
+        "current_completed_quantity": 18.0,
+        "progress_pct": 60.0
+      },
+      {
+        "child_activity_id": "PIP-PS3-HDR-100-C",
+        "planned_quantity": 30.0,
+        "current_completed_quantity": 0.0,
+        "progress_pct": 0.0
+      }
+    ],
+    "calculation": {
+      "formula": "Parent_Completed = sum(Child_Completed); Parent_Progress = (Parent_Completed / Parent_Planned) * 100",
+      "parent_completed_quantity": 18.0,
+      "parent_progress_pct": 18.0
+    },
+    "expected_parent_completed": 18.0,
+    "expected_parent_progress_pct": 18.0,
+    "status": "VALIDATED"
+  }
+]

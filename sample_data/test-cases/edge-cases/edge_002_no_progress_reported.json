@@ -1,0 +1,14 @@
+{
+  "case_id": "EDGE-002",
+  "edge_case_type": "NO_PROGRESS_REPORTED",
+  "activity_id": "INS-PS3-FGS-001",
+  "activity_name": "Fire & Gas Detector Mounting",
+  "planned_start": "2026-08-18",
+  "planned_finish": "2026-08-22",
+  "planned_quantity": 16.0,
+  "unit": "ea",
+  "reporting_period": "2026-08-18 to 2026-08-22",
+  "reports_found_count": 0,
+  "expected_status": "NO_PROGRESS_REPORTED",
+  "review_required": false
+}

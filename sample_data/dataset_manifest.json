@@ -1,0 +1,394 @@
+{
+  "project": "SIH26122",
+  "title": "Intelligent Construction Progress Data Capture & Schedule-Linking Benchmark Dataset",
+  "canonical_activities_count": 45,
+  "disciplines": {
+    "Civil": 8,
+    "Piping": 10,
+    "Static/Rotating Equipment": 7,
+    "Electrical": 8,
+    "Instrumentation": 7,
+    "HSE": 5
+  },
+  "reporting_dates": [
+    "2026-08-11",
+    "2026-08-12",
+    "2026-08-13",
+    "2026-08-14",
+    "2026-08-15",
+    "2026-08-18",
+    "2026-08-19",
+    "2026-08-20",
+    "2026-08-21",
+    "2026-08-22"
+  ],
+  "file_counts_by_category": {
+    "canonical": 2,
+    "expected": 3,
+    "ignore": 13,
+    "input": 30,
+    "test-cases": 12
+  },
+  "files": [
+    {
+      "path": "canonical/activity_master.csv",
+      "category": "canonical",
+      "size_bytes": 12466,
+      "sha256": "f80f4839d0c13a75598b3faa90d99934065118d4e26f270b6bc8a7bf45c17a06"
+    },
+    {
+      "path": "canonical/schedule.csv",
+      "category": "canonical",
+      "size_bytes": 9542,
+      "sha256": "668f9148f03cda3ff59457d62436499fad6402094bcd45e74190801b27a5789a"
+    },
+    {
+      "path": "expected/conflict_results.json",
+      "category": "expected",
+      "size_bytes": 799,
+      "sha256": "32648a9ab76a847ea1270f746a5a3086cca69845ff380116bdbfd4b3fbd2d7fd"
+    },
+    {
+      "path": "expected/matching_results.json",
+      "category": "expected",
+      "size_bytes": 2237,
+      "sha256": "f3160f18822c89ab8b4cbf3bd71fba5337d047e7498d839e3b40271ff1625510"
+    },
+    {
+      "path": "expected/rollup_results.json",
+      "category": "expected",
+      "size_bytes": 1134,
+      "sha256": "ebba3746ebf89af8fd1692d7ae13d7805e7ab074afa00cec716f28a5e9637a62"
+    },
+    {
+      "path": "ignore/generation-scripts/generate_canonical.py",
+      "category": "ignore",
+      "size_bytes": 35845,
+      "sha256": "1c91c571d8819ea4b9ed9712daf0e5ccf836996ef0f88a81563274a785b6050e"
+    },
+    {
+      "path": "ignore/generation-scripts/generate_manifest.py",
+      "category": "ignore",
+      "size_bytes": 1609,
+      "sha256": "ae8ad01c05286231edd8550f4f6c67040263a1ebecc408eee9e8f74cd8afae74"
+    },
+    {
+      "path": "ignore/generation-scripts/generate_reports.py",
+      "category": "ignore",
+      "size_bytes": 45813,
+      "sha256": "ab533602341e5924ab7ae6ba425eb1234c1eaccb7ea2c5a0d260b42da1396c94"
+    },
+    {
+      "path": "ignore/generation-scripts/generate_test_cases.py",
+      "category": "ignore",
+      "size_bytes": 16471,
+      "sha256": "8f03dbed9f86d1fe6394a764def85cc13cdf49a1cfd670acbd6f1f6ac442532c"
+    },
+    {
+      "path": "ignore/generation-scripts/validate_dataset.py",
+      "category": "ignore",
+      "size_bytes": 12408,
+      "sha256": "e3fda9c542c6581dc90f9bcb9d28bf22dfd50cab50d94ba253620d25b694c5db"
+    },
+    {
+      "path": "ignore/old-versions/sih26122_canonical_schedule_v0.csv",
+      "category": "ignore",
+      "size_bytes": 1065,
+      "sha256": "613ef1b3995e2eb441441689773375bfc45a8186a1f622760b32ceb5659390d4"
+    },
+    {
+      "path": "ignore/old-versions/golden_14aug_backup/daily_progress_2026-08-14.csv",
+      "category": "ignore",
+      "size_bytes": 937,
+      "sha256": "9dc299a98c6f8e0247df24672505761ea6893c989b547baaa7e31af13ad747b9"
+    },
+    {
+      "path": "ignore/old-versions/golden_14aug_backup/daily_progress_report_2026-08-14.pdf",
+      "category": "ignore",
+      "size_bytes": 3581,
+      "sha256": "6ed7d903fad512c536c5849648d77dbb9960de2d82e2b61dedc3d5911b2d64f8"
+    },
+    {
+      "path": "ignore/old-versions/golden_14aug_backup/daily_progress_report_2026-08-14.txt",
+      "category": "ignore",
+      "size_bytes": 1313,
+      "sha256": "3b201785560a88c2fe1e26d1f3ccad68bd4dfead868529cd25661e04a3a5a945"
+    },
+    {
+      "path": "ignore/old-versions/golden_14aug_backup/discipline_progress_2026-08-14.xlsx",
+      "category": "ignore",
+      "size_bytes": 7521,
+      "sha256": "c08bcf678f256aa5ab2c090a8564d30190279ebb4262d84fe5000ebffd87fb93"
+    },
+    {
+      "path": "ignore/old-versions/golden_14aug_backup/site_diary_2026-08-14.png",
+      "category": "ignore",
+      "size_bytes": 2303659,
+      "sha256": "df86df578a20c5fc8eeaa0038610b5f723771f79461196cd76cf6a929954dc96"
+    },
+    {
+      "path": "ignore/public-reference-files/sample_schedule_borouge4_reference.xer",
+      "category": "ignore",
+      "size_bytes": 10012,
+      "sha256": "37407ae9ba6d33e46d291ebf3f5403bc27d3b36f91895493772ca4089afcf671"
+    },
+    {
+      "path": "ignore/source-notes/README.md",
+      "category": "ignore",
+      "size_bytes": 5396,
+      "sha256": "1bd6bb7c3a737e821b19d4784fecb9f2630d386707315e9dfc4736563e25f3b2"
+    },
+    {
+      "path": "input/daily-report-pdf/daily_progress_report_2026-08-12.pdf",
+      "category": "input",
+      "size_bytes": 3125,
+      "sha256": "9cf602137433c142ae538ffbdc02e532f67023d525721d0b7e118cb0d4ff9dfd"
+    },
+    {
+      "path": "input/daily-report-pdf/daily_progress_report_2026-08-14.pdf",
+      "category": "input",
+      "size_bytes": 3581,
+      "sha256": "6ed7d903fad512c536c5849648d77dbb9960de2d82e2b61dedc3d5911b2d64f8"
+    },
+    {
+      "path": "input/daily-report-pdf/daily_progress_report_2026-08-18.pdf",
+      "category": "input",
+      "size_bytes": 3205,
+      "sha256": "87a1f00d28aa8a3bb1bd0486cf3488bc3b137dbf9f3dbccae4533fa1b7f5d536"
+    },
+    {
+      "path": "input/daily-report-pdf/daily_progress_report_2026-08-21.pdf",
+      "category": "input",
+      "size_bytes": 3192,
+      "sha256": "811c3e0ebf823730afc63f1b3d0d6400bfd2d47d83d9ef2312d8dd9fe276bd13"
+    },
+    {
+      "path": "input/daily-report-txt/daily_progress_report_2026-08-11.txt",
+      "category": "input",
+      "size_bytes": 1407,
+      "sha256": "0e195c4d914770122f853cf4bcc8fc6d712606628162d74eb3aff1c9dbcd6f50"
+    },
+    {
+      "path": "input/daily-report-txt/daily_progress_report_2026-08-13.txt",
+      "category": "input",
+      "size_bytes": 1442,
+      "sha256": "97e61420f33cae99f6a517fb2757b3b2514106b4173492f8ba6a77797fd99324"
+    },
+    {
+      "path": "input/daily-report-txt/daily_progress_report_2026-08-14.txt",
+      "category": "input",
+      "size_bytes": 1313,
+      "sha256": "3b201785560a88c2fe1e26d1f3ccad68bd4dfead868529cd25661e04a3a5a945"
+    },
+    {
+      "path": "input/daily-report-txt/daily_progress_report_2026-08-15.txt",
+      "category": "input",
+      "size_bytes": 1477,
+      "sha256": "d5444f169ada53d835dc84e2a9d2e0e364a6dedb9567c258fcc29aca8285018f"
+    },
+    {
+      "path": "input/daily-report-txt/daily_progress_report_2026-08-19.txt",
+      "category": "input",
+      "size_bytes": 1533,
+      "sha256": "c9f936486d037bd19a40fad56102f2dc1101322dc363919b1577eba5bd7f7bb2"
+    },
+    {
+      "path": "input/daily-report-txt/daily_progress_report_2026-08-21.txt",
+      "category": "input",
+      "size_bytes": 1484,
+      "sha256": "bcf777ca130e3702e82c755d8d91742d312dace940dbdb793bc234761f3dd935"
+    },
+    {
+      "path": "input/discipline-report-xlsx/discipline_progress_2026-08-14.xlsx",
+      "category": "input",
+      "size_bytes": 7521,
+      "sha256": "c08bcf678f256aa5ab2c090a8564d30190279ebb4262d84fe5000ebffd87fb93"
+    },
+    {
+      "path": "input/discipline-report-xlsx/discipline_progress_2026-08-18.xlsx",
+      "category": "input",
+      "size_bytes": 7859,
+      "sha256": "928405d4e3e120c0e96ad81b62e41c7cbd814ca6ab11df4cbb2aed3c6e43dbf0"
+    },
+    {
+      "path": "input/discipline-report-xlsx/discipline_progress_2026-08-20.xlsx",
+      "category": "input",
+      "size_bytes": 7750,
+      "sha256": "dedad4e4bab4f01b81171b31b4e4cae3e26c6f21db71ca9d9b70ce23340fa850"
+    },
+    {
+      "path": "input/field-reports-json/field_report_2026-08-12_p101_blinding.json",
+      "category": "input",
+      "size_bytes": 768,
+      "sha256": "31c1afe12baa44f323417d3844b199636b4bed5f0d7f23ec720f3d239a69c059"
+    },
+    {
+      "path": "input/field-reports-json/field_report_2026-08-14_golden_claim.json",
+      "category": "input",
+      "size_bytes": 782,
+      "sha256": "9423985616f5cbae2cb6872112dca84ad65a0adcdc2691b1a4b5a93b496a09d9"
+    },
+    {
+      "path": "input/field-reports-json/field_report_2026-08-19_pump_plinth_pour.json",
+      "category": "input",
+      "size_bytes": 753,
+      "sha256": "9eb8904cebb6b6fbaf35d094b4d01ea8930324d42b510bd9ed410d87a00179bb"
+    },
+    {
+      "path": "input/field-reports-json/field_report_2026-08-22_generator_installation.json",
+      "category": "input",
+      "size_bytes": 779,
+      "sha256": "668a1746c3acb28711efbf691d75ba82e273aeebb5d4f8a9bdc65f4d968540a9"
+    },
+    {
+      "path": "input/progress-report-csv/daily_progress_2026-08-11.csv",
+      "category": "input",
+      "size_bytes": 1106,
+      "sha256": "087471faad4d6c109255d7ba7ed8ceeabf7bfc87d01b5040477c7232a9633d4c"
+    },
+    {
+      "path": "input/progress-report-csv/daily_progress_2026-08-12.csv",
+      "category": "input",
+      "size_bytes": 1485,
+      "sha256": "de0771e93c1de9429061c5a11c426a73260c8aebd874fb1ea44f8fc0491b4a90"
+    },
+    {
+      "path": "input/progress-report-csv/daily_progress_2026-08-13.csv",
+      "category": "input",
+      "size_bytes": 1274,
+      "sha256": "9a93d56a908a7f62c59cf281d598b9323b1d5a1b630980b3b254563a80078e35"
+    },
+    {
+      "path": "input/progress-report-csv/daily_progress_2026-08-14.csv",
+      "category": "input",
+      "size_bytes": 937,
+      "sha256": "9dc299a98c6f8e0247df24672505761ea6893c989b547baaa7e31af13ad747b9"
+    },
+    {
+      "path": "input/progress-report-csv/daily_progress_2026-08-15.csv",
+      "category": "input",
+      "size_bytes": 2096,
+      "sha256": "479f197cbffc667c315d00ad03bcb3b225d4fcd37d0fe6c33058d86d29240bc7"
+    },
+    {
+      "path": "input/progress-report-csv/daily_progress_2026-08-18.csv",
+      "category": "input",
+      "size_bytes": 1473,
+      "sha256": "e30e337f5439ea937dceac6f47eb183166f82d0eb6e869cfa6113180a3babeac"
+    },
+    {
+      "path": "input/progress-report-csv/daily_progress_2026-08-19.csv",
+      "category": "input",
+      "size_bytes": 1322,
+      "sha256": "8adce8d4a1dd1355d3ecb63c615c18d8ab3665891b4552e7d64baaf889fa5892"
+    },
+    {
+      "path": "input/progress-report-csv/daily_progress_2026-08-20.csv",
+      "category": "input",
+      "size_bytes": 1157,
+      "sha256": "25b984197aef472f8c6ee65e18fa03e7cee19bb74dae5aa51e5298335b6ef2fa"
+    },
+    {
+      "path": "input/progress-report-csv/daily_progress_2026-08-21.csv",
+      "category": "input",
+      "size_bytes": 1566,
+      "sha256": "457e4ff4c900d1a836648c31632d2f97bcbe6830d801989b26ee1d8beed5f009"
+    },
+    {
+      "path": "input/progress-report-csv/daily_progress_2026-08-22.csv",
+      "category": "input",
+      "size_bytes": 1441,
+      "sha256": "24dfea830ff3f91aba2eff37aa1fc207e5c9bc2959b30dc0952949e9aefdb81d"
+    },
+    {
+      "path": "input/scanned-diary/site_diary_2026-08-14.png",
+      "category": "input",
+      "size_bytes": 2303659,
+      "sha256": "df86df578a20c5fc8eeaa0038610b5f723771f79461196cd76cf6a929954dc96"
+    },
+    {
+      "path": "input/scanned-diary/site_diary_2026-08-21.png",
+      "category": "input",
+      "size_bytes": 111657,
+      "sha256": "162f29e443c6ff7cbd929f82be59bf7f685cdc941ed453ce13f6072020f7827b"
+    },
+    {
+      "path": "input/schedule-xer/sih26122_schedule.xer",
+      "category": "input",
+      "size_bytes": 6489,
+      "sha256": "80380e76b9c0b04451f83aba788091ea953eada6e8e9ce7caa53b851bdc3cb6b"
+    },
+    {
+      "path": "test-cases/conflicts/conf_001_source_a_txt_claim.json",
+      "category": "test-cases",
+      "size_bytes": 514,
+      "sha256": "32778f29f3186592cba40f0790eafdb1da8472af19a3dd3b97ea4c54538c73eb"
+    },
+    {
+      "path": "test-cases/conflicts/conf_001_source_b_field_claim.json",
+      "category": "test-cases",
+      "size_bytes": 507,
+      "sha256": "6dc1571e03b6b3a7c2c0856d7f720c7df5532a67e17fba6298879db71e2642b9"
+    },
+    {
+      "path": "test-cases/edge-cases/edge_001_delayed_activity.json",
+      "category": "test-cases",
+      "size_bytes": 529,
+      "sha256": "422e16b96d1a7fc4c6cd779a6f90f50cc46d60e363355dba6afd1fbd0e9db7d1"
+    },
+    {
+      "path": "test-cases/edge-cases/edge_002_no_progress_reported.json",
+      "category": "test-cases",
+      "size_bytes": 433,
+      "sha256": "22daf8e659c09d3eba6f029e6d5465bc3c21d8fa6d64fb98afb15a0bd27b641f"
+    },
+    {
+      "path": "test-cases/edge-cases/edge_003_quantity_exceeds_plan.json",
+      "category": "test-cases",
+      "size_bytes": 652,
+      "sha256": "b94e6f6a98fe59e725b80bef405b1934cfbfbefa94242c6e063a8ba934ed1779"
+    },
+    {
+      "path": "test-cases/edge-cases/edge_004_cross_format_mismatch.json",
+      "category": "test-cases",
+      "size_bytes": 900,
+      "sha256": "81adacc0f6ba1f733be65126a40f9729bcf81924313848aff9d6829f72a1e2cd"
+    },
+    {
+      "path": "test-cases/matching/match_001_exact_id.json",
+      "category": "test-cases",
+      "size_bytes": 461,
+      "sha256": "db8ef981ac614d7c5c218fd91b199dcf6aa8aea182b44349efe2faae47f64f93"
+    },
+    {
+      "path": "test-cases/matching/match_002_asset_tag.json",
+      "category": "test-cases",
+      "size_bytes": 444,
+      "sha256": "72c80bc3285c725e019cd33b593744ab089698bb7262a621f32791a4b1624461"
+    },
+    {
+      "path": "test-cases/matching/match_003_semantic.json",
+      "category": "test-cases",
+      "size_bytes": 412,
+      "sha256": "e509e78537e38920f3c65b7f4b665b8dbcfaaf10370b3a411aadc09dfa759aca"
+    },
+    {
+      "path": "test-cases/matching/match_004_ambiguous.json",
+      "category": "test-cases",
+      "size_bytes": 433,
+      "sha256": "9cf1651f54d8b3005701b343a345ffd8c8c7e5e1ffe5d17f66ed114f4919259e"
+    },
+    {
+      "path": "test-cases/matching/match_005_unmatched.json",
+      "category": "test-cases",
+      "size_bytes": 405,
+      "sha256": "6eeababa7f3a69a6f22b71c64d1890dcae253ad7f9b3b6fd97f31c16f05551a8"
+    },
+    {
+      "path": "test-cases/rollup/rollup_001_child_b_claim.json",
+      "category": "test-cases",
+      "size_bytes": 447,
+      "sha256": "c98f6fbff57211660ab65951ac2e27fda40fa31dcf2e7d4b8d7dc298c08f3371"
+    }
+  ]
+}

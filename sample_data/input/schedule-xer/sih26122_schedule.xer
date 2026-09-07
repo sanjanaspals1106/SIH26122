@@ -1,0 +1,61 @@
+ERMHDR	19.12	2026-08-10	Project	admin	SIH26122_Planner	NORTH_FIELD_CORRIDOR	USD	DD/MM/YYYY	1	0	0
+%T	PROJECT
+%F	proj_id	proj_short_name	plan_start_date	plan_end_date
+%R	1	SIH26122_NFU	2026-08-10 08:00	2026-08-22 18:00
+%T	PROJWBS
+%F	wbs_id	proj_id	parent_wbs_id	wbs_short_name	wbs_name
+%R	100	1		1	North Field Utility Corridor
+%R	101	1	100	1.01	Civil Works
+%R	102	1	100	1.02	Piping Works
+%R	103	1	100	1.03	Static and Rotating Equipment
+%R	104	1	100	1.04	Electrical Works
+%R	105	1	100	1.05	Instrumentation Works
+%R	106	1	100	1.06	Health Safety Environment
+%T	TASK
+%F	task_id	proj_id	wbs_id	task_code	task_name	task_type	status_code	target_drtn_hr_cnt	target_start_date	target_end_date	total_float_hr_cnt	cstr_type	cstr_date
+%R	2001	1	101	CIV-PS3-TR-0180	Utility Trench Excavation CH 0+180 to CH 0+220	TT_Task	TK_Complete	80	2026-08-14 08:00	2026-08-14 18:00	0		
+%R	2002	1	101	CIV-PS3-TR-0220	Utility Trench Excavation CH 0+220 to CH 0+260	TT_Task	TK_Complete	80	2026-08-15 08:00	2026-08-16 18:00	0		
+%R	2003	1	101	CIV-PS3-FND-001	Pump P-101/P-102 Foundation Blinding	TT_Task	TK_Complete	80	2026-08-11 08:00	2026-08-13 18:00	0		
+%R	2004	1	101	CIV-PS3-FND-002	Pump P-101/P-102 Rebar & Formwork	TT_Task	TK_Complete	80	2026-08-14 08:00	2026-08-18 18:00	0		
+%R	2005	1	101	CIV-PS3-FND-003	Pump P-101/P-102 Foundation Concrete Pour	TT_Task	TK_Complete	80	2026-08-19 08:00	2026-08-21 18:00	0		
+%R	2006	1	101	CIV-PS3-DRN-001	Stormwater Drainage Channel Installation	TT_Task	TK_Active	80	2026-08-12 08:00	2026-08-20 18:00	0		
+%R	2007	1	101	CIV-PS3-RD-001	Road Crossing Duct Bank Encasement	TT_Task	TK_Active	80	2026-08-18 08:00	2026-08-22 18:00	0		
+%R	2008	1	101	CIV-PS3-BKF-001	Trench Backfill & Compaction CH 0+000-0+180	TT_Task	TK_Active	80	2026-08-15 08:00	2026-08-22 18:00	0		
+%R	2009	1	102	PIP-PS3-WLD-024	Utility Header Field Weld Joints	TT_Task	TK_Complete	80	2026-08-11 08:00	2026-08-15 18:00	0		
+%R	2010	1	102	PIP-PS3-HDR-100	Above Ground Utility Header Fabrication	TT_Task	TK_Active	80	2026-08-12 08:00	2026-08-22 18:00	0		
+%R	2011	1	102	PIP-PS3-HDR-100-A	Utility Header Spool Section A	TT_Task	TK_Complete	80	2026-08-12 08:00	2026-08-16 18:00	0		
+%R	2012	1	102	PIP-PS3-HDR-100-B	Utility Header Spool Section B	TT_Task	TK_Active	80	2026-08-15 08:00	2026-08-19 18:00	0		
+%R	2013	1	102	PIP-PS3-HDR-100-C	Utility Header Spool Section C	TT_Task	TK_Active	80	2026-08-18 08:00	2026-08-22 18:00	0		
+%R	2014	1	102	PIP-PS3-SPO-015	Firewater Line Spool Placement	TT_Task	TK_Complete	80	2026-08-11 08:00	2026-08-15 18:00	0		
+%R	2015	1	102	PIP-PS3-HYD-001	Hydrostatic Pressure Test Firewater Sector 1	TT_Task	TK_Complete	80	2026-08-18 08:00	2026-08-19 18:00	0		
+%R	2016	1	102	PIP-PS3-VLV-005	12-inch Gate Valve Installation	TT_Task	TK_Active	80	2026-08-19 08:00	2026-08-22 18:00	0		
+%R	2017	1	102	PIP-PS3-SPT-030	Pipe Support Secondary Steel Erection	TT_Task	TK_Active	80	2026-08-13 08:00	2026-08-21 18:00	0		
+%R	2018	1	102	PIP-PS3-TIE-002	Tie-in Spool Fit-up Manifold M-01	TT_Task	TK_Active	80	2026-08-21 08:00	2026-08-22 18:00	0		
+%R	2019	1	103	MECH-PS3-DWP-003	Dewatering Pump Relocation	TT_Task	TK_Complete	80	2026-08-14 08:00	2026-08-14 18:00	0		
+%R	2020	1	103	EQP-PS3-PMP-101	Crude Pump P-101 Baseplate Grouting	TT_Task	TK_Complete	80	2026-08-18 08:00	2026-08-20 18:00	0		
+%R	2021	1	103	EQP-PS3-PMP-102	Crude Pump P-102 Positioning & Alignment	TT_Task	TK_Complete	80	2026-08-19 08:00	2026-08-21 18:00	0		
+%R	2022	1	103	EQP-PS3-TK-001	Sump Tank TK-01 Internal Inspection	TT_Task	TK_Complete	80	2026-08-12 08:00	2026-08-15 18:00	0		
+%R	2023	1	103	EQP-PS3-SKD-002	Chemical Dosing Skid SK-02 Positioning	TT_Task	TK_Complete	80	2026-08-15 08:00	2026-08-18 18:00	0		
+%R	2024	1	103	EQP-PS3-AIR-001	Air Receiver Vessel V-103 Erection	TT_Task	TK_Complete	80	2026-08-13 08:00	2026-08-15 18:00	0		
+%R	2025	1	103	EQP-PS3-GEN-001	Diesel Generator DG-01 Installation	TT_Task	TK_Active	80	2026-08-20 08:00	2026-08-22 18:00	0		
+%R	2026	1	104	ELE-PS3-CT-011	Cable Trench Bedding at MCC-02	TT_Task	TK_Complete	80	2026-08-10 08:00	2026-08-16 18:00	0		
+%R	2027	1	104	ELE-PS3-CT-012	Cable Trench Bedding at MCC-01	TT_Task	TK_Complete	80	2026-08-11 08:00	2026-08-17 18:00	0		
+%R	2028	1	104	ELE-PS3-CBL-001	11kV Medium Voltage Cable Pulling	TT_Task	TK_Active	80	2026-08-12 08:00	2026-08-18 18:00	0		
+%R	2029	1	104	ELE-PS3-CBL-002	415V Low Voltage Auxiliary Cable Pulling	TT_Task	TK_Active	80	2026-08-18 08:00	2026-08-22 18:00	0		
+%R	2030	1	104	ELE-PS3-TR-005	Cable Tray Installation Piperack Tier 2	TT_Task	TK_Active	80	2026-08-14 08:00	2026-08-20 18:00	0		
+%R	2031	1	104	ELE-PS3-EAR-001	Earth Pit Grid Installation	TT_Task	TK_Complete	80	2026-08-11 08:00	2026-08-16 18:00	0		
+%R	2032	1	104	ELE-PS3-LGT-002	High Mast Lighting Wiring & Conduits	TT_Task	TK_Active	80	2026-08-19 08:00	2026-08-22 18:00	0		
+%R	2033	1	104	ELE-PS3-SWG-001	11kV Switchgear Panel Positioning	TT_Task	TK_Complete	80	2026-08-15 08:00	2026-08-19 18:00	0		
+%R	2034	1	105	INS-PS3-JB-001	Field Junction Box Installation	TT_Task	TK_Complete	80	2026-08-12 08:00	2026-08-16 18:00	0		
+%R	2035	1	105	INS-PS3-ITR-002	Instrument Cable Tray Installation	TT_Task	TK_Complete	80	2026-08-13 08:00	2026-08-18 18:00	0		
+%R	2036	1	105	INS-PS3-CBL-004	Signal & Thermocouple Cable Pulling	TT_Task	TK_Active	80	2026-08-18 08:00	2026-08-22 18:00	0		
+%R	2037	1	105	INS-PS3-PT-021	Pressure Transmitter Mounting & Impulse Piping	TT_Task	TK_Active	80	2026-08-19 08:00	2026-08-22 18:00	0		
+%R	2038	1	105	INS-PS3-FT-010	Ultrasonic Flowmeter Spool Installation	TT_Task	TK_Active	80	2026-08-20 08:00	2026-08-22 18:00	0		
+%R	2039	1	105	INS-PS3-FGS-001	Fire & Gas Detector Mounting	TT_Task	TK_NotStart	80	2026-08-18 08:00	2026-08-22 18:00	0		
+%R	2040	1	105	INS-PS3-CAL-003	Control Valve Bench Calibration	TT_Task	TK_Active	80	2026-08-21 08:00	2026-08-22 18:00	0		
+%R	2041	1	106	HSE-PS3-IND-001	Daily Site Safety Induction & Toolbox Talks	TT_Task	TK_Active	80	2026-08-11 08:00	2026-08-22 18:00	0		
+%R	2042	1	106	HSE-PS3-BAR-002	Deep Excavation Hard Barricading	TT_Task	TK_Complete	80	2026-08-11 08:00	2026-08-16 18:00	0		
+%R	2043	1	106	HSE-PS3-GAS-001	Confined Space Atmospheric Gas Monitoring	TT_Task	TK_Active	80	2026-08-14 08:00	2026-08-22 18:00	0		
+%R	2044	1	106	HSE-PS3-WST-003	Hazardous Chemical Waste Storage & Manifesting	TT_Task	TK_Active	80	2026-08-12 08:00	2026-08-21 18:00	0		
+%R	2045	1	106	HSE-PS3-AUD-001	Weekly Environmental Compliance Audit	TT_Task	TK_Active	80	2026-08-15 08:00	2026-08-22 18:00	0		
+%E

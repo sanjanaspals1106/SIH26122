@@ -1,0 +1,22 @@
+{
+  "event_id": "EVT-20260812-001",
+  "schedule_id": "SIH26122_NFU",
+  "event_date": "2026-08-12",
+  "raw_claim_text": "Blinding concrete pour continued for Crude Pump P-101/P-102 foundation base. 25 m3 placed today, total 45 m3.",
+  "input_channel": "MOBILE_APP",
+  "language_detected": "en",
+  "reported_activity_id": "CIV-PS3-FND-001",
+  "discipline": "Civil",
+  "action": "POUR",
+  "event_type": "PROGRESS_UPDATE",
+  "claim_mode": "CUMULATIVE_QTY",
+  "asset_tag": "FND-P101",
+  "location": "Pump Station 3",
+  "claimed_quantity": 45.0,
+  "claimed_uom": "m3",
+  "claimed_pct": 69.2,
+  "delay_reason": null,
+  "supervisor_id": "8b0821c9-6617-48f2-8957-69b596f241a1",
+  "photo_path": "photos/20260812_p101_blinding.jpg",
+  "status": "EXTRACTED"
+}
