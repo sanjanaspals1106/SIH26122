@@ -28,8 +28,8 @@ def get_approved_actual(
                 exported_at,
                 created_at
             FROM approved_actuals
-            WHERE schedule_id = ?
-              AND activity_id = ?
+            WHERE schedule_id = %s
+              AND activity_id = %s
             """,
             (schedule_id, activity_id),
         ).fetchone()

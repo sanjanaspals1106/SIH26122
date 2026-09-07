@@ -13,7 +13,7 @@ requires human planner approval before anything becomes final.
 - Python
 - FastAPI
 - Pydantic v2
-- SQLite
+- Supabase PostgreSQL
 
 ### Frontend
 - React

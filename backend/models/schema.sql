@@ -1,9 +1,16 @@
+CREATE TABLE IF NOT EXISTS profiles (
+    id UUID PRIMARY KEY,
+    full_name TEXT NOT NULL,
+    role TEXT NOT NULL CHECK (role IN ('SITE_ENGINEER', 'SUPERVISOR')),
+    created_at TIMESTAMPTZ DEFAULT now()
+);
+
 CREATE TABLE IF NOT EXISTS schedules (
     schedule_id TEXT PRIMARY KEY,
     project_name TEXT NOT NULL,
     data_date DATE,
     source_format TEXT,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    created_at TIMESTAMPTZ DEFAULT now()
 );
 
 CREATE TABLE IF NOT EXISTS schedule_activities (
@@ -34,9 +41,9 @@ CREATE TABLE IF NOT EXISTS source_documents (
     document_id TEXT PRIMARY KEY,
     file_name TEXT NOT NULL,
     document_type TEXT,
-    uploader_id TEXT,
+    uploader_id UUID,
     file_hash TEXT NOT NULL,
-    uploaded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    uploaded_at TIMESTAMPTZ DEFAULT now()
 );
 
 CREATE TABLE IF NOT EXISTS execution_events (
@@ -59,10 +66,10 @@ CREATE TABLE IF NOT EXISTS execution_events (
     claimed_uom TEXT,
     claimed_pct REAL,
     delay_reason TEXT,
-    supervisor_id TEXT,
+    supervisor_id UUID,
     photo_path TEXT,
     status TEXT DEFAULT 'EXTRACTED',
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    created_at TIMESTAMPTZ DEFAULT now()
 );
 
 CREATE TABLE IF NOT EXISTS source_references (
@@ -82,8 +89,7 @@ CREATE TABLE IF NOT EXISTS candidate_matches (
     activity_id TEXT NOT NULL,
     rank_order INTEGER CHECK (rank_order BETWEEN 1 AND 3),
     match_tier TEXT,
-    composite_confidence REAL
-        CHECK (composite_confidence BETWEEN 0.0 AND 1.0),
+    composite_confidence REAL CHECK (composite_confidence BETWEEN 0.0 AND 1.0),
     semantic_score REAL,
     fuzzy_score REAL,
     location_score REAL,
@@ -121,9 +127,9 @@ CREATE TABLE IF NOT EXISTS planner_decisions (
     action TEXT,
     approved_pct REAL,
     approved_qty REAL,
-    planner_id TEXT NOT NULL,
+    planner_id UUID NOT NULL,
     justification TEXT NOT NULL,
-    decided_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    decided_at TIMESTAMPTZ DEFAULT now()
 );
 
 CREATE TABLE IF NOT EXISTS approved_actuals (
@@ -134,16 +140,15 @@ CREATE TABLE IF NOT EXISTS approved_actuals (
     activity_id TEXT NOT NULL,
     actual_start DATE,
     actual_finish DATE,
-    actual_pct_complete REAL
-        CHECK (actual_pct_complete BETWEEN 0.0 AND 100.0),
+    actual_pct_complete REAL CHECK (actual_pct_complete BETWEEN 0.0 AND 100.0),
     actual_quantity REAL,
-    exported_at TIMESTAMP,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    exported_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ DEFAULT now(),
     UNIQUE (schedule_id, activity_id)
 );
 
 CREATE TABLE IF NOT EXISTS audit_logs (
-    log_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    log_id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     entity_type TEXT NOT NULL,
     entity_id TEXT NOT NULL,
     action TEXT NOT NULL,
@@ -153,5 +158,5 @@ CREATE TABLE IF NOT EXISTS audit_logs (
     payload_hash TEXT NOT NULL,
     previous_hash TEXT NOT NULL,
     current_hash TEXT NOT NULL,
-    timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    timestamp TIMESTAMPTZ DEFAULT now()
 );

@@ -100,20 +100,27 @@ def write_audit_log(
                 previous_hash,
                 current_hash
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+            RETURNING log_id
             """,
             (
                 entity_type,
                 entity_id,
                 action,
                 actor_id,
-                canonical_json(before_state) if before_state is not None else None,
-                canonical_json(after_state) if after_state is not None else None,
+                canonical_json(before_state)
+                if before_state is not None
+                else None,
+                canonical_json(after_state)
+                if after_state is not None
+                else None,
                 current_payload_hash,
                 previous_hash,
                 current_hash,
             ),
         )
+
+        row = cursor.fetchone()
         conn.commit()
 
-        return cursor.lastrowid
+        return row["log_id"]
