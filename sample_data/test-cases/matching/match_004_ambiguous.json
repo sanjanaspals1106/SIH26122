@@ -1,0 +1,14 @@
+{
+  "case_id": "MATCH-004",
+  "scenario": "AMBIGUOUS_MATCH",
+  "event_id": "EVT-TEST-M04",
+  "schedule_id": "SIH26122_NFU",
+  "event_date": "2026-08-15",
+  "raw_claim_text": "Utility trench excavation from approximately CH 0+200 to CH 0+240 completed.",
+  "input_channel": "SUPERVISOR_NOTE",
+  "reported_activity_id": null,
+  "asset_tag": null,
+  "discipline": "Civil",
+  "claimed_quantity": 40.0,
+  "claimed_uom": "m"
+}

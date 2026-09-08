@@ -1,0 +1,22 @@
+{
+  "event_id": "EVT-20260819-002",
+  "schedule_id": "SIH26122_NFU",
+  "event_date": "2026-08-19",
+  "raw_claim_text": "First stage 30 m3 structural concrete placed for pump foundation. Slump test 130mm accepted.",
+  "input_channel": "MOBILE_APP",
+  "language_detected": "en",
+  "reported_activity_id": "CIV-PS3-FND-003",
+  "discipline": "Civil",
+  "action": "POUR",
+  "event_type": "PROGRESS_UPDATE",
+  "claim_mode": "CUMULATIVE_QTY",
+  "asset_tag": "FND-P101",
+  "location": "Pump Station 3",
+  "claimed_quantity": 30.0,
+  "claimed_uom": "m3",
+  "claimed_pct": 50.0,
+  "delay_reason": null,
+  "supervisor_id": "3c7f12e8-9921-41b3-b452-92a101f39281",
+  "photo_path": "photos/20260819_fnd_pour_stage1.jpg",
+  "status": "EXTRACTED"
+}

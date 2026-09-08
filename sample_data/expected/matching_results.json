@@ -1,0 +1,69 @@
+[
+  {
+    "case_id": "MATCH-001",
+    "input_file": "test-cases/matching/match_001_exact_id.json",
+    "scenario": "EXACT_ID",
+    "matched_activity_id": "PIP-PS3-WLD-024",
+    "match_tier": "TIER_1_EXACT_ID",
+    "confidence_score": 1.0,
+    "expected_status": "MATCHED",
+    "review_required": false,
+    "candidate_activities": [
+      "PIP-PS3-WLD-024"
+    ]
+  },
+  {
+    "case_id": "MATCH-002",
+    "input_file": "test-cases/matching/match_002_asset_tag.json",
+    "scenario": "ASSET_TAG_MATCH",
+    "matched_activity_id": "PIP-PS3-WLD-024",
+    "match_tier": "TIER_2_ASSET_TAG",
+    "confidence_score": 0.92,
+    "expected_status": "MATCHED",
+    "review_required": false,
+    "candidate_activities": [
+      "PIP-PS3-WLD-024"
+    ],
+    "resolution_path": "Asset Tag P-102 maps to PIP-PS3-WLD-024"
+  },
+  {
+    "case_id": "MATCH-003",
+    "input_file": "test-cases/matching/match_003_semantic.json",
+    "scenario": "SEMANTIC_MATCH",
+    "matched_activity_id": "PIP-PS3-WLD-024",
+    "match_tier": "TIER_3_SEMANTIC",
+    "confidence_score": 0.86,
+    "expected_status": "MATCHED",
+    "review_required": false,
+    "candidate_activities": [
+      "PIP-PS3-WLD-024"
+    ]
+  },
+  {
+    "case_id": "MATCH-004",
+    "input_file": "test-cases/matching/match_004_ambiguous.json",
+    "scenario": "AMBIGUOUS_MATCH",
+    "matched_activity_id": null,
+    "match_tier": "TIER_4_AMBIGUOUS",
+    "confidence_score": 0.52,
+    "expected_status": "AMBIGUOUS",
+    "review_required": true,
+    "candidate_activities": [
+      "CIV-PS3-TR-0180",
+      "CIV-PS3-TR-0220"
+    ],
+    "ambiguity_reason": "Claim chainage CH 0+200 to CH 0+240 overlaps both CIV-PS3-TR-0180 (CH 0+180 to 0+220) and CIV-PS3-TR-0220 (CH 0+220 to 0+260)"
+  },
+  {
+    "case_id": "MATCH-005",
+    "input_file": "test-cases/matching/match_005_unmatched.json",
+    "scenario": "UNMATCHED",
+    "matched_activity_id": null,
+    "match_tier": "UNMATCHED",
+    "confidence_score": 0.12,
+    "expected_status": "UNMATCHED",
+    "review_required": true,
+    "candidate_activities": [],
+    "unmatched_reason": "Temporary rain shelter at laydown area has no matching activity in canonical baseline schedule"
+  }
+]

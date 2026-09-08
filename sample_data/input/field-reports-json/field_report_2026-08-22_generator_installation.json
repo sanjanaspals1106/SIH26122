@@ -1,0 +1,22 @@
+{
+  "event_id": "EVT-20260822-003",
+  "schedule_id": "SIH26122_NFU",
+  "event_date": "2026-08-22",
+  "raw_claim_text": "Standby diesel generator DG-01 offloaded and positioned onto acoustic plinth in generator bay.",
+  "input_channel": "SUPERVISOR_PORTAL",
+  "language_detected": "en",
+  "reported_activity_id": "EQP-PS3-GEN-001",
+  "discipline": "Static/Rotating Equipment",
+  "action": "ERECT",
+  "event_type": "PROGRESS_UPDATE",
+  "claim_mode": "CUMULATIVE_QTY",
+  "asset_tag": "DG-01",
+  "location": "Generator Bay",
+  "claimed_quantity": 1.0,
+  "claimed_uom": "ea",
+  "claimed_pct": 100.0,
+  "delay_reason": null,
+  "supervisor_id": "3c7f12e8-9921-41b3-b452-92a101f39281",
+  "photo_path": "photos/20260822_dg01_positioned.jpg",
+  "status": "EXTRACTED"
+}

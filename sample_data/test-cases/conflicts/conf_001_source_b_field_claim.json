@@ -1,0 +1,13 @@
+{
+  "conflict_case_id": "CONF-001",
+  "source_id": "SOURCE_B",
+  "source_document": "test-cases/conflicts/conf_001_source_b_field_claim.json",
+  "reporting_period": "2026-08-14",
+  "activity_id": "PIP-PS3-WLD-024",
+  "claimed_today_quantity": 3.0,
+  "cumulative_quantity": 23.0,
+  "planned_quantity": 24.0,
+  "uom": "joints",
+  "progress_pct": 95.8,
+  "raw_snippet": "Welding foreman report: 3 field weld joints completed on 16-inch header line at Pump Station 3 today (cumulative 23 joints)."
+}

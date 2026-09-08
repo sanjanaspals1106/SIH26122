@@ -1,0 +1,17 @@
+{
+  "case_id": "EDGE-003",
+  "edge_case_type": "QUANTITY_EXCEEDS_PLAN",
+  "activity_id": "PIP-PS3-SPT-030",
+  "activity_name": "Pipe Support Secondary Steel Erection",
+  "reporting_date": "2026-08-21",
+  "source_document": "input/progress-report-csv/daily_progress_2026-08-21.csv",
+  "planned_quantity": 100.0,
+  "reported_cumulative_quantity": 108.0,
+  "calculated_progress_pct": 108.0,
+  "unit": "ea",
+  "excess_quantity": 8.0,
+  "excess_percentage": 8.0,
+  "expected_status": "ANOMALY",
+  "review_required": true,
+  "anomaly_reason": "Reported cumulative quantity (108 ea) exceeds planned baseline quantity (100 ea) by 8 ea (8.0%)"
+}

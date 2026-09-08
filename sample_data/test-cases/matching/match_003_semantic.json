@@ -1,0 +1,14 @@
+{
+  "case_id": "MATCH-003",
+  "scenario": "SEMANTIC_MATCH",
+  "event_id": "EVT-TEST-M03",
+  "schedule_id": "SIH26122_NFU",
+  "event_date": "2026-08-14",
+  "raw_claim_text": "Two field weld joints completed on utility header.",
+  "input_channel": "VOICE_TRANSCRIPT",
+  "reported_activity_id": null,
+  "asset_tag": null,
+  "discipline": "Piping",
+  "claimed_quantity": 2.0,
+  "claimed_uom": "joints"
+}

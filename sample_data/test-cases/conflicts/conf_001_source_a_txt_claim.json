@@ -1,0 +1,13 @@
+{
+  "conflict_case_id": "CONF-001",
+  "source_id": "SOURCE_A",
+  "source_document": "input/daily-report-txt/daily_progress_report_2026-08-14.txt",
+  "reporting_period": "2026-08-14",
+  "activity_id": "PIP-PS3-WLD-024",
+  "claimed_today_quantity": 2.0,
+  "cumulative_quantity": 22.0,
+  "planned_quantity": 24.0,
+  "uom": "joints",
+  "progress_pct": 91.7,
+  "raw_snippet": "PIP-PS3-WLD-024 | Piping | Two field weld joints completed; visual testing accepted. Today: 2 joints | Cumulative: 22/24 joints"
+}
