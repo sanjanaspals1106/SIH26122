@@ -151,9 +151,9 @@ export default function DailyDigest() {
           className={cn(
             'h-8 w-8 rounded-lg text-xs font-semibold flex items-center justify-center transition-all',
             isSelected
-              ? 'bg-[#FC4C02] text-white shadow-md font-bold scale-105'
+              ? 'bg-[#E31E24] text-white shadow-md font-bold scale-105'
               : isTodayStr
-              ? 'border border-[#FC4C02] text-[#FC4C02] hover:bg-slate-100 dark:hover:bg-blue-900/50'
+              ? 'border border-[#E31E24] text-[#E31E24] hover:bg-slate-100 dark:hover:bg-blue-900/50'
               : 'text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-blue-900/40'
           )}
         >
@@ -165,8 +165,8 @@ export default function DailyDigest() {
     const monthNames = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 
     return (
-      <div className="p-4 bg-white dark:bg-[#001E60] border border-slate-200 dark:border-blue-800 rounded-2xl shadow-xl w-72 space-y-3 z-50">
-        <div className="flex items-center justify-between border-b border-slate-200 dark:border-blue-800 pb-2">
+      <div className="p-4 bg-white dark:bg-[#262322] border border-slate-200 dark:border-white/10 rounded-2xl shadow-xl w-72 space-y-3 z-50">
+        <div className="flex items-center justify-between border-b border-slate-200 dark:border-white/10 pb-2">
           <span className="text-xs font-bold text-slate-900 dark:text-white">
             {monthNames[month]} {year}
           </span>
@@ -200,10 +200,10 @@ export default function DailyDigest() {
   return (
     <div className="space-y-6">
       {/* Top Header Toolbar */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-200 dark:border-blue-900/50 pb-4">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-200 dark:border-white/10 pb-4">
         <div>
           <h1 className="text-2xl font-bold text-slate-900 dark:text-slate-100 tracking-tight flex items-center gap-2">
-            <ClipboardList className="w-6 h-6 text-[#FC4C02]" />
+            <ClipboardList className="w-6 h-6 text-[#E31E24]" />
             Daily Digest & Claims Log
           </h1>
           <p className="text-slate-500 dark:text-slate-400 text-xs mt-1">
@@ -217,7 +217,7 @@ export default function DailyDigest() {
             variant="outline"
             size="sm"
             onClick={handlePrevDay}
-            className="bg-white dark:bg-[#001E60] border-slate-300 dark:border-blue-800 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-blue-900/50 h-9"
+            className="bg-white dark:bg-[#262322] border-slate-300 dark:border-white/10 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-blue-900/50 h-9"
           >
             <ChevronLeft className="w-4 h-4" />
           </Button>
@@ -226,9 +226,9 @@ export default function DailyDigest() {
             variant="outline"
             size="sm"
             onClick={() => setShowCalendar(!showCalendar)}
-            className="bg-white dark:bg-[#001E60] border-slate-300 dark:border-blue-800 text-slate-900 dark:text-slate-100 hover:border-[#FC4C02] font-mono text-xs h-9 px-3 gap-2 shadow-sm"
+            className="bg-white dark:bg-[#262322] border-slate-300 dark:border-white/10 text-slate-900 dark:text-slate-100 hover:border-[#E31E24] font-mono text-xs h-9 px-3 gap-2 shadow-sm"
           >
-            <CalendarIcon className="w-4 h-4 text-[#FC4C02]" />
+            <CalendarIcon className="w-4 h-4 text-[#E31E24]" />
             <span>{selectedDate}</span>
           </Button>
 
@@ -242,7 +242,7 @@ export default function DailyDigest() {
             variant="outline"
             size="sm"
             onClick={handleNextDay}
-            className="bg-white dark:bg-[#001E60] border-slate-300 dark:border-blue-800 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-blue-900/50 h-9"
+            className="bg-white dark:bg-[#262322] border-slate-300 dark:border-white/10 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-blue-900/50 h-9"
           >
             <ChevronRight className="w-4 h-4" />
           </Button>
@@ -251,7 +251,7 @@ export default function DailyDigest() {
             variant="ghost"
             size="sm"
             onClick={handleToday}
-            className="text-xs text-[#FC4C02] hover:text-[#e04302] hover:bg-[#FC4C02]/10 h-9 font-semibold"
+            className="text-xs text-[#E31E24] hover:text-[#a3151a] hover:bg-[#E31E24]/10 h-9 font-semibold"
           >
             Today
           </Button>
@@ -260,45 +260,45 @@ export default function DailyDigest() {
 
       {/* Summary KPI Bar */}
       <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
-        <div className="p-4 rounded-xl bg-white dark:bg-[#001E60] border border-slate-200 dark:border-blue-900/60 shadow-sm">
+        <div className="p-4 rounded-xl bg-white dark:bg-[#262322] border border-slate-200 dark:border-white/10 shadow-sm">
           <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase">Total Claims</span>
           <div className="text-2xl font-bold text-slate-900 dark:text-slate-100 mt-1 font-mono">{totalClaims}</div>
         </div>
 
-        <div className="p-4 rounded-xl bg-white dark:bg-[#001E60] border border-amber-500/40 bg-amber-500/5 shadow-sm">
+        <div className="p-4 rounded-xl bg-white dark:bg-[#262322] border border-amber-500/40 bg-amber-500/5 shadow-sm">
           <span className="text-[11px] font-bold text-amber-700 dark:text-amber-400 uppercase">Review Required</span>
           <div className="text-2xl font-bold text-amber-600 dark:text-amber-400 mt-1 font-mono">{reviewRequired}</div>
         </div>
 
-        <div className="p-4 rounded-xl bg-white dark:bg-[#001E60] border border-blue-500/40 bg-blue-500/5 shadow-sm">
+        <div className="p-4 rounded-xl bg-white dark:bg-[#262322] border border-blue-500/40 bg-blue-500/5 shadow-sm">
           <span className="text-[11px] font-bold text-blue-700 dark:text-blue-400 uppercase font-mono">Validated</span>
           <div className="text-2xl font-bold text-blue-600 dark:text-blue-400 mt-1 font-mono">{validated}</div>
         </div>
 
-        <div className="p-4 rounded-xl bg-white dark:bg-[#001E60] border border-emerald-500/40 bg-emerald-500/5 shadow-sm">
+        <div className="p-4 rounded-xl bg-white dark:bg-[#262322] border border-emerald-500/40 bg-emerald-500/5 shadow-sm">
           <span className="text-[11px] font-bold text-emerald-700 dark:text-emerald-400 uppercase font-mono">Approved</span>
           <div className="text-2xl font-bold text-emerald-600 dark:text-emerald-400 mt-1 font-mono">{approved}</div>
         </div>
 
-        <div className="p-4 rounded-xl bg-white dark:bg-[#001E60] border border-slate-200 dark:border-blue-900/60 shadow-sm col-span-2 sm:col-span-1">
+        <div className="p-4 rounded-xl bg-white dark:bg-[#262322] border border-slate-200 dark:border-white/10 shadow-sm col-span-2 sm:col-span-1">
           <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase">On Hold</span>
           <div className="text-2xl font-bold text-slate-700 dark:text-slate-400 mt-1 font-mono">{hold}</div>
         </div>
       </div>
 
       {/* Bulk Action Toolbar */}
-      <div className="p-4 rounded-xl bg-white dark:bg-[#001E60] border border-slate-200 dark:border-blue-900/60 flex flex-col sm:flex-row items-center justify-between gap-3 shadow-sm">
+      <div className="p-4 rounded-xl bg-white dark:bg-[#262322] border border-slate-200 dark:border-white/10 flex flex-col sm:flex-row items-center justify-between gap-3 shadow-sm">
         <div className="text-xs text-slate-700 dark:text-slate-300 flex items-center gap-2">
-          <Sparkles className="w-4 h-4 text-[#FC4C02] shrink-0" />
+          <Sparkles className="w-4 h-4 text-[#E31E24] shrink-0" />
           <span>
-            <strong>{reviewRequired + validated}</strong> claims ready for supervisor signoff for date <span className="font-mono text-[#FC4C02] font-bold">{selectedDate}</span>.
+            <strong>{reviewRequired + validated}</strong> claims ready for supervisor signoff for date <span className="font-mono text-[#E31E24] font-bold">{selectedDate}</span>.
           </span>
         </div>
 
         <Button
           onClick={handleBulkApprove}
           disabled={isBulking || (reviewRequired + validated === 0)}
-          className="bg-[#FC4C02] hover:bg-[#e04302] text-white text-xs font-semibold h-9 px-4 shadow-md shadow-[#FC4C02]/20 w-full sm:w-auto rounded-xl"
+          className="bg-[#E31E24] hover:bg-[#a3151a] text-white text-xs font-semibold h-9 px-4 shadow-md shadow-[#E31E24]/20 w-full sm:w-auto rounded-xl"
         >
           {isBulking ? (
             <span>Processing Bulk Approval...</span>
@@ -330,11 +330,11 @@ export default function DailyDigest() {
       {isLoading ? (
         <div className="space-y-4">
           {[1, 2, 3].map((i) => (
-            <div key={i} className="h-28 rounded-2xl bg-white dark:bg-[#001E60] border border-slate-200 dark:border-blue-900/60 animate-pulse" />
+            <div key={i} className="h-28 rounded-2xl bg-white dark:bg-[#262322] border border-slate-200 dark:border-white/10 animate-pulse" />
           ))}
         </div>
       ) : events.length === 0 ? (
-        <Card className="bg-white dark:bg-[#001E60] border-slate-200 dark:border-blue-900/60 p-12 text-center shadow-sm">
+        <Card className="bg-white dark:bg-[#262322] border-slate-200 dark:border-white/10 p-12 text-center shadow-sm">
           <div className="w-12 h-12 rounded-full bg-slate-100 dark:bg-blue-900/60 flex items-center justify-center mx-auto text-slate-400 mb-3">
             <Clock className="w-6 h-6" />
           </div>
@@ -351,8 +351,8 @@ export default function DailyDigest() {
 
             return (
               <div key={disc} className="space-y-3">
-                <div className="flex items-center gap-2 border-b border-slate-200 dark:border-blue-900/50 pb-2">
-                  <span className="text-xs font-bold uppercase tracking-wider text-[#FC4C02] font-mono">
+                <div className="flex items-center gap-2 border-b border-slate-200 dark:border-white/10 pb-2">
+                  <span className="text-xs font-bold uppercase tracking-wider text-[#E31E24] font-mono">
                     {disc.replace('_', ' ')}
                   </span>
                   <span className="text-[10px] bg-slate-100 dark:bg-blue-900/60 text-slate-700 dark:text-blue-200 px-2 py-0.5 rounded-full font-mono font-semibold">
@@ -366,10 +366,10 @@ export default function DailyDigest() {
                       key={ev.event_id}
                       onClick={() => navigate(`/review?event_id=${ev.event_id}`)}
                       className={cn(
-                        'p-4 rounded-xl bg-white dark:bg-[#001E60] border transition-all cursor-pointer hover:border-[#FC4C02] shadow-sm group relative',
+                        'p-4 rounded-xl bg-white dark:bg-[#262322] border transition-all cursor-pointer hover:border-[#E31E24] shadow-sm group relative',
                         ev.status === 'REVIEW_REQUIRED'
                           ? 'border-amber-500/50 bg-amber-500/[0.02]'
-                          : 'border-slate-200 dark:border-blue-900/60'
+                          : 'border-slate-200 dark:border-white/10'
                       )}
                     >
                       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-2">
@@ -385,11 +385,11 @@ export default function DailyDigest() {
                         </div>
                       </div>
 
-                      <p className="text-sm font-semibold text-slate-900 dark:text-slate-100 leading-relaxed mb-3 group-hover:text-[#FC4C02]">
+                      <p className="text-sm font-semibold text-slate-900 dark:text-slate-100 leading-relaxed mb-3 group-hover:text-[#E31E24]">
                         "{ev.raw_claim_text}"
                       </p>
 
-                      <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-slate-100 dark:border-blue-900/40 text-xs">
+                      <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-slate-100 dark:border-white/10 text-xs">
                         <div className="flex items-center gap-4 text-slate-600 dark:text-slate-300">
                           <div>
                             Matched Activity:{' '}
@@ -400,12 +400,12 @@ export default function DailyDigest() {
                           {ev.claimed_pct !== null && (
                             <div>
                               Progress:{' '}
-                              <span className="font-mono text-[#FC4C02] font-bold">{ev.claimed_pct}%</span>
+                              <span className="font-mono text-[#E31E24] font-bold">{ev.claimed_pct}%</span>
                             </div>
                           )}
                         </div>
 
-                        <div className="text-[#FC4C02] font-semibold flex items-center gap-1 group-hover:translate-x-1 transition-transform">
+                        <div className="text-[#E31E24] font-semibold flex items-center gap-1 group-hover:translate-x-1 transition-transform">
                           <span>Inspect Claim</span>
                           <ArrowRight className="w-3.5 h-3.5" />
                         </div>

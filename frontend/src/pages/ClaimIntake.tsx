@@ -1,36 +1,25 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useAuth } from '@/auth/AuthProvider';
 import {
   Mic,
   MicOff,
   FileText,
   Upload,
-  Loader2,
   CheckCircle2,
-  AlertTriangle,
-  XCircle,
-  Radio,
-  Paperclip,
-  ChevronRight,
-  RefreshCw,
-  Play,
-  Volume2,
   FileAudio,
-  Building2,
+  Image as ImageIcon,
   Sparkles,
   PlusCircle,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
-import { claimsApi, ExecutionEvent, ClaimStatus } from '@/api';
+import { claimsApi, ExecutionEvent } from '@/api';
 import { cn } from '@/lib/utils';
 
-type InputTab = 'text' | 'voice' | 'file';
+type InputTab = 'text' | 'voice' | 'file' | 'photo';
 
 export default function ClaimIntake() {
-  const { user } = useAuth();
   const navigate = useNavigate();
 
   const [activeTab, setActiveTab] = useState<InputTab>('text');
@@ -49,9 +38,15 @@ export default function ClaimIntake() {
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
   const audioInputRef = useRef<HTMLInputElement>(null);
 
-  // File Tab State
+  // File Tab State (documents / P6 exports)
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Photo / Scanned Diary Tab State (OCR)
+  const [photoFile, setPhotoFile] = useState<File | null>(null);
+  const [photoPreviewUrl, setPhotoPreviewUrl] = useState<string | null>(null);
+  const photoInputRef = useRef<HTMLInputElement>(null);
+  const [photoNote, setPhotoNote] = useState('');
 
   // Pipeline Stepper State
   const [pipelineStep, setPipelineStep] = useState<number>(0);
@@ -128,6 +123,20 @@ export default function ClaimIntake() {
     setAudioUrl(null);
   };
 
+  const handlePhotoFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      setPhotoFile(file);
+      setPhotoPreviewUrl(URL.createObjectURL(file));
+    }
+  };
+
+  const removePhotoFile = () => {
+    setPhotoFile(null);
+    if (photoPreviewUrl) URL.revokeObjectURL(photoPreviewUrl);
+    setPhotoPreviewUrl(null);
+  };
+
   // Submit Claim & Execute Pipeline
   const runPipeline = async (claimText: string, file: File | null = null) => {
     setIsProcessing(true);
@@ -179,24 +188,39 @@ export default function ClaimIntake() {
     runPipeline(`Uploaded document: ${selectedFile.name}`, selectedFile);
   };
 
+  const handleSubmitPhoto = () => {
+    if (!photoFile) return;
+    const caption = photoNote.trim()
+      ? `Scanned diary / evidence photo: ${photoFile.name} — ${photoNote.trim()}`
+      : `Scanned diary / evidence photo: ${photoFile.name}`;
+    runPipeline(caption, photoFile);
+  };
+
   const pipelineSteps = [
     { title: 'Intake', desc: 'Ingesting update' },
-    { title: 'Extraction', desc: 'LLM field parsing' },
+    { title: 'Extraction', desc: 'LLM field parsing / OCR' },
     { title: 'Matching', desc: 'FAISS + Vector' },
     { title: 'Checks', desc: 'Rules & Validation' },
     { title: 'Supervisor Review', desc: 'Ready for approval' },
+  ];
+
+  const tabs: { key: InputTab; label: string; icon: React.ElementType }[] = [
+    { key: 'text', label: 'Type Update', icon: FileText },
+    { key: 'voice', label: 'Voice Input', icon: Mic },
+    { key: 'file', label: 'File / P6 Export', icon: Upload },
+    { key: 'photo', label: 'Photo / Scanned Diary', icon: ImageIcon },
   ];
 
   return (
     <div className="space-y-6">
       {/* Header */}
       <div>
-        <h1 className="text-2xl font-bold text-slate-100 tracking-tight flex items-center gap-2">
-          <PlusCircle className="w-6 h-6 text-indigo-400" />
+        <h1 className="text-2xl font-bold text-slate-900 dark:text-slate-100 tracking-tight flex items-center gap-2">
+          <PlusCircle className="w-6 h-6 text-sky-500 dark:text-sky-400" />
           Site Engineer Progress Claim Intake
         </h1>
-        <p className="text-slate-400 text-xs mt-1">
-          Submit raw daily field updates via Natural Language Text, Web Speech Recording, or Document Upload.
+        <p className="text-slate-500 dark:text-slate-400 text-xs mt-1">
+          Submit raw daily field updates via Natural Language Text, Web Speech Recording, Document Upload, or a Scanned Diary / Evidence Photo.
         </p>
       </div>
 
@@ -204,53 +228,30 @@ export default function ClaimIntake() {
         {/* LEFT COLUMN: Input Form Tabs (7 Cols) */}
         <div className="lg:col-span-7 space-y-6">
           {/* Tab Selector */}
-          <div className="flex bg-slate-900 border border-slate-800 p-1.5 rounded-2xl gap-1">
-            <button
-              type="button"
-              onClick={() => setActiveTab('text')}
-              className={cn(
-                'flex-1 py-2 rounded-xl text-xs font-semibold flex items-center justify-center gap-2 transition-all',
-                activeTab === 'text'
-                  ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/20'
-                  : 'text-slate-400 hover:text-slate-200'
-              )}
-            >
-              <FileText className="w-4 h-4" /> Type Update
-            </button>
-
-            <button
-              type="button"
-              onClick={() => setActiveTab('voice')}
-              className={cn(
-                'flex-1 py-2 rounded-xl text-xs font-semibold flex items-center justify-center gap-2 transition-all',
-                activeTab === 'voice'
-                  ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/20'
-                  : 'text-slate-400 hover:text-slate-200'
-              )}
-            >
-              <Mic className="w-4 h-4" /> Voice Input
-            </button>
-
-            <button
-              type="button"
-              onClick={() => setActiveTab('file')}
-              className={cn(
-                'flex-1 py-2 rounded-xl text-xs font-semibold flex items-center justify-center gap-2 transition-all',
-                activeTab === 'file'
-                  ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/20'
-                  : 'text-slate-400 hover:text-slate-200'
-              )}
-            >
-              <Upload className="w-4 h-4" /> File / Export
-            </button>
+          <div className="grid grid-cols-2 sm:grid-cols-4 bg-slate-100 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-1.5 rounded-2xl gap-1">
+            {tabs.map(({ key, label, icon: Icon }) => (
+              <button
+                key={key}
+                type="button"
+                onClick={() => setActiveTab(key)}
+                className={cn(
+                  'py-2 rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 transition-all',
+                  activeTab === key
+                    ? 'bg-sky-600 text-white shadow-md shadow-sky-600/20'
+                    : 'text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
+                )}
+              >
+                <Icon className="w-4 h-4 shrink-0" /> <span className="truncate">{label}</span>
+              </button>
+            ))}
           </div>
 
           {/* TAB 1: TEXT UPDATE */}
           {activeTab === 'text' && (
-            <Card className="bg-slate-900 border-slate-800 text-slate-100">
+            <Card className="bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 text-slate-900 dark:text-slate-100">
               <CardHeader>
                 <CardTitle className="text-sm font-semibold">Natural Language Progress Claim</CardTitle>
-                <CardDescription className="text-slate-400 text-xs">
+                <CardDescription className="text-slate-500 dark:text-slate-400 text-xs">
                   Type field execution notes in plain English or Hindi (e.g., "Finished pouring 50 cu.m concrete for F4 in Block-4").
                 </CardDescription>
               </CardHeader>
@@ -260,13 +261,13 @@ export default function ClaimIntake() {
                   value={textValue}
                   onChange={(e) => setTextValue(e.target.value)}
                   placeholder="Enter detailed site execution update..."
-                  className="bg-slate-950 border-slate-800 text-slate-100 focus:border-indigo-500 text-sm"
+                  className="bg-slate-50 dark:bg-slate-950 border-slate-200 dark:border-slate-800 text-slate-900 dark:text-slate-100 focus:border-sky-500 text-sm"
                 />
 
                 <Button
                   onClick={handleSubmitText}
                   disabled={isProcessing || !textValue.trim()}
-                  className="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-semibold h-10 shadow-lg shadow-indigo-600/20"
+                  className="w-full bg-sky-600 hover:bg-sky-500 text-white font-semibold h-10 shadow-lg shadow-sky-600/20"
                 >
                   {isProcessing ? 'Processing Claim...' : 'Submit Claim Through AI Pipeline'}
                 </Button>
@@ -276,24 +277,24 @@ export default function ClaimIntake() {
 
           {/* TAB 2: VOICE INPUT & AUDIO FILE UPLOAD */}
           {activeTab === 'voice' && (
-            <Card className="bg-slate-900 border-slate-800 text-slate-100">
+            <Card className="bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 text-slate-900 dark:text-slate-100">
               <CardHeader>
                 <CardTitle className="text-sm font-semibold flex items-center justify-between">
                   <span>Browser Web Speech & Audio Ingestion</span>
-                  <span className="text-[10px] bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 px-2 py-0.5 rounded-full font-mono">
+                  <span className="text-[10px] bg-sky-500/10 text-sky-700 dark:text-sky-300 border border-sky-500/30 px-2 py-0.5 rounded-full font-mono">
                     Live Recognition
                   </span>
                 </CardTitle>
               </CardHeader>
               <CardContent className="space-y-5">
                 {speechError && (
-                  <div className="p-3 bg-amber-500/10 border border-amber-500/30 text-amber-300 text-xs rounded-xl">
+                  <div className="p-3 bg-amber-500/10 border border-amber-500/30 text-amber-700 dark:text-amber-300 text-xs rounded-xl">
                     {speechError}
                   </div>
                 )}
 
                 {/* Speech Button */}
-                <div className="flex flex-col items-center justify-center p-6 bg-slate-950/60 rounded-2xl border border-slate-800 space-y-3">
+                <div className="flex flex-col items-center justify-center p-6 bg-slate-50 dark:bg-slate-950/60 rounded-2xl border border-slate-200 dark:border-slate-800 space-y-3">
                   <button
                     type="button"
                     onClick={toggleRecording}
@@ -301,32 +302,32 @@ export default function ClaimIntake() {
                       'w-16 h-16 rounded-full flex items-center justify-center transition-all shadow-xl',
                       isRecording
                         ? 'bg-rose-600 text-white animate-pulse shadow-rose-600/40'
-                        : 'bg-indigo-600 text-white hover:bg-indigo-500 shadow-indigo-600/30'
+                        : 'bg-sky-600 text-white hover:bg-sky-500 shadow-sky-600/30'
                     )}
                   >
                     {isRecording ? <MicOff className="w-8 h-8" /> : <Mic className="w-8 h-8" />}
                   </button>
 
-                  <span className="text-xs text-slate-300 font-semibold">
+                  <span className="text-xs text-slate-600 dark:text-slate-300 font-semibold">
                     {isRecording ? 'Listening... Speak your site update now' : 'Click microphone to record voice update'}
                   </span>
                 </div>
 
                 {/* Live Transcript Editable Area */}
                 <div className="space-y-1.5">
-                  <label className="text-xs text-slate-300 font-semibold">Live / Editable Transcript</label>
+                  <label className="text-xs text-slate-600 dark:text-slate-300 font-semibold">Live / Editable Transcript</label>
                   <Textarea
                     rows={4}
                     value={voiceTranscript}
                     onChange={(e) => setVoiceTranscript(e.target.value)}
                     placeholder="Transcript will appear here in real-time as you speak..."
-                    className="bg-slate-950 border-slate-800 text-slate-100 text-xs"
+                    className="bg-slate-50 dark:bg-slate-950 border-slate-200 dark:border-slate-800 text-slate-900 dark:text-slate-100 text-xs"
                   />
                 </div>
 
                 {/* Upload Audio File Section */}
-                <div className="pt-3 border-t border-slate-800 space-y-3">
-                  <span className="text-xs font-semibold text-slate-300 block">Upload Pre-recorded Audio File</span>
+                <div className="pt-3 border-t border-slate-200 dark:border-slate-800 space-y-3">
+                  <span className="text-xs font-semibold text-slate-600 dark:text-slate-300 block">Upload Pre-recorded Audio File</span>
                   <input
                     type="file"
                     ref={audioInputRef}
@@ -340,16 +341,16 @@ export default function ClaimIntake() {
                       type="button"
                       variant="outline"
                       onClick={() => audioInputRef.current?.click()}
-                      className="w-full bg-slate-950 border-slate-800 text-slate-300 hover:bg-slate-800 text-xs h-9"
+                      className="w-full bg-slate-50 dark:bg-slate-950 border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 text-xs h-9"
                     >
-                      <FileAudio className="w-4 h-4 mr-2 text-indigo-400" />
+                      <FileAudio className="w-4 h-4 mr-2 text-sky-500 dark:text-sky-400" />
                       Select Audio Recording (.wav, .mp3, .m4a)
                     </Button>
                   ) : (
-                    <div className="p-3 bg-slate-950 rounded-xl border border-slate-800 space-y-2 text-xs">
+                    <div className="p-3 bg-slate-50 dark:bg-slate-950 rounded-xl border border-slate-200 dark:border-slate-800 space-y-2 text-xs">
                       <div className="flex items-center justify-between">
-                        <span className="font-mono font-bold text-indigo-300 truncate">{audioFile.name}</span>
-                        <Button variant="ghost" size="sm" onClick={removeAudioFile} className="h-6 text-xs text-rose-400">Remove</Button>
+                        <span className="font-mono font-bold text-sky-600 dark:text-sky-300 truncate">{audioFile.name}</span>
+                        <Button variant="ghost" size="sm" onClick={removeAudioFile} className="h-6 text-xs text-rose-500 dark:text-rose-400">Remove</Button>
                       </div>
                       {audioUrl && <audio src={audioUrl} controls className="w-full h-8" />}
                     </div>
@@ -359,7 +360,7 @@ export default function ClaimIntake() {
                 <Button
                   onClick={handleSubmitVoice}
                   disabled={isProcessing || (!voiceTranscript.trim() && !audioFile)}
-                  className="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-semibold h-10 shadow-lg shadow-indigo-600/20"
+                  className="w-full bg-sky-600 hover:bg-sky-500 text-white font-semibold h-10 shadow-lg shadow-sky-600/20"
                 >
                   {isProcessing ? 'Processing Voice Claim...' : 'Submit Voice Claim Through Pipeline'}
                 </Button>
@@ -369,11 +370,11 @@ export default function ClaimIntake() {
 
           {/* TAB 3: FILE UPLOAD */}
           {activeTab === 'file' && (
-            <Card className="bg-slate-900 border-slate-800 text-slate-100">
+            <Card className="bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 text-slate-900 dark:text-slate-100">
               <CardHeader>
                 <CardTitle className="text-sm font-semibold">Document & Progress Export Ingestion</CardTitle>
-                <CardDescription className="text-slate-400 text-xs">
-                  Upload PDF reports, Excel spreadsheets, CSV progress logs, or Primavera P6 exports.
+                <CardDescription className="text-slate-500 dark:text-slate-400 text-xs">
+                  Upload PDF reports, Excel spreadsheets, CSV progress logs, or a Primavera P6 / MSP progress export.
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
@@ -387,21 +388,85 @@ export default function ClaimIntake() {
 
                 <div
                   onClick={() => fileInputRef.current?.click()}
-                  className="border-2 border-dashed border-slate-800 hover:border-indigo-500/60 bg-slate-950/60 rounded-2xl p-8 text-center cursor-pointer transition-all space-y-2"
+                  className="border-2 border-dashed border-slate-200 dark:border-slate-800 hover:border-sky-500/60 bg-slate-50 dark:bg-slate-950/60 rounded-2xl p-8 text-center cursor-pointer transition-all space-y-2"
                 >
-                  <Upload className="w-8 h-8 text-slate-500 mx-auto" />
-                  <div className="text-xs text-slate-300 font-semibold">
+                  <Upload className="w-8 h-8 text-slate-400 dark:text-slate-500 mx-auto" />
+                  <div className="text-xs text-slate-600 dark:text-slate-300 font-semibold">
                     {selectedFile ? selectedFile.name : 'Click to browse or drop document file here'}
                   </div>
-                  <div className="text-[10px] text-slate-500">Supported: PDF, XLSX, CSV, TXT, P6 Export</div>
+                  <div className="text-[10px] text-slate-400 dark:text-slate-500">Supported: PDF, XLSX, CSV, TXT, P6/MSP Export (.xer)</div>
                 </div>
 
                 <Button
                   onClick={handleSubmitFile}
                   disabled={isProcessing || !selectedFile}
-                  className="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-semibold h-10 shadow-lg shadow-indigo-600/20"
+                  className="w-full bg-sky-600 hover:bg-sky-500 text-white font-semibold h-10 shadow-lg shadow-sky-600/20"
                 >
                   {isProcessing ? 'Extracting & Parsing Document...' : 'Ingest Document Update'}
+                </Button>
+              </CardContent>
+            </Card>
+          )}
+
+          {/* TAB 4: PHOTO / SCANNED DIARY (OCR) */}
+          {activeTab === 'photo' && (
+            <Card className="bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 text-slate-900 dark:text-slate-100">
+              <CardHeader>
+                <CardTitle className="text-sm font-semibold">Scanned Diary & Evidence Photo (OCR)</CardTitle>
+                <CardDescription className="text-slate-500 dark:text-slate-400 text-xs">
+                  Attach a photo of a handwritten site diary page, or an evidence photo of completed work. Timestamp/GPS metadata is checked automatically where available.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <input
+                  type="file"
+                  ref={photoInputRef}
+                  accept="image/*,.jpg,.jpeg,.png,.heic,.webp"
+                  capture="environment"
+                  onChange={handlePhotoFileChange}
+                  className="hidden"
+                />
+
+                {!photoFile ? (
+                  <div
+                    onClick={() => photoInputRef.current?.click()}
+                    className="border-2 border-dashed border-slate-200 dark:border-slate-800 hover:border-sky-500/60 bg-slate-50 dark:bg-slate-950/60 rounded-2xl p-8 text-center cursor-pointer transition-all space-y-2"
+                  >
+                    <ImageIcon className="w-8 h-8 text-slate-400 dark:text-slate-500 mx-auto" />
+                    <div className="text-xs text-slate-600 dark:text-slate-300 font-semibold">
+                      Click to take or upload a photo
+                    </div>
+                    <div className="text-[10px] text-slate-400 dark:text-slate-500">Supported: JPG, PNG, HEIC, WEBP</div>
+                  </div>
+                ) : (
+                  <div className="p-3 bg-slate-50 dark:bg-slate-950 rounded-xl border border-slate-200 dark:border-slate-800 space-y-2 text-xs">
+                    <div className="flex items-center justify-between">
+                      <span className="font-mono font-bold text-sky-600 dark:text-sky-300 truncate">{photoFile.name}</span>
+                      <Button variant="ghost" size="sm" onClick={removePhotoFile} className="h-6 text-xs text-rose-500 dark:text-rose-400">Remove</Button>
+                    </div>
+                    {photoPreviewUrl && (
+                      <img src={photoPreviewUrl} alt="Evidence preview" className="w-full max-h-64 object-contain rounded-lg border border-slate-200 dark:border-slate-800" />
+                    )}
+                  </div>
+                )}
+
+                <div className="space-y-1.5">
+                  <label className="text-xs text-slate-600 dark:text-slate-300 font-semibold">Optional Note</label>
+                  <Textarea
+                    rows={2}
+                    value={photoNote}
+                    onChange={(e) => setPhotoNote(e.target.value)}
+                    placeholder="e.g., Diary page for 08-Sep, Block-4 civil works"
+                    className="bg-slate-50 dark:bg-slate-950 border-slate-200 dark:border-slate-800 text-slate-900 dark:text-slate-100 text-xs"
+                  />
+                </div>
+
+                <Button
+                  onClick={handleSubmitPhoto}
+                  disabled={isProcessing || !photoFile}
+                  className="w-full bg-sky-600 hover:bg-sky-500 text-white font-semibold h-10 shadow-lg shadow-sky-600/20"
+                >
+                  {isProcessing ? 'Running OCR & Extracting...' : 'Submit Photo Through OCR Pipeline'}
                 </Button>
               </CardContent>
             </Card>
@@ -410,17 +475,17 @@ export default function ClaimIntake() {
 
         {/* RIGHT COLUMN: Pipeline Stepper & Result (5 Cols) */}
         <div className="lg:col-span-5 space-y-6">
-          <Card className="bg-slate-900 border-slate-800 text-slate-100">
-            <CardHeader className="pb-3 border-b border-slate-800">
+          <Card className="bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 text-slate-900 dark:text-slate-100">
+            <CardHeader className="pb-3 border-b border-slate-200 dark:border-slate-800">
               <CardTitle className="text-sm font-semibold flex items-center gap-2">
-                <Sparkles className="w-4 h-4 text-indigo-400" />
+                <Sparkles className="w-4 h-4 text-sky-500 dark:text-sky-400" />
                 Real-Time AI Pipeline Execution
               </CardTitle>
             </CardHeader>
 
             <CardContent className="pt-6 space-y-6">
               {pipelineError && (
-                <div className="p-3 bg-rose-500/10 border border-rose-500/30 text-rose-300 text-xs rounded-xl">
+                <div className="p-3 bg-rose-500/10 border border-rose-500/30 text-rose-700 dark:text-rose-300 text-xs rounded-xl">
                   {pipelineError}
                 </div>
               )}
@@ -440,18 +505,18 @@ export default function ClaimIntake() {
                           isCompleted
                             ? 'bg-emerald-600 text-white'
                             : isCurrent
-                            ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-600/30 animate-pulse'
-                            : 'bg-slate-950 text-slate-500 border border-slate-800'
+                            ? 'bg-sky-600 text-white shadow-lg shadow-sky-600/30 animate-pulse'
+                            : 'bg-slate-100 dark:bg-slate-950 text-slate-400 dark:text-slate-500 border border-slate-200 dark:border-slate-800'
                         )}
                       >
                         {isCompleted ? <CheckCircle2 className="w-4 h-4" /> : stepNum}
                       </div>
 
                       <div className="flex-1">
-                        <div className={cn('text-xs font-semibold', isCurrent ? 'text-indigo-600 dark:text-indigo-300' : isCompleted ? 'text-slate-800 dark:text-slate-200' : 'text-slate-500')}>
+                        <div className={cn('text-xs font-semibold', isCurrent ? 'text-sky-600 dark:text-sky-300' : isCompleted ? 'text-slate-800 dark:text-slate-200' : 'text-slate-400 dark:text-slate-500')}>
                           {st.title}
                         </div>
-                        <div className="text-[10px] text-slate-500">{st.desc}</div>
+                        <div className="text-[10px] text-slate-400 dark:text-slate-500">{st.desc}</div>
                       </div>
                     </div>
                   );

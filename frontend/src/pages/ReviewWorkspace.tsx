@@ -111,10 +111,10 @@ export default function ReviewWorkspace() {
   if (isLoading) {
     return (
       <div className="space-y-4 max-w-6xl mx-auto py-8">
-        <div className="h-10 w-64 bg-slate-200 dark:bg-[#001E60] rounded-xl animate-pulse" />
+        <div className="h-10 w-64 bg-slate-200 dark:bg-[#262322] rounded-xl animate-pulse" />
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          <div className="h-96 bg-slate-200 dark:bg-[#001E60] rounded-2xl animate-pulse lg:col-span-2" />
-          <div className="h-96 bg-slate-200 dark:bg-[#001E60] rounded-2xl animate-pulse" />
+          <div className="h-96 bg-slate-200 dark:bg-[#262322] rounded-2xl animate-pulse lg:col-span-2" />
+          <div className="h-96 bg-slate-200 dark:bg-[#262322] rounded-2xl animate-pulse" />
         </div>
       </div>
     );
@@ -122,9 +122,9 @@ export default function ReviewWorkspace() {
 
   if (!event) {
     return (
-      <Card className="bg-white dark:bg-[#001E60] border-slate-200 dark:border-blue-900/60 text-center p-12">
+      <Card className="bg-white dark:bg-[#262322] border-slate-200 dark:border-white/10 text-center p-12">
         <CardTitle className="text-slate-900 dark:text-slate-100">Claim Event Not Found</CardTitle>
-        <Button onClick={() => navigate('/digest')} className="mt-4 bg-[#FC4C02] text-white">Return to Daily Digest</Button>
+        <Button onClick={() => navigate('/digest')} className="mt-4 bg-[#E31E24] text-white">Return to Daily Digest</Button>
       </Card>
     );
   }
@@ -132,9 +132,9 @@ export default function ReviewWorkspace() {
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-200 dark:border-blue-900/50 pb-4">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-200 dark:border-white/10 pb-4">
         <div>
-          <div className="flex items-center gap-2 text-xs font-mono text-[#FC4C02] font-bold">
+          <div className="flex items-center gap-2 text-xs font-mono text-[#E31E24] font-bold">
             <span>CLAIM ID: {event.event_id}</span>
             <span>·</span>
             <span>DATE: {event.event_date}</span>
@@ -147,7 +147,7 @@ export default function ReviewWorkspace() {
         <Button
           variant="outline"
           onClick={() => navigate('/digest')}
-          className="bg-white dark:bg-[#001E60] border-slate-300 dark:border-blue-800 text-slate-700 dark:text-slate-200 text-xs h-9"
+          className="bg-white dark:bg-[#262322] border-slate-300 dark:border-white/10 text-slate-700 dark:text-slate-200 text-xs h-9"
         >
           Back to Digest
         </Button>
@@ -155,16 +155,16 @@ export default function ReviewWorkspace() {
 
       {/* 4-Step Pipeline Flow Bar */}
       <div className="grid grid-cols-4 gap-2 text-center text-xs">
-        <div className="p-3 rounded-xl bg-white dark:bg-[#001E60] border border-slate-200 dark:border-blue-800 text-slate-700 dark:text-slate-200 font-bold flex items-center justify-center gap-1.5 shadow-sm">
+        <div className="p-3 rounded-xl bg-white dark:bg-[#262322] border border-slate-200 dark:border-white/10 text-slate-700 dark:text-slate-200 font-bold flex items-center justify-center gap-1.5 shadow-sm">
           <FileText className="w-4 h-4 text-blue-500" /> 1. Field Claim
         </div>
-        <div className="p-3 rounded-xl bg-white dark:bg-[#001E60] border border-purple-500/40 text-purple-700 dark:text-purple-300 font-bold flex items-center justify-center gap-1.5 shadow-sm">
-          <Sparkles className="w-4 h-4 text-purple-500" /> 2. AI Match Tier
+        <div className="p-3 rounded-xl bg-white dark:bg-[#262322] border border-sky-500/40 text-sky-700 dark:text-sky-300 font-bold flex items-center justify-center gap-1.5 shadow-sm">
+          <Sparkles className="w-4 h-4 text-sky-500" /> 2. AI Match Tier
         </div>
-        <div className="p-3 rounded-xl bg-white dark:bg-[#001E60] border border-amber-500/40 text-amber-700 dark:text-amber-300 font-bold flex items-center justify-center gap-1.5 shadow-sm">
+        <div className="p-3 rounded-xl bg-white dark:bg-[#262322] border border-amber-500/40 text-amber-700 dark:text-amber-300 font-bold flex items-center justify-center gap-1.5 shadow-sm">
           <ShieldAlert className="w-4 h-4 text-amber-500" /> 3. Checks
         </div>
-        <div className="p-3 rounded-xl bg-[#FC4C02] text-white font-bold flex items-center justify-center gap-1.5 shadow-md">
+        <div className="p-3 rounded-xl bg-[#E31E24] text-white font-bold flex items-center justify-center gap-1.5 shadow-md">
           <CheckCircle2 className="w-4 h-4" /> 4. Human Decision
         </div>
       </div>
@@ -192,15 +192,15 @@ export default function ReviewWorkspace() {
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
         {/* LEFT COLUMN: Field Claim Provenance */}
         <div className="lg:col-span-4 space-y-6">
-          <Card className="bg-white dark:bg-[#001E60] border-slate-200 dark:border-blue-900/60 shadow-sm">
-            <CardHeader className="pb-3 border-b border-slate-100 dark:border-blue-900/40">
+          <Card className="bg-white dark:bg-[#262322] border-slate-200 dark:border-white/10 shadow-sm">
+            <CardHeader className="pb-3 border-b border-slate-100 dark:border-white/10">
               <CardTitle className="text-sm font-semibold flex items-center gap-2 text-slate-900 dark:text-slate-100">
                 <FileText className="w-4 h-4 text-blue-500" />
                 Original Field Claim Provenance
               </CardTitle>
             </CardHeader>
             <CardContent className="pt-4 space-y-4 text-xs">
-              <div className="p-3 bg-slate-50 dark:bg-[#001438] rounded-xl border border-slate-200 dark:border-blue-900/60 font-semibold text-slate-900 dark:text-slate-100 leading-relaxed">
+              <div className="p-3 bg-slate-50 dark:bg-[#1c1a19] rounded-xl border border-slate-200 dark:border-white/10 font-semibold text-slate-900 dark:text-slate-100 leading-relaxed">
                 "{event.raw_claim_text}"
               </div>
 
@@ -211,7 +211,7 @@ export default function ReviewWorkspace() {
                 </div>
                 <div>
                   <span className="text-[10px] uppercase font-bold text-slate-500 block">Channel</span>
-                  <span className="font-mono text-[#FC4C02] font-bold">{event.input_channel}</span>
+                  <span className="font-mono text-[#E31E24] font-bold">{event.input_channel}</span>
                 </div>
                 <div>
                   <span className="text-[10px] uppercase font-bold text-slate-500 block">Claim Mode</span>
@@ -241,8 +241,8 @@ export default function ReviewWorkspace() {
           </Card>
 
           {/* Validation & Conflict Checks */}
-          <Card className="bg-white dark:bg-[#001E60] border-slate-200 dark:border-blue-900/60 shadow-sm">
-            <CardHeader className="pb-3 border-b border-slate-100 dark:border-blue-900/40">
+          <Card className="bg-white dark:bg-[#262322] border-slate-200 dark:border-white/10 shadow-sm">
+            <CardHeader className="pb-3 border-b border-slate-100 dark:border-white/10">
               <CardTitle className="text-sm font-semibold flex items-center gap-2 text-slate-900 dark:text-slate-100">
                 <ShieldAlert className="w-4 h-4 text-amber-500" />
                 Automated Validation & Conflicts
@@ -285,14 +285,14 @@ export default function ReviewWorkspace() {
 
         {/* MIDDLE COLUMN: Top 3 AI Matches */}
         <div className="lg:col-span-4 space-y-6">
-          <Card className="bg-white dark:bg-[#001E60] border-slate-200 dark:border-blue-900/60 shadow-sm">
-            <CardHeader className="pb-3 border-b border-slate-100 dark:border-blue-900/40">
+          <Card className="bg-white dark:bg-[#262322] border-slate-200 dark:border-white/10 shadow-sm">
+            <CardHeader className="pb-3 border-b border-slate-100 dark:border-white/10">
               <CardTitle className="text-sm font-semibold flex items-center justify-between text-slate-900 dark:text-slate-100">
                 <span className="flex items-center gap-2">
-                  <Sparkles className="w-4 h-4 text-purple-500" />
+                  <Sparkles className="w-4 h-4 text-sky-500" />
                   Top-3 AI Candidate Matches
                 </span>
-                <span className="text-[10px] bg-purple-500/10 text-purple-700 dark:text-purple-300 border border-purple-500/30 px-2 py-0.5 rounded-full font-mono font-bold">
+                <span className="text-[10px] bg-sky-500/10 text-sky-700 dark:text-sky-300 border border-sky-500/30 px-2 py-0.5 rounded-full font-mono font-bold">
                   FAISS Matching
                 </span>
               </CardTitle>
@@ -309,8 +309,8 @@ export default function ReviewWorkspace() {
                     className={cn(
                       'p-4 rounded-xl border transition-all cursor-pointer relative space-y-2.5 shadow-sm',
                       isSelected
-                        ? 'bg-purple-500/10 dark:bg-purple-950/40 border-purple-500 font-semibold'
-                        : 'bg-slate-50 dark:bg-[#001438] border-slate-200 dark:border-blue-900/60 hover:border-purple-400'
+                        ? 'bg-sky-500/10 dark:bg-sky-950/40 border-sky-500 font-semibold'
+                        : 'bg-slate-50 dark:bg-[#1c1a19] border-slate-200 dark:border-white/10 hover:border-sky-400'
                     )}
                   >
                     <div className="flex items-center justify-between">
@@ -322,8 +322,8 @@ export default function ReviewWorkspace() {
                       </div>
 
                       <div className="flex items-center gap-1.5">
-                        <span className="text-[11px] font-bold font-mono text-purple-600 dark:text-purple-300">{confidencePct}% match</span>
-                        {isSelected && <Check className="w-4 h-4 text-purple-600 dark:text-purple-400" />}
+                        <span className="text-[11px] font-bold font-mono text-sky-600 dark:text-sky-300">{confidencePct}% match</span>
+                        {isSelected && <Check className="w-4 h-4 text-sky-600 dark:text-sky-400" />}
                       </div>
                     </div>
 
@@ -335,7 +335,7 @@ export default function ReviewWorkspace() {
                         : 'Foundation Concrete Pouring (Block-4)'}
                     </div>
 
-                    <div className="grid grid-cols-4 gap-1 text-[10px] font-mono text-slate-500 dark:text-slate-400 pt-1 border-t border-slate-200 dark:border-blue-900/40">
+                    <div className="grid grid-cols-4 gap-1 text-[10px] font-mono text-slate-500 dark:text-slate-400 pt-1 border-t border-slate-200 dark:border-white/10">
                       <div>Sem: <span className="font-bold">{Math.round((cand.semantic_score || 0) * 100)}%</span></div>
                       <div>Fuz: <span className="font-bold">{Math.round((cand.fuzzy_score || 0) * 100)}%</span></div>
                       <div>Loc: <span className="font-bold">{Math.round((cand.location_score || 0) * 100)}%</span></div>
@@ -347,19 +347,48 @@ export default function ReviewWorkspace() {
                         ✓ {cand.supporting_signals}
                       </p>
                     )}
+
+                    {cand.disqualifying_signals && (
+                      <p className="text-[11px] text-rose-600 dark:text-rose-400 leading-tight">
+                        ✕ {cand.disqualifying_signals}
+                      </p>
+                    )}
                   </div>
                 );
               })}
             </CardContent>
           </Card>
+
+          {/* Evidence Metadata */}
+          {event.photo_path && (
+            <Card className="bg-white dark:bg-[#262322] border-slate-200 dark:border-white/10 shadow-sm">
+              <CardHeader className="pb-3 border-b border-slate-100 dark:border-white/10">
+                <CardTitle className="text-sm font-semibold flex items-center gap-2 text-slate-900 dark:text-slate-100">
+                  <FileText className="w-4 h-4 text-blue-500" />
+                  Evidence Photo / Scan
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="pt-4 space-y-2 text-xs">
+                <div className="p-3 bg-slate-50 dark:bg-[#1c1a19] rounded-xl border border-slate-200 dark:border-white/10 space-y-1">
+                  <div>
+                    <span className="text-[10px] uppercase font-bold text-slate-500 block">Source File</span>
+                    <span className="font-mono text-slate-900 dark:text-slate-100 break-all">{event.photo_path}</span>
+                  </div>
+                  <p className="text-[11px] text-slate-500 dark:text-slate-400 leading-relaxed pt-1">
+                    Timestamp and GPS metadata (where present in the file) are checked deterministically against the claimed event date and activity location — this does not require full visual understanding of the photo content.
+                  </p>
+                </div>
+              </CardContent>
+            </Card>
+          )}
         </div>
 
         {/* RIGHT COLUMN: Human Supervisor Action Form */}
         <div className="lg:col-span-4 space-y-6">
-          <Card className="bg-white dark:bg-[#001E60] border-2 border-[#FC4C02]/60 shadow-lg">
-            <CardHeader className="pb-3 border-b border-slate-100 dark:border-blue-900/50">
+          <Card className="bg-white dark:bg-[#262322] border-2 border-[#E31E24]/60 shadow-lg">
+            <CardHeader className="pb-3 border-b border-slate-100 dark:border-white/10">
               <CardTitle className="text-sm font-bold flex items-center gap-2 text-slate-900 dark:text-white">
-                <CheckCircle2 className="w-4 h-4 text-[#FC4C02]" />
+                <CheckCircle2 className="w-4 h-4 text-[#E31E24]" />
                 Human Supervisor Decision
               </CardTitle>
               <CardDescription className="text-slate-500 dark:text-blue-200/80 text-xs">
@@ -380,7 +409,7 @@ export default function ReviewWorkspace() {
                   <Input
                     value={selectedActivityId}
                     onChange={(e) => setSelectedActivityId(e.target.value)}
-                    className="bg-slate-50 dark:bg-[#001438] border-slate-300 dark:border-blue-800 font-mono text-[#FC4C02] font-bold text-sm h-9 rounded-xl"
+                    className="bg-slate-50 dark:bg-[#1c1a19] border-slate-300 dark:border-white/10 font-mono text-[#E31E24] font-bold text-sm h-9 rounded-xl"
                   />
                 </div>
 
@@ -398,11 +427,11 @@ export default function ReviewWorkspace() {
                             ? act === 'APPROVE'
                               ? 'bg-emerald-600 border-emerald-500 text-white shadow-md'
                               : act === 'EDIT'
-                              ? 'bg-[#FC4C02] border-[#FC4C02] text-white shadow-md'
+                              ? 'bg-[#E31E24] border-[#E31E24] text-white shadow-md'
                               : act === 'HOLD'
                               ? 'bg-amber-600 border-amber-500 text-white shadow-md'
                               : 'bg-rose-600 border-rose-500 text-white shadow-md'
-                            : 'bg-slate-50 dark:bg-[#001438] border-slate-200 dark:border-blue-800 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-blue-950'
+                            : 'bg-slate-50 dark:bg-[#1c1a19] border-slate-200 dark:border-white/10 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-blue-950'
                         )}
                       >
                         {act}
@@ -412,14 +441,14 @@ export default function ReviewWorkspace() {
                 </div>
 
                 {action === 'EDIT' && (
-                  <div className="grid grid-cols-2 gap-3 p-3 bg-slate-50 dark:bg-[#001438] rounded-xl border border-slate-200 dark:border-blue-800">
+                  <div className="grid grid-cols-2 gap-3 p-3 bg-slate-50 dark:bg-[#1c1a19] rounded-xl border border-slate-200 dark:border-white/10">
                     <div className="space-y-1">
                       <Label className="text-[11px] text-slate-600 dark:text-slate-400">Approved %</Label>
                       <Input
                         type="number"
                         value={approvedPct}
                         onChange={(e) => setApprovedPct(e.target.value !== '' ? Number(e.target.value) : '')}
-                        className="bg-white dark:bg-[#001E60] border-slate-300 dark:border-blue-700 text-slate-900 dark:text-slate-100 font-mono h-8"
+                        className="bg-white dark:bg-[#262322] border-slate-300 dark:border-white/10 text-slate-900 dark:text-slate-100 font-mono h-8"
                       />
                     </div>
                     <div className="space-y-1">
@@ -428,7 +457,7 @@ export default function ReviewWorkspace() {
                         type="number"
                         value={approvedQty}
                         onChange={(e) => setApprovedQty(e.target.value !== '' ? Number(e.target.value) : '')}
-                        className="bg-white dark:bg-[#001E60] border-slate-300 dark:border-blue-700 text-slate-900 dark:text-slate-100 font-mono h-8"
+                        className="bg-white dark:bg-[#262322] border-slate-300 dark:border-white/10 text-slate-900 dark:text-slate-100 font-mono h-8"
                       />
                     </div>
                   </div>
@@ -444,14 +473,14 @@ export default function ReviewWorkspace() {
                     placeholder="Enter reason for approval/edit/rejection..."
                     value={justification}
                     onChange={(e) => setJustification(e.target.value)}
-                    className="bg-slate-50 dark:bg-[#001438] border-slate-300 dark:border-blue-800 text-slate-900 dark:text-slate-100 text-xs rounded-xl"
+                    className="bg-slate-50 dark:bg-[#1c1a19] border-slate-300 dark:border-white/10 text-slate-900 dark:text-slate-100 text-xs rounded-xl"
                   />
                 </div>
 
                 <Button
                   type="submit"
                   disabled={isSubmitting || decisionSuccess}
-                  className="w-full bg-[#FC4C02] hover:bg-[#e04302] text-white font-bold h-10 shadow-lg shadow-[#FC4C02]/25 rounded-xl"
+                  className="w-full bg-[#E31E24] hover:bg-[#a3151a] text-white font-bold h-10 shadow-lg shadow-[#E31E24]/25 rounded-xl"
                 >
                   {isSubmitting ? 'Recording Decision...' : 'Commit Official Decision'}
                 </Button>

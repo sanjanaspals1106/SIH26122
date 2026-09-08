@@ -46,11 +46,11 @@ export default function ImpactPreview() {
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4 border-b border-slate-200 dark:border-blue-900/50 pb-4">
+      <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4 border-b border-slate-200 dark:border-white/10 pb-4">
         <div>
           <h1 className="text-2xl font-bold text-slate-900 dark:text-slate-100 tracking-tight flex items-center gap-2">
-            <div className="p-1.5 rounded-lg bg-violet-100 dark:bg-violet-500/10 border border-violet-200 dark:border-violet-500/20">
-              <GitBranch className="w-5 h-5 text-violet-600 dark:text-violet-400" />
+            <div className="p-1.5 rounded-lg bg-sky-100 dark:bg-sky-500/10 border border-sky-200 dark:border-sky-500/20">
+              <GitBranch className="w-5 h-5 text-sky-600 dark:text-sky-400" />
             </div>
             Precedence Ripple Impact Preview
           </h1>
@@ -61,7 +61,7 @@ export default function ImpactPreview() {
       </div>
 
       {/* Scope Disclaimer */}
-      <div className="p-3.5 rounded-xl bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-700/50 text-blue-700 dark:text-blue-300 text-xs flex items-center gap-2.5">
+      <div className="p-3.5 rounded-xl bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-white/10 text-blue-700 dark:text-blue-300 text-xs flex items-center gap-2.5">
         <Info className="w-4 h-4 text-blue-500 dark:text-blue-400 shrink-0" />
         <span>
           <strong>Preview Scope:</strong> Immediate Finish-to-Start (FS) successors only · Not a full CPM recalculation · For planning reference only
@@ -70,10 +70,10 @@ export default function ImpactPreview() {
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Left Column: Form Inputs */}
-        <Card className="bg-white dark:bg-[#001E60]/80 border-slate-200 dark:border-blue-900/50 shadow-sm lg:col-span-1">
+        <Card className="bg-white dark:bg-[#262322]/80 border-slate-200 dark:border-white/10 shadow-sm lg:col-span-1">
           <CardHeader>
             <CardTitle className="text-sm font-semibold flex items-center gap-2 text-slate-900 dark:text-slate-200">
-              <Activity className="w-4 h-4 text-violet-600 dark:text-violet-400" />
+              <Activity className="w-4 h-4 text-sky-600 dark:text-sky-400" />
               Simulation Inputs
             </CardTitle>
             <CardDescription className="text-slate-500 dark:text-slate-400 text-xs">
@@ -94,7 +94,7 @@ export default function ImpactPreview() {
                 value={activityId}
                 onChange={(e) => setActivityId(e.target.value)}
                 placeholder="e.g. ACT-201"
-                className="bg-slate-50 dark:bg-[#001438] border-slate-300 dark:border-blue-800 font-mono text-slate-900 dark:text-slate-200 focus:border-violet-500 dark:focus:border-violet-500"
+                className="bg-slate-50 dark:bg-[#1c1a19] border-slate-300 dark:border-white/10 font-mono text-slate-900 dark:text-slate-200 focus:border-sky-500 dark:focus:border-sky-500"
               />
               <p className="text-[11px] text-slate-400 dark:text-slate-500">Enter the Primavera P6 activity identifier</p>
             </div>
@@ -108,7 +108,7 @@ export default function ImpactPreview() {
                   max={90}
                   value={delayDays}
                   onChange={(e) => setDelayDays(Number(e.target.value))}
-                  className="bg-slate-50 dark:bg-[#001438] border-slate-300 dark:border-blue-800 text-slate-900 dark:text-slate-200 font-mono focus:border-violet-500 dark:focus:border-violet-500 pr-16"
+                  className="bg-slate-50 dark:bg-[#1c1a19] border-slate-300 dark:border-white/10 text-slate-900 dark:text-slate-200 font-mono focus:border-sky-500 dark:focus:border-sky-500 pr-16"
                 />
                 <span className="absolute right-3 top-2.5 text-slate-400 dark:text-slate-500 text-xs font-mono">days</span>
               </div>
@@ -132,7 +132,7 @@ export default function ImpactPreview() {
             <Button
               onClick={handleSimulate}
               disabled={isSimulating || !activityId}
-              className="w-full bg-violet-600 hover:bg-violet-500 dark:bg-violet-600 dark:hover:bg-violet-500 text-white font-medium shadow-md shadow-violet-600/20 h-10 gap-2"
+              className="w-full bg-sky-600 hover:bg-sky-500 dark:bg-sky-600 dark:hover:bg-sky-500 text-white font-medium shadow-md shadow-sky-600/20 h-10 gap-2"
             >
               {isSimulating ? (
                 <>
@@ -152,15 +152,15 @@ export default function ImpactPreview() {
         {/* Right Column: Results */}
         <div className="lg:col-span-2 space-y-6">
           {!simulationResult ? (
-            <Card className="bg-white dark:bg-[#001E60]/80 border-slate-200 dark:border-blue-900/50 shadow-sm h-full min-h-[280px] flex items-center justify-center text-center p-8">
+            <Card className="bg-white dark:bg-[#262322]/80 border-slate-200 dark:border-white/10 shadow-sm h-full min-h-[280px] flex items-center justify-center text-center p-8">
               <div className="space-y-3 max-w-sm">
-                <div className="w-14 h-14 rounded-2xl bg-violet-100 dark:bg-violet-500/10 border border-violet-200 dark:border-violet-500/20 flex items-center justify-center mx-auto">
-                  <GitBranch className="w-7 h-7 text-violet-500 dark:text-violet-400" />
+                <div className="w-14 h-14 rounded-2xl bg-sky-100 dark:bg-sky-500/10 border border-sky-200 dark:border-sky-500/20 flex items-center justify-center mx-auto">
+                  <GitBranch className="w-7 h-7 text-sky-500 dark:text-sky-400" />
                 </div>
                 <h3 className="text-slate-700 dark:text-slate-300 font-semibold text-sm">No Simulation Run Yet</h3>
                 <p className="text-xs text-slate-400 dark:text-slate-500">
                   Enter an Activity ID and delay duration on the left, then click{' '}
-                  <strong className="text-violet-600 dark:text-violet-400">Run Successor Impact Analysis</strong> to preview immediate FS successor schedule shifts.
+                  <strong className="text-sky-600 dark:text-sky-400">Run Successor Impact Analysis</strong> to preview immediate FS successor schedule shifts.
                 </p>
               </div>
             </Card>
@@ -182,11 +182,11 @@ export default function ImpactPreview() {
               </div>
 
               {/* Ripple Graph Card */}
-              <Card className="bg-white dark:bg-[#001E60]/80 border-slate-200 dark:border-blue-900/50 shadow-sm">
-                <CardHeader className="pb-3 border-b border-slate-200 dark:border-blue-900/50">
+              <Card className="bg-white dark:bg-[#262322]/80 border-slate-200 dark:border-white/10 shadow-sm">
+                <CardHeader className="pb-3 border-b border-slate-200 dark:border-white/10">
                   <CardTitle className="text-sm font-semibold flex items-center justify-between">
                     <span className="flex items-center gap-2">
-                      <GitBranch className="w-4 h-4 text-violet-600 dark:text-violet-400" />
+                      <GitBranch className="w-4 h-4 text-sky-600 dark:text-sky-400" />
                       Finish-to-Start Precedence Ripple Graph
                     </span>
                     <span className="text-[10px] bg-rose-100 dark:bg-rose-500/20 text-rose-700 dark:text-rose-400 border border-rose-200 dark:border-rose-500/30 px-2 py-0.5 rounded-full font-mono font-bold">
@@ -222,11 +222,11 @@ export default function ImpactPreview() {
                       {simulationResult.successors.map((succ, idx) => (
                         <div
                           key={idx}
-                          className="p-4 rounded-xl bg-slate-50 dark:bg-slate-950/80 border border-slate-200 dark:border-slate-700 hover:border-violet-300 dark:hover:border-violet-700/60 transition-colors space-y-2.5 text-xs"
+                          className="p-4 rounded-xl bg-slate-50 dark:bg-slate-950/80 border border-slate-200 dark:border-slate-700 hover:border-sky-300 dark:hover:border-sky-700/60 transition-colors space-y-2.5 text-xs"
                         >
                           <div className="flex items-center justify-between flex-wrap gap-2">
                             <div className="flex items-center gap-2">
-                              <span className="font-mono font-bold text-violet-700 dark:text-violet-300 bg-violet-100 dark:bg-violet-500/10 px-2 py-0.5 rounded-md border border-violet-200 dark:border-violet-500/20">
+                              <span className="font-mono font-bold text-sky-700 dark:text-sky-300 bg-sky-100 dark:bg-sky-500/10 px-2 py-0.5 rounded-md border border-sky-200 dark:border-sky-500/20">
                                 {succ.successor_activity_id}
                               </span>
                               <span className="text-[10px] bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 px-2 py-0.5 rounded-full font-mono">

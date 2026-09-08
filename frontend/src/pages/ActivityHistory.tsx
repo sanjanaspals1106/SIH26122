@@ -90,11 +90,11 @@ export default function ActivityHistory() {
   return (
     <div className="space-y-6">
       {/* Header & Activity Search Bar */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-200 dark:border-blue-900/50 pb-4">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-200 dark:border-white/10 pb-4">
         <div>
           <h1 className="text-2xl font-bold text-slate-900 dark:text-slate-100 tracking-tight flex items-center gap-2">
-            <div className="p-1.5 rounded-lg bg-[#FC4C02]/10 border border-[#FC4C02]/20">
-              <Clock className="w-5 h-5 text-[#FC4C02]" />
+            <div className="p-1.5 rounded-lg bg-[#E31E24]/10 border border-[#E31E24]/20">
+              <Clock className="w-5 h-5 text-[#E31E24]" />
             </div>
             Activity History & Change Timeline
           </h1>
@@ -110,10 +110,10 @@ export default function ActivityHistory() {
               value={searchInput}
               onChange={(e) => setSearchInput(e.target.value)}
               placeholder="Activity ID (e.g. ACT-202)..."
-              className="pl-9 bg-white dark:bg-[#001438] border-slate-300 dark:border-blue-800 text-slate-900 dark:text-slate-100 text-xs h-9 w-64 font-mono focus:border-[#FC4C02] dark:focus:border-[#FC4C02]"
+              className="pl-9 bg-white dark:bg-[#1c1a19] border-slate-300 dark:border-white/10 text-slate-900 dark:text-slate-100 text-xs h-9 w-64 font-mono focus:border-[#E31E24] dark:focus:border-[#E31E24]"
             />
           </div>
-          <Button type="submit" size="sm" className="bg-[#FC4C02] hover:bg-[#e04302] text-white text-xs h-9">
+          <Button type="submit" size="sm" className="bg-[#E31E24] hover:bg-[#a3151a] text-white text-xs h-9">
             Lookup
           </Button>
         </form>
@@ -121,9 +121,9 @@ export default function ActivityHistory() {
 
       {isLoading ? (
         <div className="space-y-4">
-          <div className="h-28 bg-slate-100 dark:bg-[#001E60]/50 rounded-2xl animate-pulse" />
-          <div className="h-64 bg-slate-100 dark:bg-[#001E60]/50 rounded-2xl animate-pulse" />
-          <div className="h-48 bg-slate-100 dark:bg-[#001E60]/50 rounded-2xl animate-pulse" />
+          <div className="h-28 bg-slate-100 dark:bg-[#262322]/50 rounded-2xl animate-pulse" />
+          <div className="h-64 bg-slate-100 dark:bg-[#262322]/50 rounded-2xl animate-pulse" />
+          <div className="h-48 bg-slate-100 dark:bg-[#262322]/50 rounded-2xl animate-pulse" />
         </div>
       ) : error ? (
         <div className="p-4 rounded-xl bg-rose-50 dark:bg-rose-500/10 border border-rose-200 dark:border-rose-500/30 text-rose-700 dark:text-rose-300 text-xs flex items-start gap-2">
@@ -134,14 +134,14 @@ export default function ActivityHistory() {
         <>
           {/* Activity Header Summary */}
           {activity && (
-            <Card className="bg-white dark:bg-[#001E60]/80 border-slate-200 dark:border-blue-900/50 shadow-sm">
+            <Card className="bg-white dark:bg-[#262322]/80 border-slate-200 dark:border-white/10 shadow-sm">
               <CardContent className="p-4 sm:p-6 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                 <div className="space-y-2">
                   <div className="flex items-center gap-2 flex-wrap">
-                    <span className="bg-[#001E60] dark:bg-[#FC4C02] text-white font-mono text-xs px-2.5 py-0.5 rounded-md font-bold">
+                    <span className="bg-[#262322] dark:bg-[#E31E24] text-white font-mono text-xs px-2.5 py-0.5 rounded-md font-bold">
                       {activity.activity_id}
                     </span>
-                    <span className="text-xs bg-slate-100 dark:bg-blue-900/80 text-slate-700 dark:text-blue-200 border border-slate-200 dark:border-blue-700/50 px-2 py-0.5 rounded-full font-mono uppercase">
+                    <span className="text-xs bg-slate-100 dark:bg-blue-900/80 text-slate-700 dark:text-blue-200 border border-slate-200 dark:border-white/10 px-2 py-0.5 rounded-full font-mono uppercase">
                       {activity.discipline}
                     </span>
                     <span className="text-xs text-slate-500 dark:text-slate-400 font-mono">WBS: {activity.wbs_code}</span>
@@ -149,12 +149,12 @@ export default function ActivityHistory() {
                   <h2 className="text-lg font-bold text-slate-900 dark:text-slate-100">{activity.activity_name}</h2>
                   <p className="text-xs text-slate-500 dark:text-slate-400">
                     Location: <strong className="text-slate-700 dark:text-slate-200">{activity.location}</strong> · Planned Window:{' '}
-                    <span className="font-mono text-[#FC4C02]">{activity.planned_start}</span> to{' '}
-                    <span className="font-mono text-[#FC4C02]">{activity.planned_finish}</span>
+                    <span className="font-mono text-[#E31E24]">{activity.planned_start}</span> to{' '}
+                    <span className="font-mono text-[#E31E24]">{activity.planned_finish}</span>
                   </p>
                 </div>
 
-                <div className="flex gap-6 border-t sm:border-t-0 sm:border-l border-slate-200 dark:border-blue-900/50 pt-3 sm:pt-0 sm:pl-6 text-xs font-mono">
+                <div className="flex gap-6 border-t sm:border-t-0 sm:border-l border-slate-200 dark:border-white/10 pt-3 sm:pt-0 sm:pl-6 text-xs font-mono">
                   <div>
                     <span className="text-[10px] uppercase text-slate-400 dark:text-slate-500 block mb-0.5">Baseline Pct</span>
                     <span className="text-slate-900 dark:text-slate-100 font-bold text-lg">{activity.baseline_pct_complete}<span className="text-sm text-slate-400">%</span></span>
@@ -171,10 +171,10 @@ export default function ActivityHistory() {
           )}
 
           {/* Chronological Timeline */}
-          <Card className="bg-white dark:bg-[#001E60]/80 border-slate-200 dark:border-blue-900/50 shadow-sm">
-            <CardHeader className="pb-3 border-b border-slate-200 dark:border-blue-900/50">
+          <Card className="bg-white dark:bg-[#262322]/80 border-slate-200 dark:border-white/10 shadow-sm">
+            <CardHeader className="pb-3 border-b border-slate-200 dark:border-white/10">
               <CardTitle className="text-sm font-semibold flex items-center gap-2">
-                <CalendarDays className="w-4 h-4 text-[#FC4C02]" />
+                <CalendarDays className="w-4 h-4 text-[#E31E24]" />
                 Chronological Claim & Decision History
               </CardTitle>
               <CardDescription className="text-slate-500 dark:text-slate-400 text-xs">
@@ -188,16 +188,16 @@ export default function ActivityHistory() {
                   No history records found for this activity.
                 </div>
               ) : (
-                <div className="relative pl-6 border-l-2 border-slate-200 dark:border-blue-900/50 space-y-6">
+                <div className="relative pl-6 border-l-2 border-slate-200 dark:border-white/10 space-y-6">
                   {history.map((item, idx) => (
                     <div key={idx} className="relative group">
                       {/* Node Dot */}
                       <div className={cn(
-                        'absolute -left-[31px] top-1.5 w-3.5 h-3.5 rounded-full border-4 border-white dark:border-[#001E60] shadow transition-transform group-hover:scale-125',
-                        item.supervisor_action ? 'bg-emerald-500' : 'bg-[#FC4C02]'
+                        'absolute -left-[31px] top-1.5 w-3.5 h-3.5 rounded-full border-4 border-white dark:border-[#262322] shadow transition-transform group-hover:scale-125',
+                        item.supervisor_action ? 'bg-emerald-500' : 'bg-[#E31E24]'
                       )} />
 
-                      <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-950/60 border border-slate-200 dark:border-slate-700 hover:border-[#FC4C02]/40 transition-colors space-y-2.5 text-xs">
+                      <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-950/60 border border-slate-200 dark:border-slate-700 hover:border-[#E31E24]/40 transition-colors space-y-2.5 text-xs">
                         <div className="flex items-center justify-between flex-wrap gap-2">
                           <div className="flex items-center gap-2 flex-wrap">
                             <span className="inline-flex items-center gap-1.5 font-mono font-bold text-slate-900 dark:text-slate-200">
@@ -242,8 +242,8 @@ export default function ActivityHistory() {
           </Card>
 
           {/* Cryptographic Audit Trail */}
-          <Card className="bg-white dark:bg-[#001E60]/80 border-slate-200 dark:border-blue-900/50 shadow-sm">
-            <CardHeader className="pb-3 border-b border-slate-200 dark:border-blue-900/50">
+          <Card className="bg-white dark:bg-[#262322]/80 border-slate-200 dark:border-white/10 shadow-sm">
+            <CardHeader className="pb-3 border-b border-slate-200 dark:border-white/10">
               <CardTitle className="text-sm font-semibold flex items-center gap-2">
                 <ShieldCheck className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
                 <span className="text-slate-900 dark:text-slate-200">Immutable Cryptographic Audit Trail</span>
@@ -274,7 +274,7 @@ export default function ActivityHistory() {
                     </div>
                     <div className="truncate p-2 bg-slate-100 dark:bg-slate-900/60 rounded-lg">
                       <span className="text-slate-400 dark:text-slate-500 block mb-0.5">Curr Hash:</span>
-                      <span className="text-[#FC4C02] dark:text-indigo-400">{log.current_hash}</span>
+                      <span className="text-[#E31E24] dark:text-sky-400">{log.current_hash}</span>
                     </div>
                   </div>
                 </div>

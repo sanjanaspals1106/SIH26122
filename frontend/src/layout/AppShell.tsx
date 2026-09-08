@@ -26,13 +26,12 @@ import { cn } from '@/lib/utils';
 
 const SIDEBAR_COLLAPSED_KEY = 'setu_sidebar_collapsed_v1';
 
-// IndianOil brand tokens
-const IOCL = {
-  navy:   '#003087',   // deep navy – sidebar/header bg
-  blue:   '#1565C0',   // medium blue – hover, accents
-  orange: '#F47920',   // brand orange – CTA, active
-  navyDark: '#00204f', // sidebar footer
-  navyLight: '#1A4BA0', // slightly lighter for hover states
+// Oil India Limited (OIL) brand tokens
+const OIL = {
+  black:   '#2B2A29',   // OIL black – sidebar/header bg
+  red:     '#E31E24',   // OIL red – CTA, active nav, brand accents
+  blackDark: '#201F1E', // sidebar footer, slightly darker than black
+  blackLight: '#3D3B39', // slightly lighter black for hover states
 };
 
 export default function AppShell() {
@@ -77,8 +76,8 @@ export default function AppShell() {
 
   return (
     <div
-      className="min-h-screen flex font-sans antialiased selection:bg-[#F47920] selection:text-white transition-colors duration-200"
-      style={{ backgroundColor: theme === 'dark' ? '#00194d' : '#E8F4FD' }}
+      className="min-h-screen flex font-sans antialiased selection:bg-[#E31E24] selection:text-white transition-colors duration-200"
+      style={{ backgroundColor: theme === 'dark' ? '#1a1918' : '#FFFFFF' }}
     >
       {/* Mobile Backdrop */}
       {isMobileOpen && (
@@ -90,7 +89,7 @@ export default function AppShell() {
 
       {/* ── LEFT SIDEBAR ─────────────────────────────────────────────────────── */}
       <aside
-        style={{ backgroundColor: IOCL.navy }}
+        style={{ backgroundColor: OIL.black }}
         className={cn(
           'fixed lg:static top-0 bottom-0 left-0 z-50 flex flex-col justify-between transition-all duration-300 ease-in-out shadow-2xl',
           isCollapsed ? 'lg:w-[72px]' : 'lg:w-64',
@@ -103,17 +102,17 @@ export default function AppShell() {
           style={{ borderColor: 'rgba(255,255,255,0.12)' }}
         >
           <div className="flex items-center gap-3 overflow-hidden">
-            {/* IndianOil-inspired flame icon in orange circle */}
+            {/* OIL-inspired flame icon in red circle */}
             <div
               className="w-10 h-10 rounded-full flex items-center justify-center shrink-0 shadow-lg"
-              style={{ background: `linear-gradient(135deg, ${IOCL.orange}, #d4640f)` }}
+              style={{ background: `linear-gradient(135deg, ${OIL.red}, #a3151a)` }}
             >
               <Flame className="w-5 h-5 text-white" />
             </div>
             {!isCollapsed && (
               <div className="flex flex-col min-w-0">
                 <span className="font-bold text-base text-white leading-tight truncate tracking-tight">
-                  Setu <span style={{ color: IOCL.orange }}>AI</span>
+                  Setu <span style={{ color: OIL.red }}>AI</span>
                 </span>
                 <span className="text-[10px] font-semibold tracking-wider truncate" style={{ color: 'rgba(255,255,255,0.55)' }}>
                   SIH26122 · Oil India
@@ -162,7 +161,7 @@ export default function AppShell() {
                     ? 'text-white shadow-md'
                     : 'text-white/65 hover:text-white hover:bg-white/10'
                 )}
-                style={isActive ? { backgroundColor: IOCL.orange, boxShadow: `0 4px 16px rgba(244,121,32,0.35)` } : {}}
+                style={isActive ? { backgroundColor: OIL.red, boxShadow: `0 4px 16px rgba(227,30,36,0.35)` } : {}}
                 title={isCollapsed ? item.label : undefined}
               >
                 <Icon
@@ -178,7 +177,7 @@ export default function AppShell() {
                 {isCollapsed && isActive && (
                   <span
                     className="absolute right-0 top-1/2 -translate-y-1/2 w-1 h-8 rounded-l-full"
-                    style={{ backgroundColor: IOCL.orange }}
+                    style={{ backgroundColor: OIL.red }}
                   />
                 )}
               </Link>
@@ -188,43 +187,47 @@ export default function AppShell() {
 
         {/* Sidebar Footer — User & Logout */}
         <div
-          className="p-3 border-t"
-          style={{ borderColor: 'rgba(255,255,255,0.12)', backgroundColor: IOCL.navyDark }}
+          className="p-3 border-t space-y-2"
+          style={{ borderColor: 'rgba(255,255,255,0.12)', backgroundColor: OIL.blackDark }}
         >
-          <div className={cn('flex items-center gap-2', isCollapsed ? 'justify-center' : 'justify-between')}>
-            {!isCollapsed && (
-              <div className="flex items-center gap-2.5 overflow-hidden">
-                <div
-                  className="w-8 h-8 rounded-full flex items-center justify-center shrink-0 border"
-                  style={{ backgroundColor: 'rgba(255,255,255,0.08)', borderColor: 'rgba(255,255,255,0.15)' }}
-                >
-                  {isSupervisor
-                    ? <ShieldCheck className="w-4 h-4 text-emerald-400" />
-                    : <HardHat className="w-4 h-4 text-amber-400" />}
-                </div>
-                <div className="flex flex-col min-w-0">
-                  <span className="text-xs font-semibold text-white truncate">{user.full_name}</span>
-                  <span className="text-[10px] font-medium truncate flex items-center gap-1" style={{ color: 'rgba(255,255,255,0.5)' }}>
-                    <span
-                      className="w-1.5 h-1.5 rounded-full"
-                      style={{ backgroundColor: isSupervisor ? '#10b981' : '#f59e0b' }}
-                    />
-                    {user.role}
-                  </span>
-                </div>
+          {!isCollapsed && (
+            <div className="flex items-center gap-3 px-1 py-1">
+              <div
+                className="w-10 h-10 rounded-full flex items-center justify-center shrink-0 border"
+                style={{ backgroundColor: 'rgba(255,255,255,0.08)', borderColor: 'rgba(255,255,255,0.15)' }}
+              >
+                {isSupervisor
+                  ? <ShieldCheck className="w-5 h-5 text-emerald-400" />
+                  : <HardHat className="w-5 h-5 text-amber-400" />}
               </div>
-            )}
+              <div className="flex flex-col min-w-0">
+                <span className="text-sm font-semibold text-white truncate">{user.full_name}</span>
+                <span className="text-xs font-medium truncate flex items-center gap-1.5" style={{ color: 'rgba(255,255,255,0.55)' }}>
+                  <span
+                    className="w-1.5 h-1.5 rounded-full shrink-0"
+                    style={{ backgroundColor: isSupervisor ? '#10b981' : '#f59e0b' }}
+                  />
+                  {isSupervisor ? 'Supervisor' : 'Site Engineer'}
+                </span>
+              </div>
+            </div>
+          )}
 
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={handleLogout}
-              className="text-white/50 hover:text-rose-300 hover:bg-rose-500/20 h-8 w-8 rounded-lg shrink-0"
-              title="Logout"
-            >
-              <LogOut className="w-4 h-4" />
-            </Button>
-          </div>
+          <Button
+            variant="ghost"
+            onClick={handleLogout}
+            className={cn(
+              'w-full font-semibold rounded-lg transition-colors',
+              isCollapsed ? 'h-9 w-9 p-0' : 'h-10 justify-start gap-2 px-3'
+            )}
+            style={{ color: 'rgba(255,255,255,0.75)', backgroundColor: 'rgba(255,255,255,0.06)' }}
+            onMouseEnter={e => { e.currentTarget.style.backgroundColor = 'rgba(227,30,36,0.15)'; e.currentTarget.style.color = '#ff8a8f'; }}
+            onMouseLeave={e => { e.currentTarget.style.backgroundColor = 'rgba(255,255,255,0.06)'; e.currentTarget.style.color = 'rgba(255,255,255,0.75)'; }}
+            title="Sign Out"
+          >
+            <LogOut className="w-4 h-4 shrink-0" />
+            {!isCollapsed && <span className="text-sm">Sign Out</span>}
+          </Button>
         </div>
       </aside>
 
@@ -234,8 +237,8 @@ export default function AppShell() {
         <header
           className="h-16 px-4 lg:px-8 flex items-center justify-between sticky top-0 z-30 shadow-md transition-colors duration-200"
           style={{
-            backgroundColor: theme === 'dark' ? IOCL.navy : IOCL.navy,
-            borderBottom: `3px solid ${IOCL.orange}`,
+            backgroundColor: theme === 'dark' ? OIL.black : OIL.black,
+            borderBottom: `3px solid ${OIL.red}`,
           }}
         >
           <div className="flex items-center gap-3">
@@ -277,12 +280,12 @@ export default function AppShell() {
             <div
               className="px-3 py-1 rounded-full text-[11px] font-mono font-semibold flex items-center gap-1.5 border"
               style={{
-                backgroundColor: 'rgba(244,121,32,0.15)',
-                borderColor: 'rgba(244,121,32,0.35)',
-                color: '#F47920',
+                backgroundColor: 'rgba(227,30,36,0.15)',
+                borderColor: 'rgba(227,30,36,0.35)',
+                color: '#E31E24',
               }}
             >
-              <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: '#F47920' }} />
+              <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: '#E31E24' }} />
               <span className="hidden sm:inline">Human-in-the-Loop</span>
               <span className="sm:hidden">HIL</span>
             </div>

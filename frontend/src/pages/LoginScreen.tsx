@@ -20,10 +20,10 @@ import {
   Droplets,
 } from 'lucide-react';
 
-// IndianOil brand
-const NAVY = '#003087';
-const ORANGE = '#F47920';
-const BLUE = '#1565C0';
+// Oil India Limited (OIL) brand
+const OIL_BLACK = '#2B2A29';
+const OIL_RED = '#E31E24';
+const OIL_GRAY = '#6B6A68'; // restrained neutral accent — never a substitute for red/black
 
 export default function LoginScreen() {
   const { login, isAuthenticated, user, error, clearError, isLoading } = useAuth();
@@ -66,26 +66,26 @@ export default function LoginScreen() {
 
   return (
     <div
-      className="min-h-screen flex font-sans antialiased selection:bg-[#F47920] selection:text-white transition-colors duration-200 relative overflow-hidden"
-      style={{ backgroundColor: theme === 'dark' ? '#00194d' : '#E8F4FD' }}
+      className="min-h-screen flex font-sans antialiased selection:bg-[#E31E24] selection:text-white transition-colors duration-200 relative overflow-hidden"
+      style={{ backgroundColor: theme === 'dark' ? '#1a1918' : '#FFFFFF' }}
     >
       {/* ── LEFT PANEL — Brand panel (hidden on mobile) ────────────────────── */}
       <div
         className="hidden lg:flex lg:w-[45%] flex-col justify-between p-10 relative overflow-hidden"
-        style={{ backgroundColor: NAVY }}
+        style={{ backgroundColor: OIL_BLACK }}
       >
         {/* Background decorative circles */}
         <div
           className="absolute -top-24 -left-24 w-96 h-96 rounded-full opacity-10"
-          style={{ backgroundColor: ORANGE }}
+          style={{ backgroundColor: OIL_RED }}
         />
         <div
           className="absolute bottom-0 right-0 w-80 h-80 rounded-full opacity-10"
-          style={{ backgroundColor: BLUE }}
+          style={{ backgroundColor: OIL_GRAY }}
         />
         <div
           className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-64 h-64 rounded-full opacity-5"
-          style={{ backgroundColor: ORANGE }}
+          style={{ backgroundColor: OIL_RED }}
         />
 
         {/* Top Brand */}
@@ -93,13 +93,13 @@ export default function LoginScreen() {
           <div className="flex items-center gap-3 mb-8">
             <div
               className="w-12 h-12 rounded-full flex items-center justify-center shadow-xl"
-              style={{ background: `linear-gradient(135deg, ${ORANGE}, #d4640f)` }}
+              style={{ background: `linear-gradient(135deg, ${OIL_RED}, #a3151a)` }}
             >
               <Flame className="w-6 h-6 text-white" />
             </div>
             <div>
               <div className="font-bold text-2xl text-white tracking-tight">
-                Setu <span style={{ color: ORANGE }}>AI</span>
+                Setu <span style={{ color: OIL_RED }}>AI</span>
               </div>
               <div className="text-xs font-medium" style={{ color: 'rgba(255,255,255,0.5)' }}>
                 SIH26122 · Oil India Progress Verification
@@ -109,7 +109,7 @@ export default function LoginScreen() {
 
           <h2 className="text-3xl font-bold text-white leading-snug mt-12">
             Smart Infrastructure<br />
-            <span style={{ color: ORANGE }}>Progress Tracking</span><br />
+            <span style={{ color: OIL_RED }}>Progress Tracking</span><br />
             for Oil India
           </h2>
 
@@ -129,9 +129,9 @@ export default function LoginScreen() {
             <div key={label} className="flex items-center gap-3">
               <div
                 className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0"
-                style={{ backgroundColor: 'rgba(244,121,32,0.15)', border: `1px solid rgba(244,121,32,0.3)` }}
+                style={{ backgroundColor: 'rgba(227,30,36,0.15)', border: `1px solid rgba(227,30,36,0.3)` }}
               >
-                <Icon className="w-4 h-4" style={{ color: ORANGE }} />
+                <Icon className="w-4 h-4" style={{ color: OIL_RED }} />
               </div>
               <span className="text-sm" style={{ color: 'rgba(255,255,255,0.75)' }}>{label}</span>
             </div>
@@ -151,11 +151,16 @@ export default function LoginScreen() {
             variant="outline"
             size="sm"
             onClick={toggleTheme}
-            className="border-slate-300 dark:border-blue-800 text-slate-600 dark:text-white/70 h-9 px-3 gap-2 text-xs rounded-xl shadow-sm bg-white dark:bg-white/5 hover:bg-slate-50 dark:hover:bg-white/10"
+            className="h-9 px-3 gap-2 text-xs rounded-xl shadow-sm"
+            style={{
+              borderColor: theme === 'dark' ? 'rgba(255,255,255,0.15)' : '#CBD5E1',
+              backgroundColor: theme === 'dark' ? 'rgba(255,255,255,0.05)' : '#FFFFFF',
+              color: theme === 'dark' ? 'rgba(255,255,255,0.85)' : '#334155',
+            }}
           >
             {theme === 'dark'
               ? <><Sun className="w-4 h-4 text-amber-400" />Light Mode</>
-              : <><Moon className="w-4 h-4" style={{ color: BLUE }} />Dark Mode</>
+              : <><Moon className="w-4 h-4" style={{ color: OIL_GRAY }} />Dark Mode</>
             }
           </Button>
         </div>
@@ -164,13 +169,13 @@ export default function LoginScreen() {
         <div className="flex lg:hidden items-center gap-2 mb-8">
           <div
             className="w-10 h-10 rounded-full flex items-center justify-center"
-            style={{ background: `linear-gradient(135deg, ${ORANGE}, #d4640f)` }}
+            style={{ background: `linear-gradient(135deg, ${OIL_RED}, #a3151a)` }}
           >
             <Flame className="w-5 h-5 text-white" />
           </div>
           <div>
-            <div className="font-bold text-xl tracking-tight" style={{ color: NAVY }}>
-              Setu <span style={{ color: ORANGE }}>AI</span>
+            <div className="font-bold text-xl tracking-tight" style={{ color: OIL_BLACK }}>
+              Setu <span style={{ color: OIL_RED }}>AI</span>
             </div>
             <div className="text-[10px] text-slate-500 font-medium">SIH26122 · Oil India</div>
           </div>
@@ -180,14 +185,14 @@ export default function LoginScreen() {
         <div
           className="w-full max-w-md rounded-2xl shadow-2xl overflow-hidden"
           style={{
-            backgroundColor: theme === 'dark' ? 'rgba(0,48,135,0.4)' : '#ffffff',
+            backgroundColor: theme === 'dark' ? 'rgba(43,42,41,0.75)' : '#ffffff',
             border: theme === 'dark' ? '1px solid rgba(255,255,255,0.1)' : '1px solid #CBD5E1',
           }}
         >
           {/* Card header stripe */}
           <div
             className="px-8 py-5 flex items-center justify-between"
-            style={{ backgroundColor: NAVY }}
+            style={{ backgroundColor: OIL_BLACK }}
           >
             <div>
               <h1 className="text-lg font-bold text-white">Sign in to your account</h1>
@@ -197,14 +202,14 @@ export default function LoginScreen() {
             </div>
             <div
               className="w-10 h-10 rounded-full flex items-center justify-center"
-              style={{ background: `linear-gradient(135deg, ${ORANGE}, #d4640f)` }}
+              style={{ background: `linear-gradient(135deg, ${OIL_RED}, #a3151a)` }}
             >
               <Flame className="w-5 h-5 text-white" />
             </div>
           </div>
 
           {/* Orange accent stripe */}
-          <div className="h-1" style={{ background: `linear-gradient(90deg, ${ORANGE}, ${BLUE})` }} />
+          <div className="h-1" style={{ background: `linear-gradient(90deg, ${OIL_RED}, ${OIL_GRAY})` }} />
 
           {/* Form body */}
           <div className="px-8 py-7 space-y-5">
@@ -273,8 +278,8 @@ export default function LoginScreen() {
                 disabled={isLoading}
                 className="w-full text-white font-semibold h-11 shadow-lg transition-all flex items-center justify-center gap-2 rounded-xl text-sm"
                 style={{
-                  background: isLoading ? '#aaa' : `linear-gradient(135deg, ${ORANGE}, #d4640f)`,
-                  boxShadow: `0 4px 18px rgba(244,121,32,0.35)`,
+                  background: isLoading ? '#aaa' : `linear-gradient(135deg, ${OIL_RED}, #a3151a)`,
+                  boxShadow: `0 4px 18px rgba(227,30,36,0.35)`,
                 }}
               >
                 {isLoading ? (
@@ -306,7 +311,7 @@ export default function LoginScreen() {
                     backgroundColor: theme === 'dark' ? 'rgba(255,255,255,0.04)' : '#F8FAFC',
                     border: `1px solid ${theme === 'dark' ? 'rgba(255,255,255,0.08)' : '#E2E8F0'}`,
                   }}
-                  onMouseEnter={e => (e.currentTarget.style.borderColor = ORANGE)}
+                  onMouseEnter={e => (e.currentTarget.style.borderColor = OIL_RED)}
                   onMouseLeave={e => (e.currentTarget.style.borderColor = theme === 'dark' ? 'rgba(255,255,255,0.08)' : '#E2E8F0')}
                 >
                   <div className="flex items-center gap-1.5 text-xs font-bold" style={{ color: theme === 'dark' ? '#e2e8f0' : '#1e293b' }}>
@@ -324,7 +329,7 @@ export default function LoginScreen() {
                     backgroundColor: theme === 'dark' ? 'rgba(255,255,255,0.04)' : '#F8FAFC',
                     border: `1px solid ${theme === 'dark' ? 'rgba(255,255,255,0.08)' : '#E2E8F0'}`,
                   }}
-                  onMouseEnter={e => (e.currentTarget.style.borderColor = ORANGE)}
+                  onMouseEnter={e => (e.currentTarget.style.borderColor = OIL_RED)}
                   onMouseLeave={e => (e.currentTarget.style.borderColor = theme === 'dark' ? 'rgba(255,255,255,0.08)' : '#E2E8F0')}
                 >
                   <div className="flex items-center gap-1.5 text-xs font-bold" style={{ color: theme === 'dark' ? '#e2e8f0' : '#1e293b' }}>

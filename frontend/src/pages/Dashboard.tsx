@@ -30,13 +30,13 @@ import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, Cell, PieCha
 import { cn } from '@/lib/utils';
 
 const CHART_COLORS = {
-  indigo: '#6366f1',
+  sky: '#6366f1',
   blue: '#3b82f6',
   amber: '#f59e0b',
-  violet: '#a855f7',
+  skyDeep: '#a855f7',
   emerald: '#10b981',
-  orange: '#FC4C02',
-  navy: '#001E60',
+  orange: '#E31E24',
+  navy: '#262322',
 };
 
 export default function Dashboard() {
@@ -81,7 +81,7 @@ export default function Dashboard() {
     { name: 'CIVIL', value: 42, fill: CHART_COLORS.orange },
     { name: 'PIPING', value: 28, fill: CHART_COLORS.blue },
     { name: 'ELECTRICAL', value: 18, fill: CHART_COLORS.amber },
-    { name: 'INSTRUMENTATION', value: 12, fill: CHART_COLORS.violet },
+    { name: 'INSTRUMENTATION', value: 12, fill: CHART_COLORS.sky },
     { name: 'HSE', value: 8, fill: CHART_COLORS.emerald },
   ];
 
@@ -92,9 +92,9 @@ export default function Dashboard() {
       delta: '+12% from last week',
       deltaPositive: true,
       icon: FileSpreadsheet,
-      accent: 'text-[#FC4C02]',
-      bg: 'bg-[#FC4C02]/10 dark:bg-[#FC4C02]/10',
-      border: 'border-[#FC4C02]/20',
+      accent: 'text-[#E31E24]',
+      bg: 'bg-[#E31E24]/10 dark:bg-[#E31E24]/10',
+      border: 'border-[#E31E24]/20',
     },
     {
       label: 'Pending Supervisor Review',
@@ -131,11 +131,11 @@ export default function Dashboard() {
   return (
     <div className="space-y-6">
       {/* Top Header Toolbar */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-200 dark:border-blue-900/50 pb-4">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-200 dark:border-white/10 pb-4">
         <div>
           <h1 className="text-2xl font-bold text-slate-900 dark:text-slate-100 tracking-tight flex items-center gap-2">
-            <div className="p-1.5 rounded-lg bg-[#FC4C02]/10 border border-[#FC4C02]/20">
-              <BarChart3 className="w-5 h-5 text-[#FC4C02]" />
+            <div className="p-1.5 rounded-lg bg-[#E31E24]/10 border border-[#E31E24]/20">
+              <BarChart3 className="w-5 h-5 text-[#E31E24]" />
             </div>
             Project Executive Dashboard
           </h1>
@@ -148,14 +148,14 @@ export default function Dashboard() {
           <Button
             onClick={loadDashboardData}
             variant="outline"
-            className="border-slate-300 dark:border-blue-800 text-slate-700 dark:text-blue-100 hover:bg-slate-100 dark:hover:bg-blue-900/50 h-9 text-xs gap-1.5"
+            className="border-slate-300 dark:border-white/10 text-slate-700 dark:text-blue-100 hover:bg-slate-100 dark:hover:bg-blue-900/50 h-9 text-xs gap-1.5"
           >
             <RefreshCw className="w-3.5 h-3.5" />
             Refresh
           </Button>
           <Button
             onClick={handleExportCsv}
-            className="bg-[#FC4C02] hover:bg-[#e04302] text-white font-medium text-xs h-9 shadow-md shadow-[#FC4C02]/20 gap-1.5"
+            className="bg-[#E31E24] hover:bg-[#a3151a] text-white font-medium text-xs h-9 shadow-md shadow-[#E31E24]/20 gap-1.5"
           >
             <Download className="w-4 h-4" /> Export CSV
           </Button>
@@ -189,7 +189,7 @@ export default function Dashboard() {
         {kpiCards.map((kpi) => {
           const Icon = kpi.icon;
           return (
-            <Card key={kpi.label} className={cn('border', kpi.border, 'bg-white dark:bg-[#001E60]/80 shadow-sm hover:shadow-md transition-shadow')}>
+            <Card key={kpi.label} className={cn('border', kpi.border, 'bg-white dark:bg-[#262322]/80 shadow-sm hover:shadow-md transition-shadow')}>
               <CardContent className="p-4">
                 <div className="flex items-start justify-between">
                   <div className={cn('p-2 rounded-lg', kpi.bg)}>
@@ -214,7 +214,7 @@ export default function Dashboard() {
       {/* Grid: Delay Reasons Chart & Discipline Breakdown */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
         {/* Delay Reasons Bar Chart (7 Cols) */}
-        <Card className="bg-white dark:bg-[#001E60]/80 border-slate-200 dark:border-blue-900/50 text-slate-900 dark:text-slate-100 lg:col-span-7 shadow-sm">
+        <Card className="bg-white dark:bg-[#262322]/80 border-slate-200 dark:border-white/10 text-slate-900 dark:text-slate-100 lg:col-span-7 shadow-sm">
           <CardHeader className="pb-2">
             <CardTitle className="text-sm font-semibold flex items-center justify-between">
               <span className="flex items-center gap-2">
@@ -232,7 +232,7 @@ export default function Dashboard() {
               <BarChart data={delayReasons} layout="vertical" margin={{ top: 5, right: 30, left: 100, bottom: 5 }}>
                 <XAxis type="number" stroke="#94a3b8" fontSize={11} />
                 <YAxis dataKey="reason" type="category" stroke="#94a3b8" fontSize={10} tickLine={false} width={150} />
-                <Tooltip contentStyle={{ backgroundColor: '#001E60', borderColor: '#1e3a8a', borderRadius: '8px', fontSize: '11px', color: '#f8fafc' }} />
+                <Tooltip contentStyle={{ backgroundColor: '#262322', borderColor: '#1e3a8a', borderRadius: '8px', fontSize: '11px', color: '#f8fafc' }} />
                 <Bar dataKey="count" fill={CHART_COLORS.orange} radius={[0, 4, 4, 0]} barSize={16} />
               </BarChart>
             </ResponsiveContainer>
@@ -240,10 +240,10 @@ export default function Dashboard() {
         </Card>
 
         {/* Discipline Pie (5 Cols) */}
-        <Card className="bg-white dark:bg-[#001E60]/80 border-slate-200 dark:border-blue-900/50 text-slate-900 dark:text-slate-100 lg:col-span-5 shadow-sm">
+        <Card className="bg-white dark:bg-[#262322]/80 border-slate-200 dark:border-white/10 text-slate-900 dark:text-slate-100 lg:col-span-5 shadow-sm">
           <CardHeader className="pb-2">
             <CardTitle className="text-sm font-semibold flex items-center gap-2">
-              <Layers className="w-4 h-4 text-indigo-500 dark:text-indigo-400" />
+              <Layers className="w-4 h-4 text-sky-500 dark:text-sky-400" />
               Discipline Volume Distribution
             </CardTitle>
             <CardDescription className="text-slate-500 dark:text-slate-400 text-xs">
@@ -269,7 +269,7 @@ export default function Dashboard() {
                     <Cell key={`cell-${index}`} fill={entry.fill} />
                   ))}
                 </Pie>
-                <Tooltip contentStyle={{ backgroundColor: '#001E60', borderColor: '#1e3a8a', borderRadius: '8px', fontSize: '11px' }} />
+                <Tooltip contentStyle={{ backgroundColor: '#262322', borderColor: '#1e3a8a', borderRadius: '8px', fontSize: '11px' }} />
               </PieChart>
             </ResponsiveContainer>
           </CardContent>
@@ -279,13 +279,13 @@ export default function Dashboard() {
       {/* Grid: Institutional Memory & Schedule Forecast */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
         {/* Institutional Memory (6 Cols) */}
-        <Card className="bg-white dark:bg-[#001E60]/80 border-slate-200 dark:border-blue-900/50 text-slate-900 dark:text-slate-100 lg:col-span-6 shadow-sm">
+        <Card className="bg-white dark:bg-[#262322]/80 border-slate-200 dark:border-white/10 text-slate-900 dark:text-slate-100 lg:col-span-6 shadow-sm">
           <CardHeader className="pb-2">
             <CardTitle className="text-sm font-semibold flex items-center gap-2">
-              <div className="p-1.5 rounded-lg bg-violet-100 dark:bg-violet-500/10 border border-violet-200 dark:border-violet-500/20">
-                <BrainCircuit className="w-3.5 h-3.5 text-violet-600 dark:text-violet-400" />
+              <div className="p-1.5 rounded-lg bg-sky-100 dark:bg-sky-500/10 border border-sky-200 dark:border-sky-500/20">
+                <BrainCircuit className="w-3.5 h-3.5 text-sky-600 dark:text-sky-400" />
               </div>
-              <span className="text-violet-700 dark:text-violet-300">Institutional Memory</span>
+              <span className="text-sky-700 dark:text-sky-300">Institutional Memory</span>
             </CardTitle>
             <CardDescription className="text-slate-500 dark:text-slate-400 text-xs">
               Learned resolutions from past supervisor overrides applied to current site conditions.
@@ -295,10 +295,10 @@ export default function Dashboard() {
             {institutionalMemory.length === 0 ? (
               <div className="text-center py-8 text-slate-400 dark:text-slate-500 text-xs">No institutional memory data available.</div>
             ) : institutionalMemory.map((mem, idx) => (
-              <div key={idx} className="p-3 bg-slate-50 dark:bg-slate-950/60 border border-slate-200 dark:border-slate-700 rounded-xl space-y-1 text-xs hover:border-violet-300 dark:hover:border-violet-700/50 transition-colors">
+              <div key={idx} className="p-3 bg-slate-50 dark:bg-slate-950/60 border border-slate-200 dark:border-slate-700 rounded-xl space-y-1 text-xs hover:border-sky-300 dark:hover:border-sky-700/50 transition-colors">
                 <div className="flex items-center justify-between text-slate-800 dark:text-slate-200 font-bold">
                   <span>{mem.topic}</span>
-                  <span className="text-[10px] bg-violet-100 dark:bg-violet-500/20 text-violet-700 dark:text-violet-300 border border-violet-200 dark:border-violet-500/30 px-2 py-0.5 rounded-full font-mono">
+                  <span className="text-[10px] bg-sky-100 dark:bg-sky-500/20 text-sky-700 dark:text-sky-300 border border-sky-200 dark:border-sky-500/30 px-2 py-0.5 rounded-full font-mono">
                     {mem.count}×
                   </span>
                 </div>
@@ -309,7 +309,7 @@ export default function Dashboard() {
         </Card>
 
         {/* Schedule Forecast (6 Cols) */}
-        <Card className="bg-white dark:bg-[#001E60]/80 border-slate-200 dark:border-blue-900/50 text-slate-900 dark:text-slate-100 lg:col-span-6 shadow-sm">
+        <Card className="bg-white dark:bg-[#262322]/80 border-slate-200 dark:border-white/10 text-slate-900 dark:text-slate-100 lg:col-span-6 shadow-sm">
           <CardHeader className="pb-2">
             <CardTitle className="text-sm font-semibold flex items-center justify-between">
               <span className="flex items-center gap-2">
@@ -348,8 +348,8 @@ export default function Dashboard() {
       </div>
 
       {/* Recent Supervisor Decisions */}
-      <Card className="bg-white dark:bg-[#001E60]/80 border-slate-200 dark:border-blue-900/50 text-slate-900 dark:text-slate-100 shadow-sm">
-        <CardHeader className="pb-2 border-b border-slate-200 dark:border-blue-900/50">
+      <Card className="bg-white dark:bg-[#262322]/80 border-slate-200 dark:border-white/10 text-slate-900 dark:text-slate-100 shadow-sm">
+        <CardHeader className="pb-2 border-b border-slate-200 dark:border-white/10">
           <CardTitle className="text-sm font-semibold flex items-center gap-2">
             <ShieldCheck className="w-4 h-4 text-emerald-500 dark:text-emerald-400" />
             Recent Supervisor Decisions Log
@@ -366,7 +366,7 @@ export default function Dashboard() {
               <div key={dec.decision_id} className="py-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2 group hover:bg-slate-50 dark:hover:bg-blue-900/20 px-2 rounded-lg transition-colors">
                 <div className="space-y-0.5">
                   <div className="flex items-center gap-2 flex-wrap">
-                    <span className="font-mono font-bold text-[#001E60] dark:text-blue-200 bg-blue-100 dark:bg-blue-900/80 px-2 py-0.5 rounded-md text-[11px]">
+                    <span className="font-mono font-bold text-[#262322] dark:text-blue-200 bg-blue-100 dark:bg-blue-900/80 px-2 py-0.5 rounded-md text-[11px]">
                       {dec.selected_activity_id}
                     </span>
                     <span className={cn(

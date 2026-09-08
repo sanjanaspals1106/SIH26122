@@ -4,94 +4,95 @@
 @tailwind components;
 @tailwind utilities;
 
-/* ── IndianOil Brand Tokens ──────────────────────────────────────────────────
-   Orange  : #F47920  (primary CTA, active nav, highlights)
-   Navy    : #003087  (header, sidebar, dark surfaces)
-   Blue    : #1565C0  (accent, links, chart fills)
-   Light   : #E8F4FD  (light-mode page background)
-   White   : #FFFFFF
+/* ── Oil India Limited (OIL) Brand Tokens ───────────────────────────────────
+   OIL Red   : #E31E24  (primary CTA, active nav, brand accents, critical)
+   OIL Black : #2B2A29  (headings, nav, dark surfaces, professional type)
+   White     : #FFFFFF  (light-mode page background)
+   Neutrals  : restrained grays for secondary text, borders, dividers
+   Status    : green/amber/red/blue kept separate from brand red so
+               "approved" vs "brand accent" are never visually confused
    ───────────────────────────────────────────────────────────────────────── */
 
 @layer base {
   :root {
     /* Page surface */
-    --background: 210 60% 96%;         /* #E8F4FD */
-    --foreground: 220 80% 12%;         /* deep navy text */
+    --background: 0 0% 100%;           /* #FFFFFF */
+    --foreground: 20 4% 16%;           /* #2B2A29 OIL black text */
 
     /* Cards */
     --card: 0 0% 100%;                 /* #FFFFFF */
-    --card-foreground: 220 80% 12%;
+    --card-foreground: 20 4% 16%;
 
     /* Popover */
     --popover: 0 0% 100%;
-    --popover-foreground: 220 80% 12%;
+    --popover-foreground: 20 4% 16%;
 
-    /* Primary = IndianOil Orange #F47920 */
-    --primary: 27 90% 54%;
+    /* Primary = OIL Red #E31E24 */
+    --primary: 357 79% 51%;
     --primary-foreground: 0 0% 100%;
 
-    /* Secondary = Light Blue tint */
-    --secondary: 210 60% 94%;
-    --secondary-foreground: 220 80% 15%;
+    /* Secondary = light neutral gray tint */
+    --secondary: 30 6% 95%;
+    --secondary-foreground: 20 4% 16%;
 
     /* Muted */
-    --muted: 210 40% 92%;
-    --muted-foreground: 220 20% 46%;
+    --muted: 30 6% 94%;
+    --muted-foreground: 20 4% 42%;
 
-    /* Accent = IndianOil Blue #1565C0 */
-    --accent: 215 76% 42%;
+    /* Accent = OIL black, used sparingly for emphasis outside of red */
+    --accent: 20 4% 16%;
     --accent-foreground: 0 0% 100%;
 
-    /* Destructive */
-    --destructive: 0 84% 60%;
+    /* Destructive (kept distinct from brand red via deeper hue/lower lightness) */
+    --destructive: 0 72% 42%;
     --destructive-foreground: 0 0% 100%;
 
     /* Borders & inputs */
-    --border: 210 40% 84%;
-    --input: 210 40% 84%;
-    --ring: 27 90% 54%;
+    --border: 30 8% 88%;
+    --input: 30 8% 88%;
+    --ring: 357 79% 51%;
 
-    --radius: 0.75rem;
+    --radius: 0.5rem;
 
-    /* Semantic status colors */
-    --status-approved: 142 76% 36%;
-    --status-review: 38 92% 44%;
-    --status-rejected: 0 72% 51%;
-    --status-ai: 262 83% 58%;
+    /* Semantic status colors — kept restrained, separate from brand red */
+    --status-approved: 142 65% 32%;
+    --status-review: 38 88% 42%;
+    --status-rejected: 0 72% 42%;
+    --status-ai: 210 60% 42%;
   }
 
   .dark {
-    /* Page surface = deep navy */
-    --background: 220 85% 10%;         /* #00194d approx */
-    --foreground: 210 40% 97%;
+    /* Page surface = OIL black */
+    --background: 20 6% 10%;           /* deep charcoal, near #201F1E */
+    --foreground: 30 8% 96%;
 
-    /* Cards = slightly lighter navy */
-    --card: 220 80% 15%;               /* #001E60-ish */
-    --card-foreground: 210 40% 97%;
+    /* Cards = slightly lighter charcoal */
+    --card: 20 6% 14%;
+    --card-foreground: 30 8% 96%;
 
-    --popover: 220 80% 15%;
-    --popover-foreground: 210 40% 97%;
+    --popover: 20 6% 14%;
+    --popover-foreground: 30 8% 96%;
 
-    /* Primary = IndianOil Orange */
-    --primary: 27 90% 54%;
+    /* Primary = OIL Red, unchanged for consistent brand recognition */
+    --primary: 357 79% 54%;
     --primary-foreground: 0 0% 100%;
 
-    --secondary: 215 60% 20%;
-    --secondary-foreground: 210 40% 97%;
+    --secondary: 20 6% 20%;
+    --secondary-foreground: 30 8% 96%;
 
-    --muted: 215 60% 18%;
-    --muted-foreground: 215 20% 65%;
+    --muted: 20 6% 18%;
+    --muted-foreground: 30 6% 65%;
 
-    /* Accent = lighter blue in dark mode */
-    --accent: 215 76% 58%;
-    --accent-foreground: 0 0% 100%;
+    /* Accent = light neutral in dark mode for contrast against black bg */
+    --accent: 30 8% 90%;
+    --accent-foreground: 20 6% 10%;
 
-    --destructive: 0 63% 31%;
-    --destructive-foreground: 210 40% 98%;
+    --destructive: 0 63% 42%;
+    --destructive-foreground: 0 0% 100%;
 
-    --border: 215 50% 22%;
-    --input: 215 50% 22%;
-    --ring: 27 90% 54%;
+    --border: 20 6% 24%;
+    --input: 20 6% 24%;
+    --ring: 357 79% 54%;
   }
 }
 
@@ -101,7 +102,7 @@
   }
 
   body {
-    @apply bg-[#E8F4FD] dark:bg-[#00194d] text-slate-900 dark:text-slate-100 font-sans antialiased transition-colors duration-200;
+    @apply bg-white dark:bg-[#1a1918] text-[#2B2A29] dark:text-slate-100 font-sans antialiased transition-colors duration-200;
     font-family: 'Inter', sans-serif;
   }
 }
@@ -111,11 +112,9 @@
     font-family: 'IBM Plex Mono', monospace;
   }
 
-  /* IndianOil brand utility classes */
-  .brand-orange { color: #F47920; }
-  .brand-navy   { color: #003087; }
-  .brand-blue   { color: #1565C0; }
-  .bg-brand-orange { background-color: #F47920; }
-  .bg-brand-navy   { background-color: #003087; }
-  .bg-brand-blue   { background-color: #1565C0; }
+  /* Oil India Limited (OIL) brand utility classes */
+  .brand-red   { color: #E31E24; }
+  .brand-black { color: #2B2A29; }
+  .bg-brand-red   { background-color: #E31E24; }
+  .bg-brand-black { background-color: #2B2A29; }
 }
