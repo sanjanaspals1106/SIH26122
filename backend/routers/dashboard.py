@@ -225,3 +225,212 @@ def get_institutional_memory(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to retrieve institutional memory",
         )
+
+
+def _calculate_historical_ratio_for_discipline(
+    discipline: str,
+    target_activity_id: Optional[str] = None,
+    conn: Optional[Any] = None,
+) -> Optional[float]:
+    """
+    Calculate the average historical actual_duration / planned_duration ratio
+    for completed activities matching the specified discipline.
+
+    Rules:
+    - Only activities with valid planned_start and planned_finish (planned_duration > 0).
+    - Only activities with valid approved_actuals actual_start and actual_finish (actual_duration >= 0).
+    - Excludes target_activity_id from history to prevent self-contamination.
+    - No division by zero.
+    - Returns None if no qualifying historical completed activities exist.
+    """
+    query = """
+        SELECT
+            sa.activity_id,
+            sa.planned_start,
+            sa.planned_finish,
+            aa.actual_start,
+            aa.actual_finish
+        FROM schedule_activities sa
+        JOIN approved_actuals aa
+            ON aa.schedule_id = sa.schedule_id
+           AND aa.activity_id = sa.activity_id
+        WHERE UPPER(TRIM(sa.discipline)) = %s
+          AND aa.actual_start IS NOT NULL
+          AND aa.actual_finish IS NOT NULL
+    """
+    disc_norm = discipline.strip().upper()
+    if conn is not None:
+        rows = conn.execute(query, (disc_norm,)).fetchall()
+    else:
+        with get_connection() as c:
+            rows = c.execute(query, (disc_norm,)).fetchall()
+
+    ratios: List[float] = []
+    for row in rows:
+        act_id = str(row["activity_id"])
+        if target_activity_id and act_id == str(target_activity_id):
+            continue
+
+        p_dur = _calculate_duration_days(row["planned_start"], row["planned_finish"])
+        a_dur = _calculate_duration_days(row["actual_start"], row["actual_finish"])
+
+        if p_dur is not None and a_dur is not None and p_dur > 0 and a_dur >= 0:
+            ratios.append(a_dur / p_dur)
+
+    if not ratios:
+        return None
+
+    return sum(ratios) / len(ratios)
+
+
+def query_forecast(
+    activity_id: Optional[str] = None,
+    discipline: Optional[str] = None,
+    conn: Optional[Any] = None,
+) -> dict:
+    """
+    Calculate historical-ratio forecast for an activity or a discipline.
+    """
+    if not activity_id and not discipline:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="At least one of 'activity_id' or 'discipline' must be provided.",
+        )
+
+    # Mode 1: Activity-level forecast
+    if activity_id:
+        target_query = """
+            SELECT
+                activity_id,
+                schedule_id,
+                discipline,
+                planned_start,
+                planned_finish
+            FROM schedule_activities
+            WHERE activity_id = %s
+            ORDER BY schedule_id ASC
+            LIMIT 1
+        """
+        if conn is not None:
+            target_row = conn.execute(target_query, (activity_id,)).fetchone()
+        else:
+            with get_connection() as c:
+                target_row = conn.execute(target_query, (activity_id,)).fetchone()
+
+        if not target_row:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Activity '{activity_id}' not found",
+            )
+
+        act_discipline = str(target_row["discipline"])
+        if discipline and act_discipline.strip().upper() != discipline.strip().upper():
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Activity '{activity_id}' does not match discipline '{discipline}'",
+            )
+
+        planned_dur = _calculate_duration_days(target_row["planned_start"], target_row["planned_finish"])
+        avg_ratio = _calculate_historical_ratio_for_discipline(
+            discipline=act_discipline,
+            target_activity_id=activity_id,
+            conn=conn,
+        )
+
+        if avg_ratio is not None and planned_dur is not None and planned_dur > 0:
+            forecast_dur = int(round(planned_dur * avg_ratio))
+            hist_ratio = round(avg_ratio, 3)
+        else:
+            forecast_dur = None
+            hist_ratio = None
+
+        return {
+            "activity_id": str(target_row["activity_id"]),
+            "discipline": act_discipline,
+            "planned_duration": planned_dur,
+            "historical_ratio": hist_ratio,
+            "forecast_duration": forecast_dur,
+        }
+
+    # Mode 2: Discipline-level forecast
+    disc_norm = discipline.strip().upper()
+    avg_ratio = _calculate_historical_ratio_for_discipline(
+        discipline=disc_norm,
+        conn=conn,
+    )
+
+    activities_query = """
+        SELECT
+            activity_id,
+            schedule_id,
+            discipline,
+            planned_start,
+            planned_finish
+        FROM schedule_activities
+        WHERE UPPER(TRIM(discipline)) = %s
+        ORDER BY activity_id ASC, schedule_id ASC
+    """
+    if conn is not None:
+        rows = conn.execute(activities_query, (disc_norm,)).fetchall()
+    else:
+        with get_connection() as c:
+            rows = c.execute(activities_query, (disc_norm,)).fetchall()
+
+    activities: List[dict] = []
+    hist_ratio = round(avg_ratio, 3) if avg_ratio is not None else None
+
+    for r in rows:
+        p_dur = _calculate_duration_days(r["planned_start"], r["planned_finish"])
+        if avg_ratio is not None and p_dur is not None and p_dur > 0:
+            f_dur = int(round(p_dur * avg_ratio))
+        else:
+            f_dur = None
+
+        activities.append(
+            {
+                "activity_id": str(r["activity_id"]),
+                "discipline": str(r["discipline"]),
+                "planned_duration": p_dur,
+                "historical_ratio": hist_ratio,
+                "forecast_duration": f_dur,
+            }
+        )
+
+    return {
+        "discipline": disc_norm,
+        "historical_ratio": hist_ratio,
+        "activities": activities,
+        "total_activities": len(activities),
+    }
+
+
+@router.get("/forecast")
+def get_forecast(
+    activity_id: Optional[str] = Query(
+        default=None,
+        description="Target activity ID for forecast",
+    ),
+    discipline: Optional[str] = Query(
+        default=None,
+        description="Target discipline for forecast",
+    ),
+    current_user: UserProfile = Depends(require_role("SUPERVISOR")),
+):
+    """
+    Lightweight historical-ratio forecasting.
+    Calculate actual_duration / planned_duration for completed historical activities
+    of the same discipline, and apply that ratio to the target activity.
+    Restricted to SUPERVISOR role.
+    """
+    try:
+        return query_forecast(activity_id=activity_id, discipline=discipline)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("Failed to calculate forecast: %s", e)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to calculate forecast",
+        )
+
+
