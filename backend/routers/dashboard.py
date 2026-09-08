@@ -315,8 +315,7 @@ def query_forecast(
             target_row = conn.execute(target_query, (activity_id,)).fetchone()
         else:
             with get_connection() as c:
-                target_row = conn.execute(target_query, (activity_id,)).fetchone()
-
+                target_row = c.execute(target_query, (activity_id,)).fetchone()
         if not target_row:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
