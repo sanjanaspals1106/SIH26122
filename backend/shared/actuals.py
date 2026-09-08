@@ -359,7 +359,7 @@ def upsert_approved_actual(
     - Honors selected_activity_id from planner_decisions as authoritative.
     - Safely skips write for HOLD and REJECT actions.
     - Commits approved_actuals database transaction before triggering adapters.
-    - Dispatches isolated, non-blocking adapter hook post-commit.
+    - Dispatches isolated, non-blocking auto-export hook post-commit.
     """
     fields_copy = dict(fields)
     external_conn = fields_copy.pop("conn", None)
@@ -379,7 +379,12 @@ def upsert_approved_actual(
         if hasattr(external_conn, "commit"):
             external_conn.commit()
 
-        _dispatch_adapters(result)
+        try:
+            from backend.routers.export import trigger_auto_export
+            trigger_auto_export(conn=external_conn, schedule_id=schedule_id)
+        except Exception as e:
+            logger.warning("Auto-triggered CSV export error (non-blocking): %s", e)
+
         return result
 
     with get_connection() as conn:
@@ -395,5 +400,11 @@ def upsert_approved_actual(
             return None
 
         conn.commit()
-        _dispatch_adapters(result)
+
+        try:
+            from backend.routers.export import trigger_auto_export
+            trigger_auto_export(conn=conn, schedule_id=schedule_id)
+        except Exception as e:
+            logger.warning("Auto-triggered CSV export error (non-blocking): %s", e)
+
         return result

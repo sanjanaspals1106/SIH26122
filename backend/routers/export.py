@@ -1,6 +1,7 @@
 import csv
 import io
 import logging
+import os
 from abc import ABC, abstractmethod
 from datetime import date
 from typing import Any, List, Optional, Union
@@ -118,6 +119,44 @@ class CSVExportAdapter(PMISAdapter):
         """
         return format_csv_rows(self.records)
 
+    def regenerate_from_records(self, records: List[dict]) -> str:
+        """
+        Regenerate the complete CSV from a full dataset of approved actuals.
+        Ensures CSV represents the current state rather than single event appends.
+        """
+        self.records = [
+            {
+                "activity_id": str(r.get("activity_id", "")),
+                "actual_start": r.get("actual_start"),
+                "actual_finish": r.get("actual_finish"),
+                "actual_pct_complete": r.get("actual_pct_complete"),
+                "actual_quantity": r.get("actual_quantity"),
+            }
+            for r in records
+        ]
+        csv_content = self.generate_csv()
+
+        if self.output_file:
+            try:
+                with open(self.output_file, "w", encoding="utf-8", newline="") as f:
+                    f.write(csv_content)
+            except Exception as e:
+                logger.warning(f"Failed to write CSV export to file '{self.output_file}': {e}")
+                raise
+
+        return csv_content
+
+    def regenerate_from_db(
+        self,
+        conn: Optional[Any] = None,
+        schedule_id: Optional[str] = None,
+    ) -> str:
+        """
+        Query current approved_actuals from DB and regenerate the CSV export.
+        """
+        rows = query_approved_actuals_for_export(conn=conn, schedule_id=schedule_id)
+        return self.regenerate_from_records(rows)
+
 
 def query_approved_actuals_for_export(
     conn: Optional[Any] = None,
@@ -150,6 +189,35 @@ def query_approved_actuals_for_export(
     with get_connection() as c:
         rows = c.execute(query, tuple(params) if params else None).fetchall()
         return [dict(r) for r in rows]
+
+
+_default_csv_adapter: Optional[CSVExportAdapter] = None
+
+
+def get_default_csv_adapter() -> CSVExportAdapter:
+    global _default_csv_adapter
+    if _default_csv_adapter is None:
+        export_path = os.getenv("EXPORT_CSV_PATH")
+        _default_csv_adapter = CSVExportAdapter(output_file=export_path)
+    return _default_csv_adapter
+
+
+def set_default_csv_adapter(adapter: Optional[CSVExportAdapter]) -> None:
+    global _default_csv_adapter
+    _default_csv_adapter = adapter
+
+
+def trigger_auto_export(
+    conn: Optional[Any] = None,
+    schedule_id: Optional[str] = None,
+    adapter: Optional[CSVExportAdapter] = None,
+) -> str:
+    """
+    Auto-triggered CSV export executed post-commit per Feature #26.
+    Uses the complete current approved_actuals dataset.
+    """
+    active_adapter = adapter or get_default_csv_adapter()
+    return active_adapter.regenerate_from_db(conn=conn, schedule_id=schedule_id)
 
 
 @router.get("/health")
