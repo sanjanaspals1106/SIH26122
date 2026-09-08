@@ -11,7 +11,7 @@ from typing import Optional
 from pydantic import BaseModel, Field
 
 
-# ---------- Shared enums (used across M2/M3/M4/M5/M6) ----------
+# ---------- shared enums (used across M2/M3/M4) ----------
 
 class Discipline(str, Enum):
     CIVIL = "CIVIL"
@@ -58,7 +58,7 @@ class UploadPurpose(str, Enum):
     SCANNED_DIARY = "SCANNED_DIARY"
 
 
-# ---------- M2: extraction output shape (LLM strict JSON contract) ----------
+# ---------- M2: extraction output shape (this is the LLM's strict JSON contract) ----------
 
 class ExtractedClaimFields(BaseModel):
     """Exact shape the LLM must return. Missing/malformed fields -> null, never crash."""
@@ -77,13 +77,14 @@ class ExtractedClaimFields(BaseModel):
     language_detected: Optional[str] = None
 
 
-# ---------- M2: request/response models for intake endpoints ----------
+# ---------- M2: request/response models for the intake endpoints ----------
 
 class TextClaimRequest(BaseModel):
     """
     Per PRD v5 Section 6.2: "User identity must never be accepted as a
-    free-form request-body field." uploader_id/supervisor_id are derived from
-    the authenticated user (require_role("SITE_ENGINEER") -> CurrentUser.id).
+    free-form request-body field." uploader_id/supervisor_id no longer come
+    from the client — the router derives them from the authenticated user
+    (require_role("SITE_ENGINEER") -> CurrentUser.id) instead.
     """
     raw_claim_text: str
     input_channel: InputChannel = InputChannel.TYPED_TEXT
@@ -114,103 +115,3 @@ class ClaimResponse(BaseModel):
     photo_path: Optional[str] = None
     status: str
     created_at: datetime
-
-
-# ---------- M1: Schedule Ingestion ----------
-
-class ScheduleActivity(BaseModel):
-    schedule_id: str
-    activity_id: str
-    activity_name: str
-    wbs_code: Optional[str] = None
-    discipline: str
-    location: str
-    asset_tag: Optional[str] = None
-    planned_start: date
-    planned_finish: date
-    planned_quantity: Optional[float] = None
-    uom: Optional[str] = None
-    baseline_pct_complete: float = Field(default=0.0, ge=0.0, le=100.0)
-
-
-class ExecutionClaim(BaseModel):
-    event_id: str
-    schedule_id: str
-    event_date: date
-    raw_claim_text: str
-    input_channel: str
-    language_detected: Optional[str] = None
-    reported_activity_id: Optional[str] = None
-    discipline: Optional[str] = None
-    action: Optional[str] = None
-    event_type: Optional[str] = None
-    claim_mode: str = "CUMULATIVE_PCT"
-    asset_tag: Optional[str] = None
-    location: Optional[str] = None
-    claimed_quantity: Optional[float] = None
-    claimed_uom: Optional[str] = None
-    claimed_pct: Optional[float] = Field(default=None, ge=0.0, le=100.0)
-    delay_reason: Optional[str] = None
-    supervisor_id: Optional[str] = None
-    photo_path: Optional[str] = None
-
-
-# ---------- M3: Matching Engine ----------
-
-class CandidateMatch(BaseModel):
-    candidate_id: str
-    event_id: str
-    schedule_id: str
-    activity_id: str
-    rank_order: int = Field(ge=1, le=3)
-    match_tier: Optional[str] = None
-    composite_confidence: float = Field(ge=0.0, le=1.0)
-    semantic_score: Optional[float] = None
-    fuzzy_score: Optional[float] = None
-    location_score: Optional[float] = None
-    discipline_score: Optional[float] = None
-    supporting_signals: Optional[str] = None
-    disqualifying_signals: Optional[str] = None
-
-
-# ---------- M4: Validation Issues ----------
-
-class ValidationIssue(BaseModel):
-    issue_id: str
-    event_id: str
-    rule_code: Optional[str] = None
-    severity: Optional[str] = None
-    description: str
-
-
-# ---------- M5: Planner Decisions ----------
-
-class PlannerDecision(BaseModel):
-    decision_id: str
-    event_id: str
-    selected_activity_id: str
-    action: Optional[str] = None
-    approved_pct: Optional[float] = Field(default=None, ge=0.0, le=100.0)
-    approved_qty: Optional[float] = None
-    planner_id: str
-    justification: str
-    decided_at: Optional[datetime] = None
-
-
-# ---------- M6: Approved Actuals ----------
-
-class ApprovedActual(BaseModel):
-    actual_id: str
-    decision_id: str
-    event_id: str
-    schedule_id: str
-    activity_id: str
-    actual_start: Optional[date] = None
-    actual_finish: Optional[date] = None
-    actual_pct_complete: Optional[float] = Field(
-        default=None,
-        ge=0.0,
-        le=100.0,
-    )
-    actual_quantity: Optional[float] = None
-    exported_at: Optional[datetime] = None

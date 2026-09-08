@@ -7,20 +7,25 @@
 # implementation (per the doc's "nobody blocks on someone else finishing —
 # build against mocked data" rule).
 #
-# When M6's real shared/auth.py is ready, this will be updated to verify
-# the actual Supabase JWT and look up `profiles` from the live Supabase
-# Postgres connection.
+# DELETE THIS FILE and replace it with M6's real shared/auth.py the moment
+# it's pushed. Do not merge this stub into main as the final version — the
+# real one needs to verify the actual Supabase JWT and look up `profiles`
+# from the live Supabase Postgres connection, which this stub does not do
+# correctly/securely.
 ################################################################################
 
 Two modes, controlled by AUTH_DEV_MODE in .env:
 
   AUTH_DEV_MODE=true   -> bypasses real JWT verification entirely. Reads
-                          X-Dev-User-Id / X-Dev-Role headers (or dev bearer token)
-                          instead, so M2 can hit the API directly (e.g. via /docs or curl)
+                          X-Dev-User-Id / X-Dev-Role headers instead, so M2
+                          can hit the API directly (e.g. via /docs or curl)
                           without a real Supabase login flow set up yet.
 
   AUTH_DEV_MODE=false  -> attempts real Supabase JWT verification using
-                          SUPABASE_JWT_SECRET (HS256).
+                          SUPABASE_JWT_SECRET (HS256). This is the closer-
+                          to-real path, but still not what M6's final
+                          version should look like — M6 owns the real
+                          profiles lookup and role-check logic.
 """
 import os
 import uuid
@@ -47,21 +52,6 @@ def get_current_user(
     x_dev_full_name: str = Header(default="Dev User"),
 ) -> CurrentUser:
     if AUTH_DEV_MODE:
-        if x_dev_user_id and x_dev_role:
-            if x_dev_role not in ("SITE_ENGINEER", "SUPERVISOR"):
-                raise HTTPException(status_code=400, detail="X-Dev-Role must be SITE_ENGINEER or SUPERVISOR")
-            return CurrentUser(id=x_dev_user_id, full_name=x_dev_full_name, role=x_dev_role)
-
-        # Allow simple Bearer token shortcuts in dev mode: e.g. "Bearer SITE_ENGINEER"
-        if authorization and authorization.startswith("Bearer "):
-            token = authorization.removeprefix("Bearer ").strip()
-            if token.upper() in ("SITE_ENGINEER", "SUPERVISOR"):
-                return CurrentUser(
-                    id=f"00000000-0000-0000-0000-{token.lower()[:12].ljust(12, '0')}",
-                    full_name=f"Dev {token.title()}",
-                    role=token.upper(),
-                )
-
         if not x_dev_user_id or not x_dev_role:
             raise HTTPException(
                 status_code=401,
@@ -71,8 +61,12 @@ def get_current_user(
                     "logged-in user until the real auth module lands."
                 ),
             )
+        if x_dev_role not in ("SITE_ENGINEER", "SUPERVISOR"):
+            raise HTTPException(status_code=400, detail="X-Dev-Role must be SITE_ENGINEER or SUPERVISOR")
+        return CurrentUser(id=x_dev_user_id, full_name=x_dev_full_name, role=x_dev_role)
 
-    # Non-dev path: verify a real Supabase JWT.
+    # Non-dev path: verify a real Supabase JWT. Still a stub — does not look
+    # up `profiles` from the DB, just trusts claims embedded in the token.
     if not authorization or not authorization.startswith("Bearer "):
         raise HTTPException(status_code=401, detail="Missing Authorization header")
     token = authorization.removeprefix("Bearer ").strip()

@@ -1,68 +1,47 @@
 """
 Shared DB connection — Supabase Postgres, direct connection (PRD v5,
-"Database connection method").
+"Database connection method"). Every router imports get_db() from here
+rather than opening its own connection.
 
-Provides both:
-- `get_connection()`: Context manager / direct connection for backend modules.
-- `get_db()`: FastAPI dependency yielding connection.
-- `init_db()`: Initializer executing schema.sql.
+ASSUMPTION FLAGGED FOR THE TEAM: the doc says "pick exactly one of asyncpg /
+psycopg2 / SQLAlchemy Core, agreed once in team chat." This file uses
+psycopg2 (sync, dict-cursor) because it's the smallest change from the
+sqlite3 code this replaces. If the team agrees on asyncpg or SQLAlchemy
+instead, this file needs to change for everyone, not just M2 — raise it
+before merging.
+
+supabase-py is NOT used here for table access, per the doc: it's reserved
+for auth only. This connects straight to Postgres with the service-role
+connection string.
 """
 import os
+import psycopg2
+import psycopg2.extras
 from pathlib import Path
-from dotenv import load_dotenv
 
-BASE_DIR = Path(__file__).resolve().parents[2]
-load_dotenv(BASE_DIR / ".env")
-load_dotenv(BASE_DIR / "backend" / ".env")
+DATABASE_URL = os.environ["DATABASE_URL"]  # Supabase connection string, service role
+SCHEMA_PATH = Path(__file__).resolve().parents[1] / "models" / "schema.sql"
 
 
-def get_database_url() -> str:
-    url = os.getenv("DATABASE_URL")
-    if not url:
-        raise RuntimeError(
-            "DATABASE_URL is not configured. "
-            "Add it to the project .env file."
-        )
-    return url
+def get_conn():
+    conn = psycopg2.connect(DATABASE_URL, cursor_factory=psycopg2.extras.RealDictCursor)
+    return conn
 
 
-def get_connection():
-    """
-    Returns a connection with dictionary-like row access.
-    Prefers psycopg (v3) with dict_row, falls back to psycopg2 RealDictCursor.
-    """
-    url = get_database_url()
-    try:
-        import psycopg
-        from psycopg.rows import dict_row
-        return psycopg.connect(url, row_factory=dict_row)
-    except ImportError:
-        import psycopg2
-        import psycopg2.extras
-        return psycopg2.connect(url, cursor_factory=psycopg2.extras.RealDictCursor)
+def init_db():
+    """Run once at startup: creates all tables if they don't exist yet."""
+    conn = get_conn()
+    with open(SCHEMA_PATH, "r") as f:
+        with conn.cursor() as cur:
+            cur.execute(f.read())
+    conn.commit()
+    conn.close()
 
 
 def get_db():
     """FastAPI dependency — yields a connection, closes it after the request."""
-    conn = get_connection()
+    conn = get_conn()
     try:
         yield conn
     finally:
         conn.close()
-
-
-def init_db() -> None:
-    """Run once at startup: creates all tables if they don't exist yet."""
-    try:
-        url = get_database_url()
-    except RuntimeError:
-        print("[db] DATABASE_URL not set; skipping init_db()")
-        return
-
-    schema_path = BASE_DIR / "backend" / "models" / "schema.sql"
-    schema = schema_path.read_text()
-
-    with get_connection() as conn:
-        with conn.cursor() as cur:
-            cur.execute(schema)
-        conn.commit()

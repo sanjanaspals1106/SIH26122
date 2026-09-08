@@ -1,9 +1,10 @@
 """
 M2's extraction engine. Takes raw claim text (any language, any messiness)
 and returns a validated ExtractedClaimFields object. Used by every intake
-path (text, voice, file, scanned-diary-after-OCR).
+path (text, voice, file, scanned-diary-after-OCR) — build and test this once,
+in isolation, before wiring it into any endpoint.
 
-PRD v5: default provider is Groq's free tier (OpenAI-compatible
+PRD v5 change: default provider is Groq's free tier (OpenAI-compatible
 endpoint), not paid OpenAI. Gemini free tier is the documented fallback,
 also reachable via an OpenAI-compatible endpoint, so both providers use the
 exact same `openai` SDK client code — only base_url/api_key/model differ.
@@ -11,12 +12,11 @@ Switch providers with the LLM_PROVIDER env var, no code change needed.
 """
 import json
 import os
-from typing import Optional
 from openai import OpenAI
 
-from backend.shared.schemas import ClaimMode, ExtractedClaimFields
+from backend.shared.schemas import ExtractedClaimFields
 
-_client: Optional[OpenAI] = None
+_client = None
 
 _PROVIDER_BASE_URLS = {
     "groq": "https://api.groq.com/openai/v1",
@@ -29,17 +29,14 @@ _PROVIDER_DEFAULT_MODELS = {
 }
 
 
-def _get_client() -> Optional[OpenAI]:
+def _get_client() -> OpenAI:
     global _client
-    api_key = os.environ.get("LLM_API_KEY")
-    if not api_key:
-        return None
     if _client is None:
         provider = os.environ.get("LLM_PROVIDER", "groq").lower()
         base_url = _PROVIDER_BASE_URLS.get(provider)
         if base_url is None:
             raise ValueError(f"Unknown LLM_PROVIDER '{provider}' — expected 'groq' or 'gemini'")
-        _client = OpenAI(api_key=api_key, base_url=base_url)
+        _client = OpenAI(api_key=os.environ["LLM_API_KEY"], base_url=base_url)
     return _client
 
 
@@ -101,10 +98,6 @@ def extract_claim_fields(raw_text: str) -> ExtractedClaimFields:
     """
     try:
         client = _get_client()
-        if not client:
-            print("[llm_extraction] LLM_API_KEY not configured, falling back to basic defaults")
-            return ExtractedClaimFields(action=raw_text.strip()[:150] if raw_text else None)
-
         response = client.chat.completions.create(
             model=_get_model(),
             messages=[
@@ -114,18 +107,13 @@ def extract_claim_fields(raw_text: str) -> ExtractedClaimFields:
             response_format={"type": "json_object"},
             temperature=0,
         )
-        raw = response.choices[0].message.content or "{}"
+        raw = response.choices[0].message.content
         data = json.loads(raw)
-        result = ExtractedClaimFields(**data)
-
-        # Enforce mutual exclusivity invariant
-        if result.claim_mode == ClaimMode.CUMULATIVE_PCT:
-            result.claimed_quantity = None
-            result.claimed_uom = None
-        elif result.claim_mode == ClaimMode.INCREMENTAL_QUANTITY:
-            result.claimed_pct = None
-
-        return result
+        return ExtractedClaimFields(**data)
     except Exception as e:
+        # Extraction failure (network error, bad key, malformed JSON, etc.)
+        # -> still return a valid (mostly-null) object rather than raising.
+        # The claim still gets created at EXTRACTED status; a human will see
+        # blank fields in the review workspace rather than the claim vanishing.
         print(f"[llm_extraction] extraction failed, falling back to nulls: {e}")
-        return ExtractedClaimFields(action=raw_text.strip()[:150] if raw_text else None)
+        return ExtractedClaimFields()
