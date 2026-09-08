@@ -1,7 +1,20 @@
 from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 
-from backend.routers import checks, decisions, export, intake, matching, schedules
+from backend.routers import (
+    schedules,
+    intake,
+    matching,
+    checks,
+    decisions,
+    export,
+    auth,
+    dashboard,
+    activities,
+    schedule_ll,
+    mock_p6,
+)
 from backend.shared.db import init_db
 
 
@@ -32,4 +45,8 @@ app.include_router(matching.router)
 app.include_router(checks.router)
 app.include_router(decisions.router)
 app.include_router(export.router)
-
+app.include_router(auth.router)
+app.include_router(dashboard.router)
+app.include_router(activities.router)
+app.include_router(schedule_ll.router)
+app.include_router(mock_p6.router)

@@ -3,6 +3,9 @@ uvicorn[standard]
 pydantic>=2.0
 python-dotenv
 
+# Auth / JWT
+PyJWT
+
 # M4 (evidence/checks)
 Pillow
 exifread
@@ -22,7 +25,6 @@ psycopg2-binary
 psycopg[binary]
 
 # Auth (Supabase Auth; supabase-py used for auth only, not table access)
-pyjwt
 supabase
 
 # M1 (schedule ingestion)
