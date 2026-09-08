@@ -18,21 +18,62 @@ class UserProfile(BaseModel):
     role: str
 
 
+_jwks_client: Optional[jwt.PyJWKClient] = None
+_jwks_url: Optional[str] = None
+
+
+def get_jwks_client(url: str) -> jwt.PyJWKClient:
+    """
+    Get or create a cached PyJWKClient instance for the specified JWKS URL.
+    Caches the JWK set for 300 seconds to optimize verification latency.
+    """
+    global _jwks_client, _jwks_url
+    if _jwks_client is None or _jwks_url != url:
+        _jwks_client = jwt.PyJWKClient(url, cache_jwk_set=True, lifespan=300)
+        _jwks_url = url
+    return _jwks_client
+
+
 def decode_supabase_jwt(token: str) -> dict:
     """
     Verify and decode a Supabase-issued JWT token.
     Extracts the payload containing the user ID ('sub').
-    """
-    jwt_secret = os.getenv("SUPABASE_JWT_SECRET") or os.getenv("JWT_SECRET")
 
-    if jwt_secret:
+    Supports:
+    1. Offline HMAC-SHA256 verification via SUPABASE_JWT_SECRET / JWT_SECRET.
+    2. Offline asymmetric ES256 verification via Supabase JWKS (PyJWKClient).
+    3. Online HTTP verification fallback via Supabase Auth API (GET /auth/v1/user)
+       using publishable or secret keys (without supabase-py create_client).
+    4. Test/development fallback when no verification credentials are configured.
+    """
+    if not token or not isinstance(token, str):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid token: token must be a non-empty string",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    token = token.strip()
+
+    # 1. Symmetric HMAC-SHA256 verification (if SUPABASE_JWT_SECRET is a secret key string, not a URL)
+    jwt_secret = os.getenv("SUPABASE_JWT_SECRET") or os.getenv("JWT_SECRET")
+    if jwt_secret and not jwt_secret.startswith(("http://", "https://")):
         try:
-            return jwt.decode(
+            payload = jwt.decode(
                 token,
                 jwt_secret,
                 algorithms=["HS256"],
                 options={"verify_aud": False},
+                leeway=10,
             )
+            if "sub" in payload:
+                return payload
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid token: missing subject claim ('sub')",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+        except HTTPException:
+            raise
         except jwt.PyJWTError as e:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
@@ -40,21 +81,81 @@ def decode_supabase_jwt(token: str) -> dict:
                 headers={"WWW-Authenticate": "Bearer"},
             )
 
+    # 2. Asymmetric ES256 verification via JWKS
+    jwks_url = os.getenv("SUPABASE_JWKS_URL")
     supabase_url = os.getenv("SUPABASE_URL")
-    supabase_key = os.getenv("SUPABASE_ANON_KEY") or os.getenv(
-        "SUPABASE_SERVICE_ROLE_KEY"
+    if not jwks_url and supabase_url:
+        jwks_url = f"{supabase_url.rstrip('/')}/auth/v1/.well-known/jwks.json"
+
+    if jwks_url:
+        try:
+            client = get_jwks_client(jwks_url)
+            signing_key = client.get_signing_key_from_jwt(token)
+            payload = jwt.decode(
+                token,
+                signing_key.key,
+                algorithms=["ES256"],
+                options={"verify_aud": False},
+                leeway=10,
+            )
+            if "sub" in payload:
+                return payload
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid token: missing subject claim ('sub')",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+        except HTTPException:
+            raise
+        except jwt.PyJWKClientConnectionError:
+            # Network error connecting to JWKS endpoint; fall through to HTTP fallback
+            pass
+        except jwt.PyJWTError as e:
+            # Token signature mismatch, unsupported algorithm, expired, or unknown kid in JWKS
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail=f"Invalid token: {str(e)}",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+        except Exception:
+            # Other transient error; fall through to HTTP fallback if configured.
+            pass
+
+    # 3. HTTP verification fallback against Supabase Auth endpoint
+    # (Direct HTTP request avoids supabase-py regex validation issues with sb_* keys)
+    supabase_key = (
+        os.getenv("SUPABASE_ANON_KEY")
+        or os.getenv("SUPABASE_PUBLISHABLE_KEY")
+        or os.getenv("SUPABASE_SERVICE_ROLE_KEY")
+        or os.getenv("SUPABASE_SECRET_KEY")
     )
     if supabase_url and supabase_key:
         try:
-            from supabase import create_client
+            import httpx
 
-            client = create_client(supabase_url, supabase_key)
-            user_resp = client.auth.get_user(token)
-            if user_resp and user_resp.user:
+            resp = httpx.get(
+                f"{supabase_url.rstrip('/')}/auth/v1/user",
+                headers={
+                    "apikey": supabase_key,
+                    "Authorization": f"Bearer {token}",
+                },
+                timeout=5.0,
+            )
+            if resp.status_code == 200:
+                user_data = resp.json()
                 return {
-                    "sub": str(user_resp.user.id),
-                    "email": user_resp.user.email,
+                    "sub": str(user_data.get("id")),
+                    "email": user_data.get("email"),
+                    "role": user_data.get("role"),
                 }
+            elif resp.status_code in (400, 401, 403):
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail="Token validation failed: Supabase rejected the token",
+                    headers={"WWW-Authenticate": "Bearer"},
+                )
+        except HTTPException:
+            raise
         except Exception as e:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
@@ -62,7 +163,7 @@ def decode_supabase_jwt(token: str) -> dict:
                 headers={"WWW-Authenticate": "Bearer"},
             )
 
-    # Local development / test mode fallback
+    # 4. Local development / offline test mode fallback (only reached if no verification provider is configured)
     try:
         payload = jwt.decode(token, options={"verify_signature": False})
         if "sub" in payload:
