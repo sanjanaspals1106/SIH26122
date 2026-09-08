@@ -7,6 +7,7 @@ openai          # also used for Groq/Gemini via their OpenAI-compatible endpoint
 
 # Database (PRD v5: Supabase Postgres, direct connection)
 psycopg2-binary
+psycopg[binary]
 
 # Auth (Supabase Auth; supabase-py used for auth only, not table access)
 pyjwt
