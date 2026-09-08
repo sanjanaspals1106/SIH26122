@@ -1,9 +1,8 @@
 import hashlib
 import json
-from typing import Any, Optional
+from typing import Any, Dict, Optional
 
 from backend.shared.db import get_connection
-
 
 GENESIS_HASH = "0" * 64
 
@@ -43,10 +42,10 @@ def compute_hash(
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
-def payload_hash(payload: Any) -> str:
-    return hashlib.sha256(
-        canonical_json(payload).encode("utf-8")
-    ).hexdigest()
+def payload_hash(before_state: Optional[Any], after_state: Optional[Any]) -> str:
+    before_str = canonical_json(before_state) if before_state is not None else ""
+    after_str = canonical_json(after_state) if after_state is not None else ""
+    return hashlib.sha256((before_str + after_str).encode("utf-8")).hexdigest()
 
 
 def get_previous_hash() -> str:
@@ -70,57 +69,97 @@ def write_audit_log(
     actor_id: str,
     before_state: Optional[Any],
     after_state: Optional[Any],
-    payload: Any,
+    payload: Any = None,
 ) -> int:
-    previous_hash = get_previous_hash()
-    current_payload_hash = payload_hash(payload)
-
-    current_hash = compute_hash(
-        entity_type=entity_type,
-        entity_id=entity_id,
-        action=action,
-        actor_id=actor_id,
-        before_state=before_state,
-        after_state=after_state,
-        payload_hash=current_payload_hash,
-        previous_hash=previous_hash,
-    )
+    current_payload_hash = payload_hash(before_state, after_state)
 
     with get_connection() as conn:
-        cursor = conn.execute(
-            """
-            INSERT INTO audit_logs (
-                entity_type,
-                entity_id,
-                action,
-                actor_id,
-                before_state,
-                after_state,
-                payload_hash,
-                previous_hash,
-                current_hash
+        with conn.transaction():
+            cursor = conn.execute(
+                """
+                SELECT current_hash
+                FROM audit_logs
+                ORDER BY log_id DESC
+                LIMIT 1
+                FOR UPDATE
+                """
             )
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
-            RETURNING log_id
+            row = cursor.fetchone()
+            previous_hash = row["current_hash"] if row else GENESIS_HASH
+
+            current_hash = compute_hash(
+                entity_type=entity_type,
+                entity_id=entity_id,
+                action=action,
+                actor_id=actor_id,
+                before_state=before_state,
+                after_state=after_state,
+                payload_hash=current_payload_hash,
+                previous_hash=previous_hash,
+            )
+
+            cursor = conn.execute(
+                """
+                INSERT INTO audit_logs (
+                    entity_type,
+                    entity_id,
+                    action,
+                    actor_id,
+                    before_state,
+                    after_state,
+                    payload_hash,
+                    previous_hash,
+                    current_hash
+                )
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                RETURNING log_id
+                """,
+                (
+                    entity_type,
+                    entity_id,
+                    action,
+                    actor_id,
+                    canonical_json(before_state)
+                    if before_state is not None
+                    else None,
+                    canonical_json(after_state)
+                    if after_state is not None
+                    else None,
+                    current_payload_hash,
+                    previous_hash,
+                    current_hash,
+                ),
+            )
+
+            row = cursor.fetchone()
+            return row["log_id"]
+
+
+def get_audit_trail(entity_id: str) -> Dict[str, Any]:
+    with get_connection() as conn:
+        rows = conn.execute(
+            """
+            SELECT * FROM audit_logs
+            WHERE entity_id = %s
+            ORDER BY log_id ASC
             """,
-            (
-                entity_type,
-                entity_id,
-                action,
-                actor_id,
-                canonical_json(before_state)
-                if before_state is not None
-                else None,
-                canonical_json(after_state)
-                if after_state is not None
-                else None,
-                current_payload_hash,
-                previous_hash,
-                current_hash,
-            ),
-        )
+            (entity_id,),
+        ).fetchall()
 
-        row = cursor.fetchone()
-        conn.commit()
+        logs = [dict(r) for r in rows]
+        is_valid = True
+        for i, log in enumerate(logs):
+            before_str = log["before_state"] or ""
+            after_str = log["after_state"] or ""
+            expected_payload_hash = hashlib.sha256(
+                (before_str + after_str).encode("utf-8")
+            ).hexdigest()
+            if log["payload_hash"] != expected_payload_hash:
+                is_valid = False
+                break
 
-        return row["log_id"]
+        return {
+            "entity_id": entity_id,
+            "chain_valid": is_valid,
+            "logs": logs,
+        }
