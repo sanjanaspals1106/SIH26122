@@ -4,6 +4,13 @@ from typing import Optional
 from pydantic import BaseModel, Field
 
 
+class Schedule(BaseModel):
+    schedule_id: str
+    project_name: str
+    data_date: Optional[date] = None
+    source_format: Optional[str] = None
+
+
 class ScheduleActivity(BaseModel):
     schedule_id: str
     activity_id: str
@@ -17,6 +24,14 @@ class ScheduleActivity(BaseModel):
     planned_quantity: Optional[float] = None
     uom: Optional[str] = None
     baseline_pct_complete: float = Field(default=0.0, ge=0.0, le=100.0)
+
+
+class ScheduleDependency(BaseModel):
+    dependency_id: str
+    schedule_id: str
+    predecessor_activity_id: str
+    successor_activity_id: str
+    relationship_type: str = "FS"
 
 
 class ExecutionClaim(BaseModel):
