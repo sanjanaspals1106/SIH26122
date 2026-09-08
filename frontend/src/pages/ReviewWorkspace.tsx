@@ -170,13 +170,13 @@ export default function ReviewWorkspace() {
       </div>
 
       {decisionSuccess && (
-        <div className="p-6 rounded-2xl bg-emerald-500/15 border border-emerald-500/40 text-emerald-800 dark:text-emerald-200 space-y-3">
+        <div className="p-6 rounded-2xl bg-emerald-500/15 border border-emerald-500/40 text-emerald-900 dark:text-emerald-200 space-y-3">
           <div className="flex items-center gap-3">
             <CheckCircle2 className="w-6 h-6 text-emerald-600 dark:text-emerald-400 shrink-0" />
             <div>
               <h3 className="font-bold text-base">Supervisor Decision Committed</h3>
-              <p className="text-xs">
-                Claim <span className="font-mono font-bold">{event.event_id}</span> action <span className="font-mono font-bold uppercase">{action}</span> has been logged to the immutable audit trail.
+              <p className="text-xs text-emerald-800 dark:text-emerald-300">
+                Claim <span className="font-mono font-bold text-emerald-950 dark:text-white">{event.event_id}</span> action <span className="font-mono font-bold uppercase text-emerald-950 dark:text-white">{action}</span> has been logged to the immutable audit trail.
               </p>
             </div>
           </div>

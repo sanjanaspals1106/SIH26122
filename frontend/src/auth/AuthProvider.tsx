@@ -1,4 +1,6 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
+import { supabase, isSupabaseConfigured } from '@/lib/supabase';
+import { authApi } from '@/api';
 
 export type UserRole = 'SITE_ENGINEER' | 'SUPERVISOR';
 
@@ -15,39 +17,48 @@ interface AuthContextType {
   loading: boolean;
   isLoading: boolean;
   error: string | null;
+  devMode: boolean;
   login: (email: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
   clearError: () => void;
 }
 
-const MOCK_ACCOUNTS: Record<string, { password: string; full_name: string; role: UserRole; id: string }> = {
-  'planner@setu.ai': {
-    password: 'demo123',
-    full_name: 'Rajesh Kumar (Lead Planner)',
-    role: 'SUPERVISOR',
-    id: 'usr-supervisor-01',
-  },
-  'engineer@setu.ai': {
-    password: 'demo123',
-    full_name: 'Vikram Sharma (Site Engineer)',
-    role: 'SITE_ENGINEER',
-    id: 'usr-engineer-01',
-  },
-  'supervisor@setu.in': {
-    password: 'supervisor123',
-    full_name: 'Project Supervisor',
-    role: 'SUPERVISOR',
-    id: 'usr-supervisor-02',
-  },
-  'engineer@setu.in': {
-    password: 'engineer123',
-    full_name: 'Site Engineer',
-    role: 'SITE_ENGINEER',
-    id: 'usr-engineer-02',
-  },
+const TOKEN_KEY = 'supabase_access_token';
+const DEV_EMAIL_KEY = 'setu_dev_email_v1';
+
+// Local dev-mode fallback, used only when VITE_SUPABASE_URL/ANON_KEY aren't
+// configured (see lib/supabase.ts). These ids are the same fixed
+// TEST_SITE_ENGINEER_ID/TEST_SUPERVISOR_ID backend/shared/seed.py seeds
+// into the real `profiles` table for local/test environments -- login here
+// mints an unsigned dev token carrying one of these as its `sub` claim and
+// hands it to the real backend, which resolves the actual role from that
+// profiles row via shared/auth.py's explicit AUTH_DEV_MODE fallback. This
+// is not a UI-only fake: it round-trips through the real backend and its
+// real database, so a misconfigured/missing profile genuinely fails.
+const DEV_MODE_ACCOUNTS: Record<string, { password: string; id: string }> = {
+  'site.engineer@sih26122.internal': { password: 'Demo123456!', id: '811a1e0f-976d-42ea-a37f-1096186daf36' },
+  'supervisor@sih26122.internal': { password: 'Demo123456!', id: '4b8e6901-de81-490c-8bec-9761f62bee70' },
+  'engineer@setu.ai': { password: 'Demo123456!', id: '811a1e0f-976d-42ea-a37f-1096186daf36' },
+  'planner@setu.ai': { password: 'Demo123456!', id: '4b8e6901-de81-490c-8bec-9761f62bee70' },
 };
 
-const SESSION_KEY = 'setu_session_v1';
+function base64UrlEncode(obj: unknown): string {
+  const json = JSON.stringify(obj);
+  const b64 = btoa(unescape(encodeURIComponent(json)));
+  return b64.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+
+// An unsigned JWT-shaped token: three dot-separated segments so PyJWT's
+// jwt.decode(..., options={"verify_signature": False}) on the backend can
+// parse it structurally. It carries no real signature -- backend/shared/
+// auth.py only accepts this path when AUTH_DEV_MODE=true AND no real
+// Supabase verification config is present; every other path (JWKS, HMAC
+// secret, live Supabase HTTP check) rejects it outright.
+function mintDevToken(userId: string): string {
+  const header = base64UrlEncode({ alg: 'none', typ: 'JWT' });
+  const payload = base64UrlEncode({ sub: userId, iat: Math.floor(Date.now() / 1000) });
+  return `${header}.${payload}.`;
+}
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
@@ -56,70 +67,121 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    try {
-      const saved = localStorage.getItem(SESSION_KEY);
-      if (saved) {
-        const parsed = JSON.parse(saved) as User;
-        setUser(parsed);
-      }
-    } catch {
-      localStorage.removeItem(SESSION_KEY);
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
   const clearError = () => setError(null);
+
+  // Resolves the authenticated role/profile from the REAL backend --
+  // never trusted from anything set client-side, in either auth mode.
+  const hydrateFromBackend = async (email: string): Promise<User> => {
+    const profile = await authApi.getMe();
+    return {
+      id: profile.id,
+      email,
+      full_name: profile.full_name,
+      role: profile.role,
+    };
+  };
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const restoreSession = async () => {
+      try {
+        if (isSupabaseConfigured && supabase) {
+          const { data } = await supabase.auth.getSession();
+          const session = data.session;
+          if (session?.access_token) {
+            localStorage.setItem(TOKEN_KEY, session.access_token);
+            const restored = await hydrateFromBackend(session.user?.email ?? '');
+            if (!cancelled) setUser(restored);
+          }
+        } else {
+          const token = localStorage.getItem(TOKEN_KEY);
+          const email = localStorage.getItem(DEV_EMAIL_KEY);
+          if (token && email) {
+            const restored = await hydrateFromBackend(email);
+            if (!cancelled) setUser(restored);
+          }
+        }
+      } catch {
+        // Stale/invalid token -- clear it and fall through to the login screen
+        // rather than getting stuck on a broken session.
+        localStorage.removeItem(TOKEN_KEY);
+        localStorage.removeItem(DEV_EMAIL_KEY);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    };
+
+    restoreSession();
+
+    if (isSupabaseConfigured && supabase) {
+      const { data: subscription } = supabase.auth.onAuthStateChange((_event, session) => {
+        if (session?.access_token) {
+          localStorage.setItem(TOKEN_KEY, session.access_token);
+        } else {
+          localStorage.removeItem(TOKEN_KEY);
+          setUser(null);
+        }
+      });
+      return () => {
+        cancelled = true;
+        subscription.subscription.unsubscribe();
+      };
+    }
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const login = async (email: string, password: string): Promise<void> => {
     setError(null);
     setLoading(true);
-
     const emailTrimmed = email.trim().toLowerCase();
 
-    // Latency
-    await new Promise((r) => setTimeout(r, 600));
-
-    const account = MOCK_ACCOUNTS[emailTrimmed];
-
-    if (account) {
-      if (account.password !== password && password !== 'demo123') {
-        setError('Incorrect password. Please try again.');
-        setLoading(false);
-        throw new Error('Incorrect password.');
+    try {
+      if (isSupabaseConfigured && supabase) {
+        const { data, error: authError } = await supabase.auth.signInWithPassword({
+          email: emailTrimmed,
+          password,
+        });
+        if (authError || !data.session) {
+          throw new Error(authError?.message || 'Sign-in failed.');
+        }
+        localStorage.setItem(TOKEN_KEY, data.session.access_token);
+        const loggedInUser = await hydrateFromBackend(data.session.user?.email ?? emailTrimmed);
+        setUser(loggedInUser);
+        return;
       }
 
-      const loggedInUser: User = {
-        id: account.id,
-        email: emailTrimmed,
-        full_name: account.full_name,
-        role: account.role,
-      };
-
+      // Dev-mode fallback (no Supabase project configured).
+      const account = DEV_MODE_ACCOUNTS[emailTrimmed];
+      if (!account || account.password !== password) {
+        throw new Error('Incorrect email or password.');
+      }
+      const devToken = mintDevToken(account.id);
+      localStorage.setItem(TOKEN_KEY, devToken);
+      localStorage.setItem(DEV_EMAIL_KEY, emailTrimmed);
+      const loggedInUser = await hydrateFromBackend(emailTrimmed);
       setUser(loggedInUser);
-      localStorage.setItem(SESSION_KEY, JSON.stringify(loggedInUser));
+    } catch (err: any) {
+      localStorage.removeItem(TOKEN_KEY);
+      localStorage.removeItem(DEV_EMAIL_KEY);
+      const message = err?.message || 'Login failed.';
+      setError(message);
+      throw new Error(message);
+    } finally {
       setLoading(false);
-      return;
     }
-
-    // Default fallback login for any user input
-    const isSupervisor = emailTrimmed.includes('planner') || emailTrimmed.includes('supervisor');
-    const loggedInUser: User = {
-      id: `usr-${Date.now()}`,
-      email: emailTrimmed,
-      full_name: isSupervisor ? 'Project Supervisor' : 'Field Engineer',
-      role: isSupervisor ? 'SUPERVISOR' : 'SITE_ENGINEER',
-    };
-
-    setUser(loggedInUser);
-    localStorage.setItem(SESSION_KEY, JSON.stringify(loggedInUser));
-    setLoading(false);
   };
 
   const logout = async (): Promise<void> => {
+    if (isSupabaseConfigured && supabase) {
+      await supabase.auth.signOut();
+    }
+    localStorage.removeItem(TOKEN_KEY);
+    localStorage.removeItem(DEV_EMAIL_KEY);
     setUser(null);
-    localStorage.removeItem(SESSION_KEY);
   };
 
   return (
@@ -130,6 +192,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         loading,
         isLoading: loading,
         error,
+        devMode: !isSupabaseConfigured,
         login,
         logout,
         clearError,

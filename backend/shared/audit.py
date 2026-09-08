@@ -1,6 +1,6 @@
 import hashlib
 import json
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from backend.shared.db import get_connection
 
@@ -133,6 +133,23 @@ def write_audit_log(
 
             row = cursor.fetchone()
             return row["log_id"]
+
+
+def list_recent_audit_logs(limit: int = 20) -> List[Dict[str, Any]]:
+    """Most recent audit_logs rows, newest first -- read-only convenience
+    for a general activity feed (e.g. Activity History's audit trail card),
+    as distinct from get_audit_trail()'s per-entity chain view."""
+    safe_limit = max(1, min(limit, 200))
+    with get_connection() as conn:
+        rows = conn.execute(
+            """
+            SELECT * FROM audit_logs
+            ORDER BY log_id DESC
+            LIMIT %s
+            """,
+            (safe_limit,),
+        ).fetchall()
+        return [dict(r) for r in rows]
 
 
 def get_audit_trail(entity_id: str) -> Dict[str, Any]:

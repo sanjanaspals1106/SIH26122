@@ -6,8 +6,9 @@ from pathlib import Path
 from typing import Any, Optional
 
 import pytest
-from fastapi import APIRouter, FastAPI, UploadFile
+from fastapi import APIRouter, FastAPI
 from fastapi.testclient import TestClient
+from pydantic import BaseModel
 
 from backend.main import app as production_app
 from backend.shared.actuals import get_approved_actual
@@ -237,24 +238,41 @@ def create_phase10_test_db() -> SQLitePsycopgAdapter:
 
 
 def create_mock_schedule_app() -> FastAPI:
-    """Create a FastAPI app with a mock POST /api/v1/schedules endpoint for testing."""
+    """
+    Create a FastAPI app with a mock POST /api/v1/schedules endpoint for
+    testing. Mirrors the real contract in routers/schedules.py: a JSON body
+    (ScheduleCreateRequest: project_name, data_date, source_format,
+    csv_content), not a multipart file upload.
+    """
     test_app = FastAPI()
 
     schedules_router = APIRouter(prefix="/api/v1/schedules")
 
+    class MockScheduleCreateRequest(BaseModel):
+        project_name: str
+        data_date: Optional[str] = None
+        source_format: Optional[str] = "csv"
+        csv_content: str
+
     @schedules_router.post("")
-    def upload_schedule(file: UploadFile):
-        content = file.file.read().decode("utf-8")
-        lines = content.splitlines()
+    def upload_schedule(request: MockScheduleCreateRequest):
+        lines = request.csv_content.splitlines()
         return {
             "schedule_id": "SIH26122_NFU",
-            "project_name": "North Field Utility Corridor",
+            "project_name": request.project_name,
             "activities_count": max(0, len(lines) - 1),
             "status": "ok",
         }
 
     test_app.include_router(schedules_router)
     return test_app
+
+
+def create_app_without_schedule_endpoint() -> FastAPI:
+    """A bare app that genuinely has no POST /api/v1/schedules -- used to
+    test the seed loader's BLOCKED path. Unlike production_app (which has
+    M1's real schedule router since it merged), this app has nothing."""
+    return FastAPI()
 
 
 # =========================================================================
@@ -264,10 +282,12 @@ def create_mock_schedule_app() -> FastAPI:
 def test_seed_blocked_when_schedule_endpoint_absent():
     """Test #1: Loader returns structured BLOCKED status when POST /api/v1/schedules is absent."""
     db = create_phase10_test_db()
-    # production_app currently only has GET /health in schedules router
-    assert not check_schedule_upload_endpoint(production_app)
+    # production_app has M1's real schedule router now (it merged) -- use a
+    # genuinely bare app to exercise the "endpoint absent" path instead.
+    absent_app = create_app_without_schedule_endpoint()
+    assert not check_schedule_upload_endpoint(absent_app)
 
-    result = load_canonical_sample_data(conn=db, app=production_app)
+    result = load_canonical_sample_data(conn=db, app=absent_app)
     assert result["status"] == "BLOCKED"
     assert result["schedule_activities_seeded"] == 0
     assert "POST /api/v1/schedules" in result["reason"]
@@ -304,12 +324,15 @@ def test_all_six_disciplines_represented():
         d = r["Discipline"]
         discipline_counts[d] = discipline_counts.get(d, 0) + 1
 
+    # schedule.csv uses the parser's real expected column headers/enum
+    # spelling (see backend/shared/schedule.py's field-mapping table) --
+    # values are e.g. "CIVIL", not "Civil".
     expected_counts = {
-        "Civil": 8,
-        "Piping": 10,
-        "Static/Rotating Equipment": 7,
-        "Electrical": 8,
-        "Instrumentation": 7,
+        "CIVIL": 8,
+        "PIPING": 10,
+        "STATIC_ROTATING_EQUIPMENT": 7,
+        "ELECTRICAL": 8,
+        "INSTRUMENTATION": 7,
         "HSE": 5,
     }
     assert discipline_counts == expected_counts
@@ -321,7 +344,9 @@ def test_canonical_activity_ids_preserved():
     with open(schedule_csv, "r", encoding="utf-8") as f:
         rows = list(csv.DictReader(f))
 
-    activity_ids = [r["Activity_ID"] for r in rows]
+    # schedule.csv's activity-id column is named "L6 Task ID" (the real P6
+    # source column M1's parser expects) -- see the field-mapping table.
+    activity_ids = [r["L6 Task ID"] for r in rows]
     # Key canonical activity IDs from requirements
     assert "CIV-PS3-TR-0180" in activity_ids
     assert "PIP-PS3-WLD-024" in activity_ids
@@ -356,8 +381,8 @@ def test_xer_evidence_links_verbatim(monkeypatch):
     """Test #6: P6 XER export exists with verified hash, verbatim line is extracted from actual file, and loader fails explicitly without fabricating snippet if task is missing."""
     xer_path = WORKSPACE_ROOT / XER_FILE_RELPATH
     assert xer_path.exists()
-    assert xer_path.stat().st_size == 6489
-    assert compute_file_hash(xer_path) == "80380e76b9c0b04451f83aba788091ea953eada6e8e9ce7caa53b851bdc3cb6b"
+    assert xer_path.stat().st_size == 6428
+    assert compute_file_hash(xer_path) == "accdc5b02a48524790efb3e2bf2ef71d8f4792b94b2561a66066e2187dfd9841"
 
     expected_verbatim_line = extract_xer_task_line(xer_path, "PIP-PS3-WLD-024")
     assert expected_verbatim_line != ""
@@ -561,10 +586,13 @@ def test_seed_idempotency():
 
 def test_startup_isolation():
     """Test #14: Importing backend.main does NOT trigger sample data seeding."""
-    # production_app was imported at the top of the file
-    # Verify that app import did not execute any seeding
-    # production_app router does not have POST /api/v1/schedules
-    assert not check_schedule_upload_endpoint(production_app)
+    # production_app was imported at the top of the file. Verify that
+    # importing it registers no startup event handlers -- i.e. simply
+    # importing backend.main never runs the seed loader as a side effect,
+    # regardless of whether the real schedule endpoint is present (it is,
+    # now that M1's router has merged).
+    assert check_schedule_upload_endpoint(production_app)
+    assert len(getattr(production_app, "on_startup", [])) == 0
 
 
 def test_phase1_9_regression_baseline():

@@ -597,7 +597,8 @@ export const authApi = {
         role: 'SUPERVISOR',
       };
     }
-    return apiFetch('/api/v1/auth/me');
+    const data: any = await apiFetch('/api/v1/auth/me');
+    return { ...data, email: data.email || '' };
   },
 };
 
@@ -632,10 +633,11 @@ export const claimsApi = {
       };
       return { event: ev };
     }
-    return apiFetch('/api/v1/claims/text', {
+    const data = await apiFetch('/api/v1/claims/text', {
       method: 'POST',
-      body: JSON.stringify({ text, schedule_id: scheduleId }),
+      body: JSON.stringify({ raw_claim_text: text, input_channel: 'TYPED_TEXT', schedule_id: scheduleId }),
     });
+    return { event: data as any };
   },
 
   submitFile: async (file: File, scheduleId: string = 'sched-OIL-2026'): Promise<{ event: ExecutionEvent }> => {
@@ -670,7 +672,6 @@ export const claimsApi = {
     }
     const form = new FormData();
     form.append('file', file);
-    form.append('schedule_id', scheduleId);
     const token = localStorage.getItem('supabase_access_token') || localStorage.getItem('auth_token');
     const headers: Record<string, string> = {};
     if (token) headers['Authorization'] = `Bearer ${token}`;
@@ -681,7 +682,8 @@ export const claimsApi = {
       body: form,
     });
     if (!res.ok) throw new Error(await res.text().catch(() => 'File submit failed'));
-    return res.json();
+    const data = await res.json();
+    return { event: data as any };
   },
 
   match: async (eventId: string): Promise<{ status: ClaimStatus; matches: CandidateMatch[] }> => {
@@ -689,7 +691,8 @@ export const claimsApi = {
       await sleep(1000);
       return { status: 'MATCHED', matches: MOCK_CANDIDATES };
     }
-    return apiFetch(`/api/v1/claims/${eventId}/match`, { method: 'POST' });
+    const data: any = await apiFetch(`/api/v1/claims/${eventId}/match`, { method: 'POST' });
+    return { status: data.status, matches: data.candidates || [] };
   },
 
   check: async (eventId: string): Promise<{ status: ClaimStatus; issues: ValidationIssue[] }> => {
@@ -697,7 +700,8 @@ export const claimsApi = {
       await sleep(800);
       return { status: 'REVIEW_REQUIRED', issues: MOCK_FLAGS };
     }
-    return apiFetch(`/api/v1/claims/${eventId}/check`, { method: 'POST' });
+    const data: any = await apiFetch(`/api/v1/claims/${eventId}/check`, { method: 'POST' });
+    return { status: data.status, issues: data.validation_issues || [] };
   },
 
   getCandidates: async (eventId: string): Promise<CandidateMatch[]> => {
@@ -705,7 +709,8 @@ export const claimsApi = {
       await sleep(300);
       return MOCK_CANDIDATES.filter((c) => c.event_id === eventId || eventId === 'evt-102');
     }
-    return apiFetch(`/api/v1/claims/${eventId}/candidates`);
+    const data: any = await apiFetch(`/api/v1/claims/${eventId}/candidates`);
+    return data.candidates || [];
   },
 
   getConflicts: async (eventId: string): Promise<ConflictRecord[]> => {
@@ -726,7 +731,8 @@ export const claimsApi = {
         },
       ];
     }
-    return apiFetch(`/api/v1/claims/${eventId}/conflicts`);
+    const data: any = await apiFetch(`/api/v1/claims/${eventId}/conflicts`);
+    return data.conflicts || [];
   },
 
   getValidation: async (eventId: string): Promise<ValidationIssue[]> => {
@@ -734,7 +740,8 @@ export const claimsApi = {
       await sleep(300);
       return MOCK_FLAGS;
     }
-    return apiFetch(`/api/v1/claims/${eventId}/validation`);
+    const data: any = await apiFetch(`/api/v1/claims/${eventId}/validation`);
+    return data.validation_issues || [];
   },
 
   getEvent: async (eventId: string): Promise<ExecutionEvent> => {
@@ -760,10 +767,11 @@ export const digestApi = {
       await sleep(900);
       return { approved: eventIds, failed: [] };
     }
-    return apiFetch('/api/v1/digest/bulk-approve', {
+    const data: any = await apiFetch('/api/v1/digest/bulk-approve', {
       method: 'POST',
       body: JSON.stringify({ event_ids: eventIds }),
     });
+    return { approved: data.approved || [], failed: (data.failed || []).map((f: any) => typeof f === 'string' ? f : f.event_id) };
   },
 };
 
@@ -790,10 +798,21 @@ export const decisionsApi = {
         decided_at: new Date().toISOString(),
       };
     }
-    return apiFetch('/api/v1/decisions', {
+    const data: any = await apiFetch('/api/v1/decisions', {
       method: 'POST',
       body: JSON.stringify(payload),
     });
+    return {
+      decision_id: data.decision_id,
+      event_id: data.event_id,
+      selected_activity_id: data.selected_activity_id,
+      action: data.action as DecisionAction,
+      approved_pct: payload.approved_pct ?? null,
+      approved_qty: payload.approved_qty ?? null,
+      planner_id: '',
+      justification: payload.justification,
+      decided_at: new Date().toISOString(),
+    };
   },
 
   getRecent: async (): Promise<PlannerDecision[]> => {
@@ -817,7 +836,8 @@ export const dashboardApi = {
         { reason: 'Inspection Clearance Bottleneck', count: 3 },
       ];
     }
-    return apiFetch('/api/v1/dashboard/delay-reasons');
+    const data: any = await apiFetch('/api/v1/dashboard/delay-reasons');
+    return (data.delay_reasons || []).map((d: any) => ({ reason: d.delay_reason, count: d.count }));
   },
 
   getInstitutionalMemory: async (): Promise<{ topic: string; resolution: string; count: number }[]> => {
@@ -829,7 +849,8 @@ export const dashboardApi = {
         { topic: 'SCADA Panel Power-Up Protocol', resolution: 'Perform secondary ground check prior to energization', count: 5 },
       ];
     }
-    return apiFetch('/api/v1/dashboard/institutional-memory');
+    const data: any = await apiFetch('/api/v1/dashboard/institutional-memory');
+    return (data.activities || []).map((a: any) => ({ topic: a.activity_id + ' (' + a.discipline + ')', resolution: a.variance_days !== null ? (a.variance_days > 0 ? a.variance_days + ' days delayed' : Math.abs(a.variance_days) + ' days ahead') : 'No actuals yet', count: a.planned_duration || 0 }));
   },
 
   getForecast: async (): Promise<{ milestone: string; target_date: string; forecast_date: string; slippage_days: number }[]> => {
@@ -841,7 +862,8 @@ export const dashboardApi = {
         { milestone: 'MS-04 Overall Substation Energization', target_date: '2026-11-15', forecast_date: '2026-11-20', slippage_days: 5 },
       ];
     }
-    return apiFetch('/api/v1/dashboard/forecast');
+    const data: any = await apiFetch('/api/v1/dashboard/forecast?discipline=CIVIL');
+    return (data.activities || [data]).map((a: any) => ({ milestone: a.activity_id || a.discipline || 'Unknown', target_date: a.planned_duration ? a.planned_duration + ' days planned' : 'N/A', forecast_date: a.forecast_duration ? a.forecast_duration + ' days forecast' : 'N/A', slippage_days: a.forecast_duration && a.planned_duration ? a.forecast_duration - a.planned_duration : 0 }));
   },
 
   getSilentActivities: async (): Promise<ScheduleActivity[]> => {
@@ -864,7 +886,8 @@ export const dashboardApi = {
         },
       ];
     }
-    return apiFetch('/api/v1/alerts/silent-activities');
+    const data: any = await apiFetch('/api/v1/alerts/silent-activities');
+    return (data.silent_activities || []).map((a: any) => ({ ...a, asset_tag: a.asset_tag || null, uom: a.uom || null, baseline_pct_complete: a.baseline_pct_complete || 0 }));
   },
 
   getExportCsvUrl: (): string => {
@@ -915,7 +938,36 @@ export const activitiesApi = {
         ],
       };
     }
-    return apiFetch(`/api/v1/activities/${activityId}/history`);
+    const data: any = await apiFetch(`/api/v1/activities/${activityId}/history`);
+    const timeline = data.timeline || [];
+    const eventItems = timeline.filter((t: any) => t.type === 'execution_event');
+    const decisionItem = timeline.find((t: any) => t.type === 'planner_decision');
+    return {
+      activity: {
+        activity_id: activityId,
+        schedule_id: eventItems[0]?.schedule_id || '',
+        activity_name: activityId,
+        wbs_code: null,
+        discipline: 'CIVIL' as Discipline,
+        location: '',
+        asset_tag: null,
+        planned_start: '',
+        planned_finish: '',
+        planned_quantity: null,
+        uom: null,
+        baseline_pct_complete: 0,
+      },
+      history: eventItems.map((ev: any) => ({
+        timestamp: ev.timestamp || ev.event_date || '',
+        raw_claim_text: ev.raw_claim_text || '',
+        input_channel: 'TYPED_TEXT' as InputChannel,
+        claimed_pct: ev.claimed_pct,
+        claimed_qty: ev.claimed_quantity,
+        status: ev.status || 'EXTRACTED',
+        supervisor_action: decisionItem?.action || null,
+        actor: 'System',
+      })),
+    };
   },
 };
 
@@ -960,7 +1012,22 @@ export const schedulesApi = {
         ],
       };
     }
-    return apiFetch(`/api/v1/schedule/${activityId}/impact-preview?delay_days=${delayDays}`);
+    const data: any = await apiFetch(`/api/v1/schedule/${activityId}/impact-preview?delay_days=${delayDays}`);
+    return {
+      activity_id: data.activity_id,
+      delay_days: data.delay_days,
+      disclaimer: 'Preview only · Immediate FS successors · Not full CPM recalculation',
+      successors: (data.impacts || []).map((imp: any) => ({
+        successor_activity_id: imp.successor_activity_id,
+        activity_name: imp.successor_activity_id,
+        relationship_type: imp.dependency_type || 'FS',
+        original_start: imp.original_earliest_start || '',
+        original_finish: '',
+        shifted_start: imp.shifted_earliest_start || '',
+        shifted_finish: '',
+        lag_days: 0,
+      })),
+    };
   },
 };
 

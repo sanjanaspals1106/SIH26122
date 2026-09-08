@@ -217,7 +217,7 @@ def test_missing_dates_handled_safely():
 # ==============================================================================
 
 def test_mock_p6_endpoint_registration():
-    routes = [route.path for route in app.routes]
+    routes = list(app.openapi()["paths"].keys())
     assert "/api/v1/mock-p6/activities/{activity_id}" in routes
 
 

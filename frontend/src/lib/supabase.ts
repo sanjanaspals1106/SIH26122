@@ -1,16 +1,17 @@
 /**
- * Supabase client stub.
- * 
- * When M6 provides VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY,
- * uncomment the real implementation and remove the stub.
- * AuthProvider.tsx calls this — no other file needs to change.
+ * Real Supabase client, created only when VITE_SUPABASE_URL and
+ * VITE_SUPABASE_ANON_KEY are both configured. AuthProvider.tsx checks
+ * `isSupabaseConfigured` to decide between real Supabase Auth and the
+ * local dev-mode fallback (see AuthProvider.tsx's DEV_MODE_ACCOUNTS) --
+ * no other file needs to change when real credentials are added later.
  */
+import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 
-// Real implementation (uncomment when credentials available):
-// import { createClient } from '@supabase/supabase-js';
-// const supabaseUrl = import.meta.env.VITE_SUPABASE_URL!;
-// const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY!;
-// export const supabase = createClient(supabaseUrl, supabaseAnonKey);
+const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string | undefined;
+const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined;
 
-// Stub for mock mode:
-export const supabase = null;
+export const isSupabaseConfigured = Boolean(supabaseUrl && supabaseAnonKey);
+
+export const supabase: SupabaseClient | null = isSupabaseConfigured
+  ? createClient(supabaseUrl as string, supabaseAnonKey as string)
+  : null;

@@ -34,3 +34,10 @@ openpyxl
 # M2 (intake/extraction)
 pymupdf
 pytesseract
+
+# Used directly by shared/auth.py's HTTP JWT-verification fallback --
+# previously only present transitively via supabase/openai
+httpx
+
+# ~200 tests across tests/ and backend/ require this to run
+pytest

@@ -6,7 +6,7 @@ from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 
-from backend.shared.audit import get_audit_trail, write_audit_log
+from backend.shared.audit import get_audit_trail, list_recent_audit_logs, write_audit_log
 from backend.shared.db import get_connection
 
 try:
@@ -618,6 +618,13 @@ def get_activity_rollup(activity_id: str, schedule_id: Optional[str] = None):
         }
 
 
+@router.get("/audit", dependencies=_supervisor_dep)
+def get_recent_audit(limit: int = 20):
+    """General recent-activity feed across all entities (newest first) --
+    distinct from GET /audit/{entity_id}'s per-entity chain view below."""
+    return list_recent_audit_logs(limit=limit)
+
+
 @router.get("/audit/{entity_id}", dependencies=_supervisor_dep)
 def get_audit(entity_id: str):
     return get_audit_trail(entity_id)
@@ -626,6 +633,7 @@ def get_audit(entity_id: str):
 @router.get("/alerts/silent-activities", dependencies=_supervisor_dep)
 @router.get("/claims/silent-activities", dependencies=_supervisor_dep)
 @router.get("/claims/checks/silent-activities", dependencies=_supervisor_dep)
+@router.get("/dashboard/silent-activities", dependencies=_supervisor_dep)
 def get_silent_activities(schedule_id: Optional[str] = None):
     with get_connection() as conn:
         query = """

@@ -14,7 +14,7 @@ from typing import Any, Dict, List, Optional
 from fastapi.testclient import TestClient
 
 from backend.main import app
-from backend.shared.auth import CurrentUser, get_current_user
+from backend.shared.auth import UserProfile as CurrentUser, get_current_user
 from backend.shared.db import get_db
 from backend.shared.schemas import ClaimMode, Discipline, EventType, ExtractedClaimFields, InputChannel
 
@@ -108,6 +108,15 @@ class FakeCursor:
                     ev["asset_tag"] = params[12]
                     ev["location"] = params[13]
                     ev["delay_reason"] = params[17]
+            # Real Postgres defaults any column not in the INSERT's column
+            # list to NULL -- match that here so a narrower INSERT (e.g.
+            # the 15-param schedule-export shape) doesn't leave keys
+            # entirely missing from the row dict.
+            for col in (
+                "matched_activity_id", "language_detected", "asset_tag",
+                "location", "delay_reason", "photo_path",
+            ):
+                ev.setdefault(col, None)
             self.db.execution_events.append(ev)
             self.last_results = []
 

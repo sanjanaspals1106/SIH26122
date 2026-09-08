@@ -99,7 +99,7 @@ def create_test_db() -> SQLitePsycopgAdapter:
 # =========================================================================
 
 def test_endpoint_is_registered():
-    routes = [r.path for r in app.routes]
+    routes = list(app.openapi()["paths"].keys())
     assert "/api/v1/activities/{activity_id}/history" in routes, (
         "GET /api/v1/activities/{activity_id}/history not registered on app"
     )
