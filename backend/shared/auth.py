@@ -148,12 +148,17 @@ def decode_supabase_jwt(token: str) -> dict:
                     "email": user_data.get("email"),
                     "role": user_data.get("role"),
                 }
-            elif resp.status_code in (400, 401, 403):
+            if resp.status_code in (400, 401, 403):
                 raise HTTPException(
                     status_code=status.HTTP_401_UNAUTHORIZED,
                     detail="Token validation failed: Supabase rejected the token",
                     headers={"WWW-Authenticate": "Bearer"},
                 )
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail=f"Token validation failed: Supabase returned {resp.status_code}",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
         except HTTPException:
             raise
         except Exception as e:
