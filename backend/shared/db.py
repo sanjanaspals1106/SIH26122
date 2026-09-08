@@ -3,8 +3,14 @@ Shared DB connection — Supabase Postgres, direct connection (PRD v5,
 "Database connection method"). Every router imports get_db() or
 get_connection() from here rather than opening its own connection.
 
-The project uses psycopg2 for synchronous PostgreSQL access with a
-dict-style cursor.
+The project uses psycopg (v3) for synchronous PostgreSQL access with a
+dict-style row factory. Most routers (audit.py, actuals.py, checks.py,
+dashboard.py, activities.py, export.py, schedule.py, schedule_repository.py)
+call conn.execute(...)/conn.transaction() directly, which is psycopg v3's
+connection-level API (psycopg2 connections have no .execute()/.transaction()
+method) — v3 is therefore the one driver this module must return connections
+from. conn.cursor() (used by intake.py/schedules.py) works identically under
+v3, so this is a single-file, non-breaking change for those callers.
 
 supabase-py is NOT used here for table access, per the doc: it's reserved
 for auth only. This connects straight to Postgres with the service-role
@@ -14,9 +20,17 @@ connection string.
 import os
 from pathlib import Path
 
-import psycopg2
-import psycopg2.extras
+import psycopg
+import psycopg.rows
+from dotenv import load_dotenv
 
+# Loaded here, not just in main.py: any standalone entry point that touches
+# the DB (smoke_test.py, shared/seed.py run directly, a bare pytest
+# collection) imports this module before it imports main.py, if it imports
+# main.py at all -- so this is the one place guaranteed to run before
+# DATABASE_URL is read below. Idempotent and harmless to call again from
+# main.py.
+load_dotenv()
 
 DATABASE_URL = os.getenv("DATABASE_URL")
 
@@ -38,9 +52,9 @@ def get_connection():
             "Add it to the project .env file."
         )
 
-    return psycopg2.connect(
+    return psycopg.connect(
         DATABASE_URL,
-        cursor_factory=psycopg2.extras.RealDictCursor,
+        row_factory=psycopg.rows.dict_row,
     )
 
 

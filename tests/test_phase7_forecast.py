@@ -79,7 +79,7 @@ def create_test_db() -> SQLitePsycopgAdapter:
 # =========================================================================
 
 def test_endpoint_is_registered():
-    routes = [r.path for r in app.routes]
+    routes = list(app.openapi()["paths"].keys())
     assert "/api/v1/dashboard/forecast" in routes, (
         "GET /api/v1/dashboard/forecast not registered on app"
     )

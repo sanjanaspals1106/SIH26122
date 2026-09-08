@@ -62,7 +62,7 @@ def test_database_schema():
 
 
 def test_audit_hashing():
-    result = payload_hash({"test": "value"})
+    result = payload_hash({"before": "value"}, {"after": "value"})
 
     assert isinstance(result, str)
     assert len(result) == 64
@@ -124,7 +124,7 @@ def test_auth_roles_and_dependencies():
 
 
 def test_auth_me_endpoint_registration():
-    routes = [route.path for route in app.routes]
+    routes = list(app.openapi()["paths"].keys())
     assert "/api/v1/auth/me" in routes, "GET /api/v1/auth/me not registered on FastAPI app"
     print("[OK] GET /api/v1/auth/me endpoint registered")
 
@@ -163,7 +163,7 @@ def test_router_health_endpoints():
     assert resp.json() == {"router": "schedules", "status": "ok"}
 
     # 7. Activities router registration check (history route)
-    routes = [route.path for route in app.routes]
+    routes = list(app.openapi()["paths"].keys())
     assert "/api/v1/activities/{activity_id}/history" in routes, (
         "GET /api/v1/activities/{activity_id}/history not registered on FastAPI app"
     )

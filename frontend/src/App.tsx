@@ -30,6 +30,7 @@ function App() {
                 {/* Supervisor-only routes */}
                 <Route element={<ProtectedRoute allowedRoles={['SUPERVISOR']} />}>
                   <Route path="/" element={<DailyDigest />} />
+                  <Route path="/digest" element={<DailyDigest />} />
                   <Route path="/review" element={<ReviewWorkspace />} />
                   <Route path="/dashboard" element={<Dashboard />} />
                   <Route path="/history" element={<ActivityHistory />} />

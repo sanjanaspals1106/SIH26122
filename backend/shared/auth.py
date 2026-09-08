@@ -86,14 +86,11 @@ def decode_supabase_jwt(token: str) -> dict:
 
         except HTTPException:
             raise
-        except jwt.PyJWTError as e:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail=f"Invalid token: {str(e)}",
-                headers={"WWW-Authenticate": "Bearer"},
-            )
+        except jwt.PyJWTError:
+            # Token might use ES256/RS256 asymmetric signature (JWKS) or secret mismatch; fall through.
+            pass
 
-    # 2. Asymmetric ES256 verification via JWKS
+    # 2. Asymmetric verification via JWKS
     jwks_url = os.getenv("SUPABASE_JWKS_URL")
     supabase_url = os.getenv("SUPABASE_URL")
 
@@ -111,7 +108,7 @@ def decode_supabase_jwt(token: str) -> dict:
             payload = jwt.decode(
                 token,
                 signing_key.key,
-                algorithms=["ES256"],
+                algorithms=["ES256", "RS256"],
                 options={"verify_aud": False},
                 leeway=10,
             )
@@ -128,17 +125,16 @@ def decode_supabase_jwt(token: str) -> dict:
         except HTTPException:
             raise
         except jwt.PyJWKClientConnectionError:
-            # Network error connecting to JWKS endpoint;
-            # fall through to HTTP fallback.
+            # Network error connecting to JWKS endpoint; fall through.
             pass
-        except jwt.PyJWTError as e:
+        except (jwt.PyJWTError, jwt.PyJWKClientError) as e:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail=f"Invalid token: {str(e)}",
                 headers={"WWW-Authenticate": "Bearer"},
             )
         except Exception:
-            # Other transient error; fall through to HTTP fallback.
+            # Other transient error; fall through.
             pass
 
     # 3. HTTP verification fallback against Supabase Auth endpoint
@@ -196,8 +192,14 @@ def decode_supabase_jwt(token: str) -> dict:
                 headers={"WWW-Authenticate": "Bearer"},
             )
 
-    # 4. Local development / offline test mode fallback
-    if not (jwt_secret or jwks_url or (supabase_url and supabase_key)):
+    # 4. Local development / offline test mode fallback.
+    # Gated on an EXPLICIT opt-in (AUTH_DEV_MODE=true), not merely on the
+    # absence of real verification config — an unconfigured deployment
+    # (missing env vars, not a deliberate dev choice) must fail closed
+    # (401) rather than silently accept any unsigned token's `sub` claim.
+    auth_dev_mode = os.getenv("AUTH_DEV_MODE", "false").strip().lower() == "true"
+
+    if auth_dev_mode and not (jwt_secret or jwks_url or (supabase_url and supabase_key)):
         try:
             payload = jwt.decode(
                 token,
@@ -289,26 +291,27 @@ def get_current_user(
     )
 
 
-def require_role(required_role: str):
+def require_role(*required_roles: str):
     """
     FastAPI dependency factory enforcing that the authenticated caller
-    possesses exactly the required role ('SITE_ENGINEER' or 'SUPERVISOR').
-    Returns HTTP 403 Forbidden if the role does not match.
+    possesses one of the required roles ('SITE_ENGINEER' and/or 'SUPERVISOR').
+    Returns HTTP 403 Forbidden if the caller's role does not match any of them.
     """
-    if required_role not in VALID_ROLES:
-        raise ValueError(
-            f"Invalid role '{required_role}'. "
-            f"Allowed roles are: {sorted(VALID_ROLES)}"
-        )
+    for required_role in required_roles:
+        if required_role not in VALID_ROLES:
+            raise ValueError(
+                f"Invalid role '{required_role}'. "
+                f"Allowed roles are: {sorted(VALID_ROLES)}"
+            )
 
     def role_dependency(
         current_user: UserProfile = Depends(get_current_user),
     ) -> UserProfile:
-        if current_user.role != required_role:
+        if current_user.role not in required_roles:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail=(
-                    f"Operation requires role '{required_role}', "
+                    f"Operation requires role in {sorted(required_roles)}, "
                     f"but caller has role '{current_user.role}'"
                 ),
             )

@@ -75,7 +75,7 @@ def create_test_db() -> SQLitePsycopgAdapter:
 # ==============================================================================
 
 def test_endpoint_is_registered():
-    routes = [route.path for route in app.routes]
+    routes = list(app.openapi()["paths"].keys())
     assert "/api/v1/schedule/{activity_id}/impact-preview" in routes
 
 

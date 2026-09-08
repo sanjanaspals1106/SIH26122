@@ -59,7 +59,7 @@ export default function LoginScreen() {
 
   const fillDemo = (demoEmail: string) => {
     setEmail(demoEmail);
-    setPassword('demo123');
+    setPassword('Demo123456!');
     setFieldError('');
     clearError();
   };
@@ -300,7 +300,7 @@ export default function LoginScreen() {
               <div className="grid grid-cols-2 gap-2.5">
                 <button
                   type="button"
-                  onClick={() => fillDemo('planner@setu.ai')}
+                  onClick={() => fillDemo('supervisor@sih26122.internal')}
                   className="p-3 rounded-xl text-left transition-all group"
                   style={{
                     backgroundColor: theme === 'dark' ? 'rgba(255,255,255,0.04)' : '#F8FAFC',
@@ -313,12 +313,12 @@ export default function LoginScreen() {
                     <ShieldCheck className="w-4 h-4 text-emerald-500" />
                     Supervisor
                   </div>
-                  <div className="text-[10px] font-mono mt-0.5 truncate text-slate-400">planner@setu.ai</div>
+                  <div className="text-[10px] font-mono mt-0.5 truncate text-slate-400">supervisor@sih26122.internal</div>
                 </button>
 
                 <button
                   type="button"
-                  onClick={() => fillDemo('engineer@setu.ai')}
+                  onClick={() => fillDemo('site.engineer@sih26122.internal')}
                   className="p-3 rounded-xl text-left transition-all group"
                   style={{
                     backgroundColor: theme === 'dark' ? 'rgba(255,255,255,0.04)' : '#F8FAFC',
@@ -331,7 +331,7 @@ export default function LoginScreen() {
                     <HardHat className="w-4 h-4 text-amber-500" />
                     Site Engineer
                   </div>
-                  <div className="text-[10px] font-mono mt-0.5 truncate text-slate-400">engineer@setu.ai</div>
+                  <div className="text-[10px] font-mono mt-0.5 truncate text-slate-400">site.engineer@sih26122.internal</div>
                 </button>
               </div>
             </div>

@@ -41,7 +41,7 @@ def test_m6_router_health_endpoints():
 
 def test_activities_and_auth_router_registration():
     """Verify authenticated / parameterized M6 routes are registered on the FastAPI app."""
-    routes = [route.path for route in app.routes]
+    routes = list(app.openapi()["paths"].keys())
     assert "/api/v1/auth/me" in routes, "GET /api/v1/auth/me route is not registered"
     assert "/api/v1/activities/{activity_id}/history" in routes, (
         "GET /api/v1/activities/{activity_id}/history route is not registered"
@@ -94,8 +94,11 @@ def test_missing_p6_base_url_causes_no_network_calls():
 
 def test_no_startup_seeding_side_effects():
     """Verify importing backend.main does not trigger sample seeding or create DB records."""
-    # check_schedule_upload_endpoint returns False for production app
-    assert not check_schedule_upload_endpoint(app)
+    # M1's real schedule router has merged, so production app now genuinely
+    # has POST /api/v1/schedules -- the "no side effects on import" claim is
+    # about the app never registering a startup seed handler, not about
+    # whether the endpoint exists.
+    assert check_schedule_upload_endpoint(app)
     # The application startup lifecycle has no seed event handlers
     startup_handlers = getattr(app, "on_startup", [])
     assert len(startup_handlers) == 0
@@ -103,7 +106,10 @@ def test_no_startup_seeding_side_effects():
 
 def test_canonical_seed_runner_remains_blocked_without_m1_endpoint():
     """Verify load_canonical_sample_data halts cleanly with status BLOCKED when M1 endpoint is absent."""
-    result = load_canonical_sample_data(app=app)
+    from fastapi import FastAPI
+
+    absent_app = FastAPI()  # genuinely no schedules router, unlike `app`
+    result = load_canonical_sample_data(app=absent_app)
     assert isinstance(result, dict)
     assert result.get("status") == "BLOCKED"
     assert "POST /api/v1/schedules" in result.get("reason", "")

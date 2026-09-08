@@ -448,7 +448,7 @@ export default function ClaimIntake() {
                       </div>
 
                       <div className="flex-1">
-                        <div className={cn('text-xs font-semibold', isCurrent ? 'text-indigo-300' : isCompleted ? 'text-slate-200' : 'text-slate-500')}>
+                        <div className={cn('text-xs font-semibold', isCurrent ? 'text-indigo-600 dark:text-indigo-300' : isCompleted ? 'text-slate-800 dark:text-slate-200' : 'text-slate-500')}>
                           {st.title}
                         </div>
                         <div className="text-[10px] text-slate-500">{st.desc}</div>
@@ -460,13 +460,13 @@ export default function ClaimIntake() {
 
               {/* Created Event Result Card */}
               {createdEvent && (
-                <div className="p-4 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-200 space-y-3 animate-in fade-in duration-300">
-                  <div className="flex items-center gap-2 text-xs font-bold text-emerald-300">
-                    <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                <div className="p-4 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-900 dark:text-emerald-200 space-y-3 animate-in fade-in duration-300">
+                  <div className="flex items-center gap-2 text-xs font-bold text-emerald-800 dark:text-emerald-300">
+                    <CheckCircle2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
                     Ingestion Complete — Queued for Supervisor
                   </div>
-                  <p className="text-xs text-slate-300 leading-relaxed">
-                    Claim ID <span className="font-mono font-bold text-white">{createdEvent.event_id}</span> status set to <span className="font-mono text-amber-400 font-bold">{createdEvent.status}</span>.
+                  <p className="text-xs text-slate-700 dark:text-slate-300 leading-relaxed">
+                    Claim ID <span className="font-mono font-bold text-slate-900 dark:text-white">{createdEvent.event_id}</span> status set to <span className="font-mono text-amber-600 dark:text-amber-400 font-bold">{createdEvent.status}</span>.
                   </p>
                   <Button
                     onClick={() => navigate(`/review?event_id=${createdEvent.event_id}`)}

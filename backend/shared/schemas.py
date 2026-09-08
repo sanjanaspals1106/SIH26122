@@ -10,7 +10,7 @@ from datetime import date, datetime
 from enum import Enum
 from typing import Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 class Schedule(BaseModel):
@@ -111,6 +111,13 @@ class ExecutionClaim(BaseModel):
     supervisor_id: Optional[str] = None
     photo_path: Optional[str] = None
 
+    @field_validator("event_id", "schedule_id", "supervisor_id", mode="before")
+    @classmethod
+    def cast_uuid_to_str(cls, v):
+        if v is not None and not isinstance(v, str):
+            return str(v)
+        return v
+
 
 # ---------- M2: extraction output shape (this is the LLM's strict JSON contract) ----------
 
@@ -207,6 +214,27 @@ class PlannerDecision(BaseModel):
     planner_id: str
     justification: str
     decided_at: Optional[datetime] = None
+
+
+class DecisionRequest(BaseModel):
+    """Body for POST /api/v1/decisions. planner_id is never taken from this
+    body — it's derived server-side from the authenticated SUPERVISOR."""
+
+    event_id: str
+    action: str  # APPROVE, EDIT, REJECT, HOLD
+    selected_activity_id: Optional[str] = None
+    approved_pct: Optional[float] = Field(default=None, ge=0.0, le=100.0)
+    approved_qty: Optional[float] = None
+    justification: str = Field(min_length=1)
+
+
+class DecisionResponse(BaseModel):
+    decision_id: str
+    event_id: str
+    action: str
+    status: str
+    selected_activity_id: str
+    approved_actual: Optional[dict] = None
 
 
 class ApprovedActual(BaseModel):

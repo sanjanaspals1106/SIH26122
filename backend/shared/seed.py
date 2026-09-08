@@ -51,6 +51,13 @@ def check_schedule_upload_endpoint(app: Any = None) -> bool:
     """
     Inspect the FastAPI application routes to check if POST /api/v1/schedules is implemented.
     Returns True only if the route exists with method POST.
+
+    Uses app.openapi()["paths"] rather than walking app.routes directly:
+    on newer Starlette versions, top-level entries in app.routes for a
+    mounted router are wrapper objects (no flat .path attribute on nested
+    routes), so a shallow walk under-reports registered endpoints. The
+    OpenAPI schema is the version-stable source of truth for "what's
+    actually registered."
     """
     if app is None:
         try:
@@ -59,12 +66,13 @@ def check_schedule_upload_endpoint(app: Any = None) -> bool:
         except Exception:
             return False
 
-    for route in getattr(app, "routes", []):
-        path = getattr(route, "path", "")
-        methods = getattr(route, "methods", set())
-        if path == "/api/v1/schedules" and "POST" in methods:
-            return True
-    return False
+    try:
+        paths = app.openapi().get("paths", {})
+    except Exception:
+        return False
+
+    methods = {m.lower() for m in paths.get("/api/v1/schedules", {}).keys()}
+    return "post" in methods
 
 
 def load_canonical_sample_data(
@@ -129,18 +137,26 @@ def load_canonical_sample_data(
             app = main_app
         test_client = TestClient(app)
 
-    with open(schedule_csv_path, "rb") as f:
-        resp = test_client.post(
-            "/api/v1/schedules",
-            files={"file": ("schedule.csv", f, "text/csv")},
+    with open(schedule_csv_path, "r", encoding="utf-8") as f:
+        csv_content = f.read()
+
+    # POST /api/v1/schedules is a JSON-body endpoint (ScheduleCreateRequest),
+    # not a multipart file upload -- see routers/schedules.py.
+    resp = test_client.post(
+        "/api/v1/schedules",
+        json={
+            "project_name": "SIH26122 Canonical Demo Schedule",
+            "source_format": "csv",
+            "csv_content": csv_content,
+        },
+    )
+    if resp.status_code not in (200, 201):
+        raise RuntimeError(
+            f"Schedule upload failed with status {resp.status_code}: {resp.text}"
         )
-        if resp.status_code not in (200, 201):
-            raise RuntimeError(
-                f"Schedule upload failed with status {resp.status_code}: {resp.text}"
-            )
-        upload_data = resp.json()
-        if isinstance(upload_data, dict) and "schedule_id" in upload_data:
-            schedule_id = upload_data["schedule_id"]
+    upload_data = resp.json()
+    if isinstance(upload_data, dict) and "schedule_id" in upload_data:
+        schedule_id = upload_data["schedule_id"]
 
     # Step 3: Seed database entities
     own_connection = False
