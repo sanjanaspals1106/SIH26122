@@ -35,7 +35,7 @@ def test_database_connection():
         assert row["ok"] == 1
         print("[OK] PostgreSQL connection")
     except Exception as e:
-        print(f"[SKIP] PostgreSQL connection ({e})")
+        raise AssertionError(f"PostgreSQL connection failed: {e}") from e
 
 
 def test_database_schema():
