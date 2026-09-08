@@ -169,13 +169,13 @@ def decode_supabase_jwt(token: str) -> dict:
             )
 
     # 4. Local development / offline test mode fallback (only reached if no verification provider is configured)
-    try:
-        payload = jwt.decode(token, options={"verify_signature": False})
-        if "sub" in payload:
-            return payload
-    except Exception:
-        pass
-
+    if not (jwt_secret or jwks_url or (supabase_url and supabase_key)):
+        try:
+            payload = jwt.decode(token, options={"verify_signature": False})
+            if "sub" in payload:
+                return payload
+        except Exception:
+            pass
     raise HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Unable to validate authentication token",
