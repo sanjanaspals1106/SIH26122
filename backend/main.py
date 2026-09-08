@@ -9,6 +9,7 @@ from backend.routers import decisions
 from backend.routers import export
 from backend.routers import auth
 from backend.routers import dashboard
+from backend.routers import activities
 
 init_db()
 
@@ -32,3 +33,4 @@ app.include_router(decisions.router)
 app.include_router(export.router)
 app.include_router(auth.router)
 app.include_router(dashboard.router)
+app.include_router(activities.router)
