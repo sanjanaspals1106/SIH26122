@@ -27,6 +27,9 @@ def get_connection() -> psycopg.Connection:
 
 
 def init_db() -> None:
+    if not DATABASE_URL:
+        return
+
     schema_path = BASE_DIR / "backend" / "models" / "schema.sql"
     schema = schema_path.read_text()
 
