@@ -11,6 +11,7 @@ from backend.routers import auth
 from backend.routers import dashboard
 from backend.routers import activities
 from backend.routers import schedule
+from backend.routers import mock_p6
 
 init_db()
 
@@ -36,3 +37,4 @@ app.include_router(auth.router)
 app.include_router(dashboard.router)
 app.include_router(activities.router)
 app.include_router(schedule.router)
+app.include_router(mock_p6.router)

@@ -385,6 +385,12 @@ def upsert_approved_actual(
         except Exception as e:
             logger.warning("Auto-triggered CSV export error (non-blocking): %s", e)
 
+        try:
+            from backend.shared.p6 import trigger_p6_actual_push
+            trigger_p6_actual_push(actual=result)
+        except Exception as e:
+            logger.warning("Auto-triggered P6 push error (non-blocking): %s", e)
+
         return result
 
     with get_connection() as conn:
@@ -406,5 +412,11 @@ def upsert_approved_actual(
             trigger_auto_export(conn=conn, schedule_id=schedule_id)
         except Exception as e:
             logger.warning("Auto-triggered CSV export error (non-blocking): %s", e)
+
+        try:
+            from backend.shared.p6 import trigger_p6_actual_push
+            trigger_p6_actual_push(actual=result)
+        except Exception as e:
+            logger.warning("Auto-triggered P6 push error (non-blocking): %s", e)
 
         return result
