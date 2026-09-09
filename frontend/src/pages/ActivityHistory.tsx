@@ -49,14 +49,15 @@ function StatusBadge({ status }: { status: string }) {
 }
 
 export default function ActivityHistory() {
-  const [selectedActivityId, setSelectedActivityId] = useState<string>('ACT-202');
-  const [searchInput, setSearchInput] = useState<string>('ACT-202');
+  const [selectedActivityId, setSelectedActivityId] = useState<string>('');
+  const [searchInput, setSearchInput] = useState<string>('');
 
   const [activity, setActivity] = useState<ScheduleActivity | null>(null);
   const [history, setHistory] = useState<any[]>([]);
   const [auditLogs, setAuditLogs] = useState<AuditLogEntry[]>([]);
-  const [isLoading, setIsLoading] = useState<boolean>(true);
+  const [isLoading, setIsLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
+  const [hasSearched, setHasSearched] = useState<boolean>(false);
 
   const loadActivityData = async (actId: string) => {
     setIsLoading(true);
@@ -77,6 +78,8 @@ export default function ActivityHistory() {
   };
 
   useEffect(() => {
+    if (!selectedActivityId) return;
+    setHasSearched(true);
     loadActivityData(selectedActivityId);
   }, [selectedActivityId]);
 
@@ -109,7 +112,7 @@ export default function ActivityHistory() {
             <Input
               value={searchInput}
               onChange={(e) => setSearchInput(e.target.value)}
-              placeholder="Activity ID (e.g. ACT-202)..."
+              placeholder="Activity ID (e.g. PIP-PS3-SPO-015)..."
               className="pl-9 bg-white dark:bg-[#001438] border-slate-300 dark:border-blue-800 text-slate-900 dark:text-slate-100 text-xs h-9 w-64 font-mono focus:border-[#FC4C02] dark:focus:border-[#FC4C02]"
             />
           </div>
@@ -119,7 +122,12 @@ export default function ActivityHistory() {
         </form>
       </div>
 
-      {isLoading ? (
+      {!hasSearched ? (
+        <div className="text-center py-16 text-slate-400 dark:text-slate-500 text-sm border border-dashed border-slate-200 dark:border-blue-900/50 rounded-2xl">
+          <Search className="w-8 h-8 mx-auto mb-3 opacity-30" />
+          Enter a Primavera activity ID (e.g. PIP-PS3-SPO-015) to view its claim &amp; decision history.
+        </div>
+      ) : isLoading ? (
         <div className="space-y-4">
           <div className="h-28 bg-slate-100 dark:bg-[#001E60]/50 rounded-2xl animate-pulse" />
           <div className="h-64 bg-slate-100 dark:bg-[#001E60]/50 rounded-2xl animate-pulse" />

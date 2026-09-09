@@ -18,7 +18,7 @@ import { schedulesApi, ImpactPreviewResult } from '@/api';
 import { cn } from '@/lib/utils';
 
 export default function ImpactPreview() {
-  const [activityId, setActivityId] = useState('ACT-201');
+  const [activityId, setActivityId] = useState('');
   const [delayDays, setDelayDays] = useState(5);
   const [isSimulating, setIsSimulating] = useState(false);
   const [simulationResult, setSimulationResult] = useState<ImpactPreviewResult | null>(null);
@@ -93,7 +93,7 @@ export default function ImpactPreview() {
               <Input
                 value={activityId}
                 onChange={(e) => setActivityId(e.target.value)}
-                placeholder="e.g. ACT-201"
+                placeholder="e.g. PIP-PS3-SPO-015"
                 className="bg-slate-50 dark:bg-[#001438] border-slate-300 dark:border-blue-800 font-mono text-slate-900 dark:text-slate-200 focus:border-violet-500 dark:focus:border-violet-500"
               />
               <p className="text-[11px] text-slate-400 dark:text-slate-500">Enter the Primavera P6 activity identifier</p>
