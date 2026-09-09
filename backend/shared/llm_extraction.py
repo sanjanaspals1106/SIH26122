@@ -12,6 +12,7 @@ Switch providers with the LLM_PROVIDER env var, no code change needed.
 """
 import json
 import os
+import httpx
 from openai import OpenAI
 
 from backend.shared.schemas import ExtractedClaimFields
@@ -24,7 +25,7 @@ _PROVIDER_BASE_URLS = {
 }
 
 _PROVIDER_DEFAULT_MODELS = {
-    "groq": "llama-3.3-70b-versatile",
+    "groq": "groq/compound-mini",
     "gemini": "gemini-2.5-flash",
 }
 
@@ -32,17 +33,30 @@ _PROVIDER_DEFAULT_MODELS = {
 def _get_client() -> OpenAI:
     global _client
     if _client is None:
+        # If the key is not already in the environment (e.g. server was started
+        # before .env was populated), try loading .env from the project root now.
+        if "LLM_API_KEY" not in os.environ:
+            import pathlib
+            from dotenv import load_dotenv
+            env_path = pathlib.Path(__file__).resolve().parents[2] / ".env"
+            load_dotenv(dotenv_path=env_path, override=False)
         provider = os.environ.get("LLM_PROVIDER", "groq").lower()
         base_url = _PROVIDER_BASE_URLS.get(provider)
         if base_url is None:
             raise ValueError(f"Unknown LLM_PROVIDER '{provider}' — expected 'groq' or 'gemini'")
-        _client = OpenAI(api_key=os.environ["LLM_API_KEY"], base_url=base_url)
+        api_key = os.environ.get("LLM_API_KEY")
+        if not api_key:
+            raise RuntimeError(
+                "LLM_API_KEY is not set. Add it to .env or export it before starting the server."
+            )
+        http_client = httpx.Client(timeout=30.0)
+        _client = OpenAI(api_key=api_key, base_url=base_url, http_client=http_client)
     return _client
 
 
 def _get_model() -> str:
     provider = os.environ.get("LLM_PROVIDER", "groq").lower()
-    return os.environ.get("LLM_MODEL", _PROVIDER_DEFAULT_MODELS.get(provider, "llama-3.3-70b-versatile"))
+    return os.environ.get("LLM_MODEL", _PROVIDER_DEFAULT_MODELS.get(provider, "groq/compound-mini"))
 
 
 SYSTEM_PROMPT = """You are a field-report extraction engine for a construction \

@@ -762,10 +762,16 @@ def match_claim_endpoint(event_id: str, action: str = "MATCH_CLAIM"):
             semantic_results = None
             if claim.raw_claim_text and schedule_index is not None:
                 try:
+                    if schedule_index.get_active_schedule_id() != claim.schedule_id:
+                        try:
+                            schedule_index.build_index(claim.schedule_id)
+                        except Exception as build_err:
+                            print(f"[M3] FAISS auto-build index warning for {claim.schedule_id}: {build_err}")
                     semantic_results = schedule_index.search_schedule(
                         claim.schedule_id, claim.raw_claim_text
                     )
-                except Exception:
+                except Exception as search_err:
+                    print(f"[M3] FAISS search warning: {search_err}")
                     semantic_results = None
 
             # 3. Run M3 matching cascade
