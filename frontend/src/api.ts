@@ -900,7 +900,7 @@ export const dashboardApi = {
 
 export const activitiesApi = {
   getHistory: async (activityId: string): Promise<{
-    activity: ScheduleActivity;
+    activity: ScheduleActivity | null;
     history: {
       timestamp: string;
       raw_claim_text: string;
@@ -945,21 +945,23 @@ export const activitiesApi = {
     const timeline = data.timeline || [];
     const eventItems = timeline.filter((t: any) => t.type === 'execution_event');
     const decisionItem = timeline.find((t: any) => t.type === 'planner_decision');
+
+    // Reuse the existing schedule-activity lookup (schedulesApi.getActivities
+    // hits the same endpoint) for real metadata instead of fabricating it.
+    // The schedule_id needed to address that endpoint comes from the
+    // activity's own linked execution events.
+    const scheduleId = eventItems.find((ev: any) => ev.schedule_id)?.schedule_id;
+    let activity: ScheduleActivity | null = null;
+    if (scheduleId) {
+      try {
+        activity = await apiFetch<ScheduleActivity>(`/api/v1/schedules/${scheduleId}/activities/${activityId}`);
+      } catch {
+        activity = null;
+      }
+    }
+
     return {
-      activity: {
-        activity_id: activityId,
-        schedule_id: eventItems[0]?.schedule_id || '',
-        activity_name: activityId,
-        wbs_code: null,
-        discipline: 'CIVIL' as Discipline,
-        location: '',
-        asset_tag: null,
-        planned_start: '',
-        planned_finish: '',
-        planned_quantity: null,
-        uom: null,
-        baseline_pct_complete: 0,
-      },
+      activity,
       history: eventItems.map((ev: any) => ({
         timestamp: ev.timestamp || ev.event_date || '',
         raw_claim_text: ev.raw_claim_text || '',
