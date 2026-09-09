@@ -37,3 +37,6 @@ build/
 # Uploads
 uploads/
 
+
+# Local scratch / dev test scripts
+scratch/

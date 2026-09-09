@@ -603,20 +603,20 @@ export const authApi = {
 };
 
 export const claimsApi = {
-  submitText: async (text: string, scheduleId: string = 'sched-OIL-2026'): Promise<{ event: ExecutionEvent }> => {
+  submitText: async (text: string): Promise<{ event: ExecutionEvent }> => {
     if (USE_MOCKS) {
       await sleep(1000);
       const ev: ExecutionEvent = {
         event_id: `evt-${Date.now()}`,
         document_id: null,
-        schedule_id: scheduleId,
+        schedule_id: 'sched-MOCK',
         event_date: TODAY,
         raw_claim_text: text,
         input_channel: 'TYPED_TEXT',
         language_detected: 'en',
         reported_activity_id: null,
         matched_activity_id: null,
-        discipline: 'CIVIL',
+        discipline: null,
         action: 'PROGRESS_UPDATE',
         event_type: 'PROGRESS_UPDATE',
         claim_mode: 'CUMULATIVE_PCT',
@@ -633,9 +633,12 @@ export const claimsApi = {
       };
       return { event: ev };
     }
+    // Do NOT send schedule_id — let the backend resolve the latest active schedule.
+    // Sending 'sched-OIL-2026' (the old hardcoded default) causes M3 to load
+    // 0 activities and produce 0 candidates because that schedule doesn't exist.
     const data = await apiFetch('/api/v1/claims/text', {
       method: 'POST',
-      body: JSON.stringify({ raw_claim_text: text, input_channel: 'TYPED_TEXT', schedule_id: scheduleId }),
+      body: JSON.stringify({ raw_claim_text: text, input_channel: 'TYPED_TEXT' }),
     });
     return { event: data as any };
   },
@@ -653,7 +656,7 @@ export const claimsApi = {
         language_detected: 'en',
         reported_activity_id: null,
         matched_activity_id: null,
-        discipline: 'CIVIL',
+        discipline: null,
         action: 'PROGRESS_UPDATE',
         event_type: 'PROGRESS_UPDATE',
         claim_mode: 'CUMULATIVE_PCT',

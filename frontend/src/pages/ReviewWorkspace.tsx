@@ -28,7 +28,7 @@ import { cn } from '@/lib/utils';
 export default function ReviewWorkspace() {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
-  const eventIdParam = searchParams.get('event_id') || 'evt-102';
+  const eventIdParam = searchParams.get('event_id');
 
   const [event, setEvent] = useState<ExecutionEvent | null>(null);
   const [candidates, setCandidates] = useState<CandidateMatch[]>([]);
@@ -62,7 +62,7 @@ export default function ReviewWorkspace() {
       setConflicts(confs);
       setIssues(valIssues);
 
-      const defaultActivity = cands[0]?.activity_id || ev.matched_activity_id || 'ACT-202';
+      const defaultActivity = cands[0]?.activity_id || ev.matched_activity_id || '';
       setSelectedActivityId(defaultActivity);
       setApprovedPct(ev.claimed_pct ?? 100);
       setApprovedQty(ev.claimed_quantity ?? '');
@@ -74,8 +74,26 @@ export default function ReviewWorkspace() {
   };
 
   useEffect(() => {
-    loadData(eventIdParam);
+    if (eventIdParam) {
+      loadData(eventIdParam);
+    } else {
+      setIsLoading(false);
+    }
   }, [eventIdParam]);
+
+  if (!eventIdParam) {
+    return (
+      <Card className="bg-white dark:bg-[#001E60] border-slate-200 dark:border-blue-900/60 text-center p-12 space-y-4">
+        <CardTitle className="text-slate-900 dark:text-slate-100 text-lg font-bold">Select a Claim to Review</CardTitle>
+        <p className="text-slate-500 dark:text-slate-400 text-xs max-w-md mx-auto">
+          Please select a specific field progress claim from the Daily Digest or Intake Pipeline to inspect candidate matches and record supervisor approval decisions.
+        </p>
+        <Button onClick={() => navigate('/digest')} className="bg-[#FC4C02] hover:bg-[#e04302] text-white text-xs font-semibold">
+          Go to Daily Digest & Claims Log
+        </Button>
+      </Card>
+    );
+  }
 
   const handleSubmitDecision = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -207,7 +225,7 @@ export default function ReviewWorkspace() {
               <div className="grid grid-cols-2 gap-3 text-slate-600 dark:text-slate-400">
                 <div>
                   <span className="text-[10px] uppercase font-bold text-slate-500 block">Discipline</span>
-                  <span className="font-mono text-slate-900 dark:text-slate-100 font-bold">{event.discipline || 'CIVIL'}</span>
+                  <span className="font-mono text-slate-900 dark:text-slate-100 font-bold">{event.discipline || 'UNASSIGNED'}</span>
                 </div>
                 <div>
                   <span className="text-[10px] uppercase font-bold text-slate-500 block">Channel</span>
@@ -319,20 +337,17 @@ export default function ReviewWorkspace() {
                           #{cand.rank_order}
                         </span>
                         <span className="font-mono font-bold text-sm text-slate-900 dark:text-slate-100">{cand.activity_id}</span>
+                        {cand.match_tier && (
+                          <span className="text-[10px] font-bold bg-purple-500/10 text-purple-700 dark:text-purple-300 border border-purple-500/30 px-1.5 py-0.5 rounded font-mono uppercase">
+                            {cand.match_tier}
+                          </span>
+                        )}
                       </div>
 
                       <div className="flex items-center gap-1.5">
-                        <span className="text-[11px] font-bold font-mono text-purple-600 dark:text-purple-300">{confidencePct}% match</span>
+                        <span className="text-[11px] font-bold font-mono text-purple-600 dark:text-purple-300">{confidencePct}% ({cand.composite_confidence.toFixed(2)})</span>
                         {isSelected && <Check className="w-4 h-4 text-purple-600 dark:text-purple-400" />}
                       </div>
-                    </div>
-
-                    <div className="text-xs text-slate-800 dark:text-slate-200 font-medium">
-                      {cand.activity_id === 'ACT-202'
-                        ? 'Rebar Placement — Column C4 (Block-2)'
-                        : cand.activity_id === 'ACT-203'
-                        ? 'Formwork Erection — Column C5 (Block-3)'
-                        : 'Foundation Concrete Pouring (Block-4)'}
                     </div>
 
                     <div className="grid grid-cols-4 gap-1 text-[10px] font-mono text-slate-500 dark:text-slate-400 pt-1 border-t border-slate-200 dark:border-blue-900/40">
