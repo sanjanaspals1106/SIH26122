@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import {
   dashboardApi,
   decisionsApi,
@@ -40,6 +41,7 @@ const CHART_COLORS = {
 };
 
 export default function Dashboard() {
+  const { t } = useTranslation();
   const [delayReasons, setDelayReasons] = useState<{ reason: string; count: number }[]>([]);
   const [institutionalMemory, setInstitutionalMemory] = useState<{ topic: string; resolution: string; count: number }[]>([]);
   const [forecasts, setForecasts] = useState<{ milestone: string; target_date: string; forecast_date: string; slippage_days: number }[]>([]);
@@ -87,9 +89,9 @@ export default function Dashboard() {
 
   const kpiCards = [
     {
-      label: 'Total Claims Ingested',
+      label: t('dashboard.kpiTotalClaims'),
       value: '148',
-      delta: '+12% from last week',
+      delta: t('dashboard.kpiTotalClaimsDelta'),
       deltaPositive: true,
       icon: FileSpreadsheet,
       accent: 'text-[#FC4C02]',
@@ -97,9 +99,9 @@ export default function Dashboard() {
       border: 'border-[#FC4C02]/20',
     },
     {
-      label: 'Pending Supervisor Review',
+      label: t('dashboard.kpiPendingReview'),
       value: '14',
-      delta: 'Requires human planner signoff',
+      delta: t('dashboard.kpiPendingReviewDelta'),
       deltaPositive: null,
       icon: Clock,
       accent: 'text-amber-500 dark:text-amber-400',
@@ -107,9 +109,9 @@ export default function Dashboard() {
       border: 'border-amber-500/20',
     },
     {
-      label: 'Official Actuals Committed',
+      label: t('dashboard.kpiActualsCommitted'),
       value: '124',
-      delta: 'Primavera baseline aligned',
+      delta: t('dashboard.kpiActualsCommittedDelta'),
       deltaPositive: true,
       icon: CheckCircle2,
       accent: 'text-emerald-600 dark:text-emerald-400',
@@ -117,9 +119,9 @@ export default function Dashboard() {
       border: 'border-emerald-500/20',
     },
     {
-      label: 'Open Quantity Conflicts',
+      label: t('dashboard.kpiOpenConflicts'),
       value: '2',
-      delta: 'Variance > 15%',
+      delta: t('dashboard.kpiOpenConflictsDelta'),
       deltaPositive: false,
       icon: XCircle,
       accent: 'text-rose-600 dark:text-rose-400',
@@ -137,10 +139,10 @@ export default function Dashboard() {
             <div className="p-1.5 rounded-lg bg-[#FC4C02]/10 border border-[#FC4C02]/20">
               <BarChart3 className="w-5 h-5 text-[#FC4C02]" />
             </div>
-            Project Executive Dashboard
+            {t('dashboard.title')}
           </h1>
           <p className="text-slate-500 dark:text-slate-400 text-xs mt-1">
-            Real-time infrastructure schedule compliance, delay breakdown, and institutional memory.
+            {t('dashboard.subtitle')}
           </p>
         </div>
 
@@ -151,13 +153,13 @@ export default function Dashboard() {
             className="border-slate-300 dark:border-blue-800 text-slate-700 dark:text-blue-100 hover:bg-slate-100 dark:hover:bg-blue-900/50 h-9 text-xs gap-1.5"
           >
             <RefreshCw className="w-3.5 h-3.5" />
-            Refresh
+            {t('dashboard.refresh')}
           </Button>
           <Button
             onClick={handleExportCsv}
             className="bg-[#FC4C02] hover:bg-[#e04302] text-white font-medium text-xs h-9 shadow-md shadow-[#FC4C02]/20 gap-1.5"
           >
-            <Download className="w-4 h-4" /> Export CSV
+            <Download className="w-4 h-4" /> {t('dashboard.exportCsv')}
           </Button>
         </div>
       </div>
@@ -168,10 +170,10 @@ export default function Dashboard() {
           <AlertTriangle className="w-5 h-5 shrink-0 mt-0.5 text-amber-500" />
           <div className="flex-1">
             <h4 className="font-bold text-xs uppercase tracking-wider text-amber-700 dark:text-amber-400">
-              Silent Activities Alert ({silentActivities.length} Detected)
+              {t('dashboard.silentAlertTitle', { count: silentActivities.length })}
             </h4>
             <p className="text-xs mt-0.5 text-amber-700 dark:text-amber-200/90">
-              Scheduled activities that have passed planned start date with zero field progress claims logged:
+              {t('dashboard.silentAlertDesc')}
             </p>
             <div className="flex flex-wrap gap-2 mt-2">
               {silentActivities.map((act) => (
@@ -219,12 +221,12 @@ export default function Dashboard() {
             <CardTitle className="text-sm font-semibold flex items-center justify-between">
               <span className="flex items-center gap-2">
                 <TrendingDown className="w-4 h-4 text-rose-500" />
-                Root Cause Delay Reasons Breakdown
+                {t('dashboard.delayReasonsTitle')}
               </span>
-              <span className="text-[10px] bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 px-2 py-0.5 rounded-full font-mono">Pareto Analysis</span>
+              <span className="text-[10px] bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 px-2 py-0.5 rounded-full font-mono">{t('dashboard.paretoAnalysis')}</span>
             </CardTitle>
             <CardDescription className="text-slate-500 dark:text-slate-400 text-xs">
-              Aggregated delay reasons stated by field engineers during progress updates.
+              {t('dashboard.delayReasonsDesc')}
             </CardDescription>
           </CardHeader>
           <CardContent className="pt-4 h-64">
@@ -244,10 +246,10 @@ export default function Dashboard() {
           <CardHeader className="pb-2">
             <CardTitle className="text-sm font-semibold flex items-center gap-2">
               <Layers className="w-4 h-4 text-indigo-500 dark:text-indigo-400" />
-              Discipline Volume Distribution
+              {t('dashboard.disciplineVolumeTitle')}
             </CardTitle>
             <CardDescription className="text-slate-500 dark:text-slate-400 text-xs">
-              Breakdown of total progress claims by engineering discipline.
+              {t('dashboard.disciplineVolumeDesc')}
             </CardDescription>
           </CardHeader>
           <CardContent className="pt-2 flex items-center justify-center h-64">
@@ -285,15 +287,15 @@ export default function Dashboard() {
               <div className="p-1.5 rounded-lg bg-violet-100 dark:bg-violet-500/10 border border-violet-200 dark:border-violet-500/20">
                 <BrainCircuit className="w-3.5 h-3.5 text-violet-600 dark:text-violet-400" />
               </div>
-              <span className="text-violet-700 dark:text-violet-300">Institutional Memory</span>
+              <span className="text-violet-700 dark:text-violet-300">{t('dashboard.institutionalMemoryTitle')}</span>
             </CardTitle>
             <CardDescription className="text-slate-500 dark:text-slate-400 text-xs">
-              Learned resolutions from past supervisor overrides applied to current site conditions.
+              {t('dashboard.institutionalMemoryDesc')}
             </CardDescription>
           </CardHeader>
           <CardContent className="pt-4 space-y-3">
             {institutionalMemory.length === 0 ? (
-              <div className="text-center py-8 text-slate-400 dark:text-slate-500 text-xs">No institutional memory data available.</div>
+              <div className="text-center py-8 text-slate-400 dark:text-slate-500 text-xs">{t('dashboard.noInstitutionalMemory')}</div>
             ) : institutionalMemory.map((mem, idx) => (
               <div key={idx} className="p-3 bg-slate-50 dark:bg-slate-950/60 border border-slate-200 dark:border-slate-700 rounded-xl space-y-1 text-xs hover:border-violet-300 dark:hover:border-violet-700/50 transition-colors">
                 <div className="flex items-center justify-between text-slate-800 dark:text-slate-200 font-bold">
@@ -316,30 +318,30 @@ export default function Dashboard() {
                 <div className="p-1.5 rounded-lg bg-blue-100 dark:bg-blue-500/10 border border-blue-200 dark:border-blue-500/20">
                   <Clock className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
                 </div>
-                Schedule Milestone Forecast
+                {t('dashboard.forecastTitle')}
               </span>
               <span className="text-[10px] bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 px-2 py-0.5 rounded-full font-mono">
-                Ratio Forecast
+                {t('dashboard.ratioForecast')}
               </span>
             </CardTitle>
             <CardDescription className="text-slate-500 dark:text-slate-400 text-xs">
-              Lightweight historical-ratio forecasting. Not ML prediction.
+              {t('dashboard.forecastDesc')}
             </CardDescription>
           </CardHeader>
           <CardContent className="pt-4 space-y-3 text-xs">
             {forecasts.length === 0 ? (
-              <div className="text-center py-8 text-slate-400 dark:text-slate-500 text-xs">No forecast data available.</div>
+              <div className="text-center py-8 text-slate-400 dark:text-slate-500 text-xs">{t('dashboard.noForecastData')}</div>
             ) : forecasts.map((fc, idx) => (
               <div key={idx} className="p-3 bg-slate-50 dark:bg-slate-950/60 border border-slate-200 dark:border-slate-700 rounded-xl flex items-center justify-between hover:border-amber-300 dark:hover:border-amber-700/50 transition-colors">
                 <div>
                   <div className="font-bold text-slate-800 dark:text-slate-200">{fc.milestone}</div>
                   <div className="text-slate-500 dark:text-slate-400 text-[11px] mt-0.5">
-                    Target: <span className="font-mono">{fc.target_date}</span> · Forecast: <span className="font-mono text-amber-600 dark:text-amber-400">{fc.forecast_date}</span>
+                    {t('dashboard.target')}: <span className="font-mono">{fc.target_date}</span> · {t('dashboard.forecast')}: <span className="font-mono text-amber-600 dark:text-amber-400">{fc.forecast_date}</span>
                   </div>
                 </div>
                 <div className="text-right font-mono">
                   <span className="text-rose-600 dark:text-rose-400 font-bold text-sm">+{fc.slippage_days}d</span>
-                  <div className="text-[10px] text-slate-400 dark:text-slate-500">slippage</div>
+                  <div className="text-[10px] text-slate-400 dark:text-slate-500">{t('dashboard.slippage')}</div>
                 </div>
               </div>
             ))}
@@ -352,16 +354,16 @@ export default function Dashboard() {
         <CardHeader className="pb-2 border-b border-slate-200 dark:border-blue-900/50">
           <CardTitle className="text-sm font-semibold flex items-center gap-2">
             <ShieldCheck className="w-4 h-4 text-emerald-500 dark:text-emerald-400" />
-            Recent Supervisor Decisions Log
+            {t('dashboard.recentDecisionsTitle')}
           </CardTitle>
           <CardDescription className="text-slate-500 dark:text-slate-400 text-xs">
-            Latest planner override and acceptance decisions with justification context.
+            {t('dashboard.recentDecisionsDesc')}
           </CardDescription>
         </CardHeader>
         <CardContent className="pt-2">
           <div className="divide-y divide-slate-100 dark:divide-slate-800 text-xs">
             {recentDecisions.length === 0 ? (
-              <div className="py-8 text-center text-slate-400 dark:text-slate-500">No recent decisions found.</div>
+              <div className="py-8 text-center text-slate-400 dark:text-slate-500">{t('dashboard.noRecentDecisions')}</div>
             ) : recentDecisions.map((dec) => (
               <div key={dec.decision_id} className="py-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2 group hover:bg-slate-50 dark:hover:bg-blue-900/20 px-2 rounded-lg transition-colors">
                 <div className="space-y-0.5">
@@ -379,12 +381,12 @@ export default function Dashboard() {
                     )}>
                       {dec.action}
                     </span>
-                    <span className="text-slate-500 dark:text-slate-400 font-mono">Event: {dec.event_id}</span>
+                    <span className="text-slate-500 dark:text-slate-400 font-mono">{t('dashboard.eventLabel')}: {dec.event_id}</span>
                   </div>
                   <p className="text-slate-600 dark:text-slate-300 text-xs">"{dec.justification}"</p>
                 </div>
                 <div className="text-slate-400 dark:text-slate-500 font-mono text-[11px] shrink-0">
-                  Planner: {dec.planner_id}
+                  {t('dashboard.plannerLabel')}: {dec.planner_id}
                 </div>
               </div>
             ))}

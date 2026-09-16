@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { activitiesApi, auditApi, ScheduleActivity, AuditLogEntry } from '@/api';
 import {
   Clock,
@@ -49,6 +50,7 @@ function StatusBadge({ status }: { status: string }) {
 }
 
 export default function ActivityHistory() {
+  const { t } = useTranslation();
   const [selectedActivityId, setSelectedActivityId] = useState<string>('');
   const [searchInput, setSearchInput] = useState<string>('');
 
@@ -71,7 +73,7 @@ export default function ActivityHistory() {
       setHistory(actHist.history);
       setAuditLogs(logs);
     } catch (e: any) {
-      setError('Failed to fetch activity history: ' + e.message);
+      setError(t('history.failedToFetch', { message: e.message }));
     } finally {
       setIsLoading(false);
     }
@@ -99,10 +101,10 @@ export default function ActivityHistory() {
             <div className="p-1.5 rounded-lg bg-[#FC4C02]/10 border border-[#FC4C02]/20">
               <Clock className="w-5 h-5 text-[#FC4C02]" />
             </div>
-            Activity History & Change Timeline
+            {t('history.title')}
           </h1>
           <p className="text-slate-500 dark:text-slate-400 text-xs mt-1">
-            Complete lifecycle timeline for specific scheduled Primavera activities with cryptographic audit trail.
+            {t('history.subtitle')}
           </p>
         </div>
 
@@ -112,12 +114,12 @@ export default function ActivityHistory() {
             <Input
               value={searchInput}
               onChange={(e) => setSearchInput(e.target.value)}
-              placeholder="Activity ID (e.g. PIP-PS3-SPO-015)..."
+              placeholder={t('history.searchPlaceholder')}
               className="pl-9 bg-white dark:bg-[#001438] border-slate-300 dark:border-blue-800 text-slate-900 dark:text-slate-100 text-xs h-9 w-64 font-mono focus:border-[#FC4C02] dark:focus:border-[#FC4C02]"
             />
           </div>
           <Button type="submit" size="sm" className="bg-[#FC4C02] hover:bg-[#e04302] text-white text-xs h-9">
-            Lookup
+            {t('history.lookup')}
           </Button>
         </form>
       </div>
@@ -125,7 +127,7 @@ export default function ActivityHistory() {
       {!hasSearched ? (
         <div className="text-center py-16 text-slate-400 dark:text-slate-500 text-sm border border-dashed border-slate-200 dark:border-blue-900/50 rounded-2xl">
           <Search className="w-8 h-8 mx-auto mb-3 opacity-30" />
-          Enter a Primavera activity ID (e.g. PIP-PS3-SPO-015) to view its claim &amp; decision history.
+          {t('history.emptyPrompt')}
         </div>
       ) : isLoading ? (
         <div className="space-y-4">
@@ -152,25 +154,25 @@ export default function ActivityHistory() {
                     <span className="text-xs bg-slate-100 dark:bg-blue-900/80 text-slate-700 dark:text-blue-200 border border-slate-200 dark:border-blue-700/50 px-2 py-0.5 rounded-full font-mono uppercase">
                       {activity.discipline}
                     </span>
-                    <span className="text-xs text-slate-500 dark:text-slate-400 font-mono">WBS: {activity.wbs_code}</span>
+                    <span className="text-xs text-slate-500 dark:text-slate-400 font-mono">{t('history.wbs')}: {activity.wbs_code}</span>
                   </div>
                   <h2 className="text-lg font-bold text-slate-900 dark:text-slate-100">{activity.activity_name}</h2>
                   <p className="text-xs text-slate-500 dark:text-slate-400">
-                    Location: <strong className="text-slate-700 dark:text-slate-200">{activity.location}</strong> · Planned Window:{' '}
-                    <span className="font-mono text-[#FC4C02]">{activity.planned_start}</span> to{' '}
+                    {t('history.location')}: <strong className="text-slate-700 dark:text-slate-200">{activity.location}</strong> · {t('history.plannedWindow')}:{' '}
+                    <span className="font-mono text-[#FC4C02]">{activity.planned_start}</span> {t('history.to')}{' '}
                     <span className="font-mono text-[#FC4C02]">{activity.planned_finish}</span>
                   </p>
                 </div>
 
                 <div className="flex gap-6 border-t sm:border-t-0 sm:border-l border-slate-200 dark:border-blue-900/50 pt-3 sm:pt-0 sm:pl-6 text-xs font-mono">
                   <div>
-                    <span className="text-[10px] uppercase text-slate-400 dark:text-slate-500 block mb-0.5">Baseline Pct</span>
+                    <span className="text-[10px] uppercase text-slate-400 dark:text-slate-500 block mb-0.5">{t('history.baselinePct')}</span>
                     <span className="text-slate-900 dark:text-slate-100 font-bold text-lg">{activity.baseline_pct_complete}<span className="text-sm text-slate-400">%</span></span>
                   </div>
                   <div>
-                    <span className="text-[10px] uppercase text-slate-400 dark:text-slate-500 block mb-0.5">Planned Qty</span>
+                    <span className="text-[10px] uppercase text-slate-400 dark:text-slate-500 block mb-0.5">{t('history.plannedQty')}</span>
                     <span className="text-slate-900 dark:text-slate-100 font-bold text-lg">
-                      {activity.planned_quantity || 'N/A'} <span className="text-sm text-slate-400">{activity.uom || ''}</span>
+                      {activity.planned_quantity || t('review.notAvailable')} <span className="text-sm text-slate-400">{activity.uom || ''}</span>
                     </span>
                   </div>
                 </div>
@@ -183,17 +185,17 @@ export default function ActivityHistory() {
             <CardHeader className="pb-3 border-b border-slate-200 dark:border-blue-900/50">
               <CardTitle className="text-sm font-semibold flex items-center gap-2">
                 <CalendarDays className="w-4 h-4 text-[#FC4C02]" />
-                Chronological Claim & Decision History
+                {t('history.timelineTitle')}
               </CardTitle>
               <CardDescription className="text-slate-500 dark:text-slate-400 text-xs">
-                All field claims and supervisor actions in sequence for this activity.
+                {t('history.timelineDesc')}
               </CardDescription>
             </CardHeader>
             <CardContent className="pt-6">
               {history.length === 0 ? (
                 <div className="text-center py-10 text-slate-400 dark:text-slate-500 text-sm">
                   <GitCommit className="w-8 h-8 mx-auto mb-3 opacity-30" />
-                  No history records found for this activity.
+                  {t('history.noHistory')}
                 </div>
               ) : (
                 <div className="relative pl-6 border-l-2 border-slate-200 dark:border-blue-900/50 space-y-6">
@@ -230,13 +232,13 @@ export default function ActivityHistory() {
                         <div className="flex items-center gap-4 text-slate-500 dark:text-slate-400 text-[11px] flex-wrap">
                           {item.claimed_pct !== null && (
                             <div className="flex items-center gap-1">
-                              Claimed:
+                              {t('history.claimed')}:
                               <span className="font-mono text-slate-900 dark:text-slate-100 font-bold ml-1">{item.claimed_pct}%</span>
                             </div>
                           )}
                           {item.supervisor_action && (
                             <div className="flex items-center gap-1">
-                              Supervisor:
+                              {t('history.supervisor')}:
                               <span className="font-mono text-emerald-600 dark:text-emerald-400 font-bold ml-1">{item.supervisor_action}</span>
                             </div>
                           )}
@@ -254,22 +256,22 @@ export default function ActivityHistory() {
             <CardHeader className="pb-3 border-b border-slate-200 dark:border-blue-900/50">
               <CardTitle className="text-sm font-semibold flex items-center gap-2">
                 <ShieldCheck className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
-                <span className="text-slate-900 dark:text-slate-200">Immutable Cryptographic Audit Trail</span>
-                <span className="text-[10px] bg-emerald-100 dark:bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-500/20 px-2 py-0.5 rounded-full font-mono">SHA-256 Hash Chain</span>
+                <span className="text-slate-900 dark:text-slate-200">{t('history.auditTrailTitle')}</span>
+                <span className="text-[10px] bg-emerald-100 dark:bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-500/20 px-2 py-0.5 rounded-full font-mono">{t('history.hashChain')}</span>
               </CardTitle>
               <CardDescription className="text-slate-500 dark:text-slate-400 text-xs">
-                Tamper-evident system log guaranteeing non-repudiation of field claims and planner decisions.
+                {t('history.auditTrailDesc')}
               </CardDescription>
             </CardHeader>
             <CardContent className="pt-4 space-y-3 font-mono text-[11px]">
               {auditLogs.length === 0 ? (
-                <div className="text-center py-8 text-slate-400 dark:text-slate-500">No audit log entries found.</div>
+                <div className="text-center py-8 text-slate-400 dark:text-slate-500">{t('history.noAuditLogs')}</div>
               ) : auditLogs.map((log) => (
                 <div key={log.log_id} className="p-3 bg-slate-50 dark:bg-slate-950/80 border border-slate-200 dark:border-slate-700 rounded-xl space-y-2 hover:border-emerald-300 dark:hover:border-emerald-700/50 transition-colors">
                   <div className="flex items-center justify-between text-slate-500 dark:text-slate-400 flex-wrap gap-1">
                     <span className="font-bold text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
                       <Hash className="w-3 h-3 text-emerald-500" />
-                      LOG {log.log_id} · {log.action}
+                      {t('history.log')} {log.log_id} · {log.action}
                     </span>
                     <span className="text-slate-400 dark:text-slate-500 text-[10px]">
                       {new Date(log.timestamp).toLocaleString()}
@@ -277,11 +279,11 @@ export default function ActivityHistory() {
                   </div>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-[10px]">
                     <div className="truncate p-2 bg-slate-100 dark:bg-slate-900/60 rounded-lg">
-                      <span className="text-slate-400 dark:text-slate-500 block mb-0.5">Prev Hash:</span>
+                      <span className="text-slate-400 dark:text-slate-500 block mb-0.5">{t('history.prevHash')}</span>
                       <span className="text-slate-500 dark:text-slate-500">{log.previous_hash}</span>
                     </div>
                     <div className="truncate p-2 bg-slate-100 dark:bg-slate-900/60 rounded-lg">
-                      <span className="text-slate-400 dark:text-slate-500 block mb-0.5">Curr Hash:</span>
+                      <span className="text-slate-400 dark:text-slate-500 block mb-0.5">{t('history.currHash')}</span>
                       <span className="text-[#FC4C02] dark:text-indigo-400">{log.current_hash}</span>
                     </div>
                   </div>

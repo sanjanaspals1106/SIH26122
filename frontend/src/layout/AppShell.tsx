@@ -1,7 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { Outlet, Navigate, useLocation, Link, useNavigate } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import { useAuth } from '@/auth/AuthProvider';
 import { useTheme } from '@/theme/ThemeProvider';
+import LanguageSwitcher from '@/components/LanguageSwitcher';
 import {
   LayoutDashboard,
   ClipboardList,
@@ -38,6 +40,7 @@ const IOCL = {
 export default function AppShell() {
   const { user, isAuthenticated, logout } = useAuth();
   const { theme, toggleTheme } = useTheme();
+  const { t } = useTranslation();
   const location = useLocation();
   const navigate = useNavigate();
 
@@ -57,15 +60,15 @@ export default function AppShell() {
   const isSupervisor = user.role === 'SUPERVISOR';
 
   const supervisorNavItems = [
-    { label: 'Daily Digest',      path: '/digest',    icon: ClipboardList },
-    { label: 'Review Workspace',  path: '/review',    icon: Layers },
-    { label: 'Dashboard',         path: '/dashboard', icon: LayoutDashboard },
-    { label: 'Activity History',  path: '/history',   icon: Clock },
-    { label: 'Impact Preview',    path: '/impact',    icon: Activity },
+    { label: t('nav.dailyDigest'),     path: '/digest',    icon: ClipboardList },
+    { label: t('nav.reviewWorkspace'), path: '/review',    icon: Layers },
+    { label: t('nav.dashboard'),       path: '/dashboard', icon: LayoutDashboard },
+    { label: t('nav.activityHistory'), path: '/history',   icon: Clock },
+    { label: t('nav.impactPreview'),   path: '/impact',    icon: Activity },
   ];
 
   const siteEngineerNavItems = [
-    { label: 'Claim Intake', path: '/intake', icon: PlusCircle },
+    { label: t('nav.claimIntake'), path: '/intake', icon: PlusCircle },
   ];
 
   const navItems = isSupervisor ? supervisorNavItems : siteEngineerNavItems;
@@ -116,7 +119,7 @@ export default function AppShell() {
                   Setu <span style={{ color: IOCL.orange }}>AI</span>
                 </span>
                 <span className="text-[10px] font-semibold tracking-wider truncate" style={{ color: 'rgba(255,255,255,0.55)' }}>
-                  SIH26122 · Oil India
+                  {t('common.brandTagline')}
                 </span>
               </div>
             )}
@@ -128,7 +131,7 @@ export default function AppShell() {
             size="icon"
             onClick={() => setIsCollapsed(!isCollapsed)}
             className="hidden lg:flex h-8 w-8 rounded-lg text-white/60 hover:text-white hover:bg-white/10"
-            title={isCollapsed ? 'Expand Sidebar' : 'Collapse Sidebar'}
+            title={isCollapsed ? t('nav.expandSidebar') : t('nav.collapseSidebar')}
           >
             {isCollapsed ? <ChevronRight className="w-4 h-4" /> : <ChevronLeft className="w-4 h-4" />}
           </Button>
@@ -220,7 +223,7 @@ export default function AppShell() {
               size="icon"
               onClick={handleLogout}
               className="text-white/50 hover:text-rose-300 hover:bg-rose-500/20 h-8 w-8 rounded-lg shrink-0"
-              title="Logout"
+              title={t('common.logout')}
             >
               <LogOut className="w-4 h-4" />
             </Button>
@@ -248,28 +251,23 @@ export default function AppShell() {
             >
               <Menu className="w-5 h-5" />
             </Button>
-
-            {/* Live status badge */}
-            <div className="flex items-center gap-2">
-              <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-              <span className="text-xs font-mono font-medium hidden sm:inline" style={{ color: 'rgba(255,255,255,0.65)' }}>
-                Primavera P6 v3.2 · Live
-              </span>
-            </div>
           </div>
 
           <div className="flex items-center gap-3">
+            {/* Language Toggle */}
+            <LanguageSwitcher />
+
             {/* Theme Toggle */}
             <Button
               variant="ghost"
               size="sm"
               onClick={toggleTheme}
               className="text-white/70 hover:text-white hover:bg-white/10 h-8 px-3 gap-1.5 text-xs rounded-xl border border-white/15"
-              title={`Switch to ${theme === 'dark' ? 'Light' : 'Dark'} Mode`}
+              title={theme === 'dark' ? t('common.switchToLight') : t('common.switchToDark')}
             >
               {theme === 'dark'
-                ? <><Sun className="w-3.5 h-3.5 text-amber-300" /><span className="hidden sm:inline">Light</span></>
-                : <><Moon className="w-3.5 h-3.5 text-blue-300" /><span className="hidden sm:inline">Dark</span></>
+                ? <><Sun className="w-3.5 h-3.5 text-amber-300" /><span className="hidden sm:inline">{t('common.light')}</span></>
+                : <><Moon className="w-3.5 h-3.5 text-blue-300" /><span className="hidden sm:inline">{t('common.dark')}</span></>
               }
             </Button>
 
@@ -283,8 +281,8 @@ export default function AppShell() {
               }}
             >
               <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: '#F47920' }} />
-              <span className="hidden sm:inline">Human-in-the-Loop</span>
-              <span className="sm:hidden">HIL</span>
+              <span className="hidden sm:inline">{t('common.humanInTheLoop')}</span>
+              <span className="sm:hidden">{t('common.hil')}</span>
             </div>
           </div>
         </header>

@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -18,6 +19,7 @@ import { schedulesApi, ImpactPreviewResult } from '@/api';
 import { cn } from '@/lib/utils';
 
 export default function ImpactPreview() {
+  const { t } = useTranslation();
   const [activityId, setActivityId] = useState('');
   const [delayDays, setDelayDays] = useState(5);
   const [isSimulating, setIsSimulating] = useState(false);
@@ -31,7 +33,7 @@ export default function ImpactPreview() {
       const res = await schedulesApi.getImpactPreview(activityId, delayDays);
       setSimulationResult(res);
     } catch (e: any) {
-      setError('Failed to compute impact preview: ' + e.message);
+      setError(t('impact.failedToCompute', { message: e.message }));
     } finally {
       setIsSimulating(false);
     }
@@ -52,10 +54,10 @@ export default function ImpactPreview() {
             <div className="p-1.5 rounded-lg bg-violet-100 dark:bg-violet-500/10 border border-violet-200 dark:border-violet-500/20">
               <GitBranch className="w-5 h-5 text-violet-600 dark:text-violet-400" />
             </div>
-            Precedence Ripple Impact Preview
+            {t('impact.title')}
           </h1>
           <p className="text-slate-500 dark:text-slate-400 text-xs mt-1">
-            Simulate downstream successor start/finish date shifts before committing actual delays.
+            {t('impact.subtitle')}
           </p>
         </div>
       </div>
@@ -64,7 +66,7 @@ export default function ImpactPreview() {
       <div className="p-3.5 rounded-xl bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-700/50 text-blue-700 dark:text-blue-300 text-xs flex items-center gap-2.5">
         <Info className="w-4 h-4 text-blue-500 dark:text-blue-400 shrink-0" />
         <span>
-          <strong>Preview Scope:</strong> Immediate Finish-to-Start (FS) successors only · Not a full CPM recalculation · For planning reference only
+          <strong>{t('impact.scopeDisclaimerLabel')}</strong> {t('impact.scopeDisclaimer')}
         </span>
       </div>
 
@@ -74,10 +76,10 @@ export default function ImpactPreview() {
           <CardHeader>
             <CardTitle className="text-sm font-semibold flex items-center gap-2 text-slate-900 dark:text-slate-200">
               <Activity className="w-4 h-4 text-violet-600 dark:text-violet-400" />
-              Simulation Inputs
+              {t('impact.simulationInputs')}
             </CardTitle>
             <CardDescription className="text-slate-500 dark:text-slate-400 text-xs">
-              Enter a Primavera Activity ID and hypothetical delay duration to preview ripple impact.
+              {t('impact.simulationInputsDesc')}
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-5 text-xs">
@@ -89,18 +91,18 @@ export default function ImpactPreview() {
             )}
 
             <div className="space-y-1.5">
-              <Label className="text-xs text-slate-700 dark:text-slate-300 font-semibold">Primavera Activity ID</Label>
+              <Label className="text-xs text-slate-700 dark:text-slate-300 font-semibold">{t('impact.activityIdLabel')}</Label>
               <Input
                 value={activityId}
                 onChange={(e) => setActivityId(e.target.value)}
-                placeholder="e.g. PIP-PS3-SPO-015"
+                placeholder={t('impact.activityIdPlaceholder')}
                 className="bg-slate-50 dark:bg-[#001438] border-slate-300 dark:border-blue-800 font-mono text-slate-900 dark:text-slate-200 focus:border-violet-500 dark:focus:border-violet-500"
               />
-              <p className="text-[11px] text-slate-400 dark:text-slate-500">Enter the Primavera P6 activity identifier</p>
+              <p className="text-[11px] text-slate-400 dark:text-slate-500">{t('impact.activityIdHint')}</p>
             </div>
 
             <div className="space-y-1.5">
-              <Label className="text-xs text-slate-700 dark:text-slate-300 font-semibold">Hypothetical Delay (Days)</Label>
+              <Label className="text-xs text-slate-700 dark:text-slate-300 font-semibold">{t('impact.delayLabel')}</Label>
               <div className="relative">
                 <Input
                   type="number"
@@ -110,16 +112,16 @@ export default function ImpactPreview() {
                   onChange={(e) => setDelayDays(Number(e.target.value))}
                   className="bg-slate-50 dark:bg-[#001438] border-slate-300 dark:border-blue-800 text-slate-900 dark:text-slate-200 font-mono focus:border-violet-500 dark:focus:border-violet-500 pr-16"
                 />
-                <span className="absolute right-3 top-2.5 text-slate-400 dark:text-slate-500 text-xs font-mono">days</span>
+                <span className="absolute right-3 top-2.5 text-slate-400 dark:text-slate-500 text-xs font-mono">{t('impact.days')}</span>
               </div>
-              <p className="text-[11px] text-slate-400 dark:text-slate-500">Range: 1–90 days</p>
+              <p className="text-[11px] text-slate-400 dark:text-slate-500">{t('impact.delayRangeHint')}</p>
             </div>
 
             {/* Visual delay severity indicator */}
             <div className="space-y-2">
               <div className="flex justify-between text-[10px] text-slate-400 dark:text-slate-500">
-                <span>Low Impact</span>
-                <span>High Impact</span>
+                <span>{t('impact.lowImpact')}</span>
+                <span>{t('impact.highImpact')}</span>
               </div>
               <div className="h-2 rounded-full bg-gradient-to-r from-amber-400 via-orange-500 to-rose-600 relative">
                 <div
@@ -137,12 +139,12 @@ export default function ImpactPreview() {
               {isSimulating ? (
                 <>
                   <Loader2 className="w-4 h-4 animate-spin" />
-                  Computing Ripple Shift...
+                  {t('impact.computing')}
                 </>
               ) : (
                 <>
                   <TrendingUp className="w-4 h-4" />
-                  Run Successor Impact Analysis
+                  {t('impact.runAnalysis')}
                 </>
               )}
             </Button>
@@ -157,10 +159,10 @@ export default function ImpactPreview() {
                 <div className="w-14 h-14 rounded-2xl bg-violet-100 dark:bg-violet-500/10 border border-violet-200 dark:border-violet-500/20 flex items-center justify-center mx-auto">
                   <GitBranch className="w-7 h-7 text-violet-500 dark:text-violet-400" />
                 </div>
-                <h3 className="text-slate-700 dark:text-slate-300 font-semibold text-sm">No Simulation Run Yet</h3>
+                <h3 className="text-slate-700 dark:text-slate-300 font-semibold text-sm">{t('impact.noSimulationTitle')}</h3>
                 <p className="text-xs text-slate-400 dark:text-slate-500">
-                  Enter an Activity ID and delay duration on the left, then click{' '}
-                  <strong className="text-violet-600 dark:text-violet-400">Run Successor Impact Analysis</strong> to preview immediate FS successor schedule shifts.
+                  {t('impact.noSimulationDesc')}{' '}
+                  <strong className="text-violet-600 dark:text-violet-400">{t('impact.runAnalysis')}</strong> {t('impact.noSimulationDescEnd')}
                 </p>
               </div>
             </Card>
@@ -171,12 +173,15 @@ export default function ImpactPreview() {
                 <AlertTriangle className="w-5 h-5 text-amber-500 shrink-0 mt-0.5" />
                 <div>
                   <p className="text-sm font-bold text-amber-800 dark:text-amber-300">
-                    Delay of +{simulationResult.delay_days} days on{' '}
-                    <span className="font-mono">{simulationResult.activity_id}</span> will ripple to{' '}
-                    {simulationResult.successors.length} immediate successor{simulationResult.successors.length !== 1 ? 's' : ''}.
+                    {t('impact.delayRippleSummary', {
+                      days: simulationResult.delay_days,
+                      activityId: simulationResult.activity_id,
+                      count: simulationResult.successors.length,
+                      plural: simulationResult.successors.length !== 1 ? 's' : '',
+                    })}
                   </p>
                   <p className="text-xs text-amber-700 dark:text-amber-400/80 mt-0.5">
-                    Commit this delay only after reviewing all shifted successor windows below.
+                    {t('impact.commitAfterReview')}
                   </p>
                 </div>
               </div>
@@ -187,10 +192,10 @@ export default function ImpactPreview() {
                   <CardTitle className="text-sm font-semibold flex items-center justify-between">
                     <span className="flex items-center gap-2">
                       <GitBranch className="w-4 h-4 text-violet-600 dark:text-violet-400" />
-                      Finish-to-Start Precedence Ripple Graph
+                      {t('impact.rippleGraphTitle')}
                     </span>
                     <span className="text-[10px] bg-rose-100 dark:bg-rose-500/20 text-rose-700 dark:text-rose-400 border border-rose-200 dark:border-rose-500/30 px-2 py-0.5 rounded-full font-mono font-bold">
-                      +{simulationResult.delay_days}d shift
+                      {t('impact.shiftLabel', { days: simulationResult.delay_days })}
                     </span>
                   </CardTitle>
                 </CardHeader>
@@ -200,7 +205,7 @@ export default function ImpactPreview() {
                     {/* Origin Node */}
                     <div className="relative p-4 rounded-xl bg-amber-50 dark:bg-amber-500/10 border-2 border-amber-400/60 dark:border-amber-500/50 text-center w-full sm:w-48 shrink-0">
                       <div className="text-[10px] font-bold text-amber-600 dark:text-amber-400 uppercase tracking-wider mb-1.5 flex items-center justify-center gap-1">
-                        <Calendar className="w-3 h-3" /> Impact Origin
+                        <Calendar className="w-3 h-3" /> {t('impact.impactOrigin')}
                       </div>
                       <div className="font-mono font-bold text-slate-900 dark:text-slate-100 text-base">{simulationResult.activity_id}</div>
                       <span className="absolute -top-3 -right-3 bg-rose-600 text-white text-xs px-2 py-0.5 rounded-full font-bold shadow-lg">
@@ -240,11 +245,11 @@ export default function ImpactPreview() {
 
                           <div className="grid grid-cols-2 gap-3 text-[11px] font-mono pt-2 border-t border-slate-200 dark:border-slate-700">
                             <div className="space-y-0.5">
-                              <span className="text-slate-400 dark:text-slate-500 text-[10px] uppercase tracking-wide block">Original Start</span>
+                              <span className="text-slate-400 dark:text-slate-500 text-[10px] uppercase tracking-wide block">{t('impact.originalStart')}</span>
                               <span className="text-slate-700 dark:text-slate-300 font-semibold">{succ.original_start}</span>
                             </div>
                             <div className="space-y-0.5">
-                              <span className="text-slate-400 dark:text-slate-500 text-[10px] uppercase tracking-wide block">Shifted Start</span>
+                              <span className="text-slate-400 dark:text-slate-500 text-[10px] uppercase tracking-wide block">{t('impact.shiftedStart')}</span>
                               <span className={cn('font-bold', slippageColor(simulationResult.delay_days))}>{succ.shifted_start}</span>
                             </div>
                           </div>

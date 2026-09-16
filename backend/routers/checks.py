@@ -636,6 +636,19 @@ def get_audit(entity_id: str):
 @router.get("/dashboard/silent-activities", dependencies=_supervisor_dep)
 def get_silent_activities(schedule_id: Optional[str] = None):
     with get_connection() as conn:
+        # Default to the current active schedule (same "most recently
+        # created" resolution get_activity_rollup above already uses),
+        # not every schedule ever uploaded. Without this, repeated test/demo
+        # re-uploads of the same baseline each contribute their own
+        # never-claimed activities, multiplying the silent count by however
+        # many duplicate schedule rows exist rather than reflecting the one
+        # schedule actually in use.
+        if not schedule_id:
+            sched_row = conn.execute(
+                "SELECT schedule_id FROM schedules ORDER BY created_at DESC LIMIT 1"
+            ).fetchone()
+            schedule_id = sched_row["schedule_id"] if sched_row else None
+
         query = """
             SELECT sa.activity_id, sa.schedule_id, sa.activity_name, sa.discipline,
                    sa.location, sa.planned_start, sa.planned_finish, sa.baseline_pct_complete

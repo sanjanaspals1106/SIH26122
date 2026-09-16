@@ -10,12 +10,46 @@ Changes in this version, per PRD v5:
     (PRD v5 6.2: "User identity must never be accepted as a free-form
     request-body field"). They're derived from the authenticated user.
   - Postgres via psycopg2 instead of SQLite.
+
+File-intake architecture (this revision):
+  A single uploaded file commonly reports progress on SEVERAL distinct
+  schedule activities at once -- a daily PDF report with one row per
+  discipline, a multi-sheet discipline spreadsheet, a P6 .xer export, a
+  photographed site diary listing several disciplines. Collapsing a whole
+  file into one LLM call bound for one execution_event silently discards
+  every activity but one. POST /claims/file therefore extracts a LIST of
+  claim drafts per file (see ClaimDraft/_build_claim_drafts) and creates one
+  execution_event per draft -- same pattern /claims/schedule-export already
+  used for structured CSV/XLSX exports, now shared via
+  shared/tabular_extraction.py and extended to PDF/TXT/image content via
+  shared/llm_extraction.py's batch (array) extraction contract, and to .xer
+  via shared/xer_parser.py.
+
+  Two claim-construction strategies are used, chosen per file shape:
+    - STRUCTURED (no LLM): CSV/XLSX with a recognizable Activity ID column,
+      or a .xer file's TASK table. The file's own columns/fields are ground
+      truth -- deterministic, no LLM cost/latency, no risk of the model
+      mis-reading a value that's already unambiguous.
+    - LLM-EXTRACTED (batch): PDF text, plain text, OCR'd/vision-read image
+      content, or a CSV/XLSX sheet with no recognizable activity-id column.
+      The model returns a JSON array of claims (see
+      llm_extraction.BATCH_SYSTEM_PROMPT) instead of a single object.
+
+  Error handling: a genuine extraction failure (corrupt/unreadable file,
+  unsupported format, LLM/vision/OCR failure, missing LLM config) raises and
+  the endpoint returns a 415/422/502 with a clear reason -- it never falls
+  back to silently creating a claim with all-null fields. An all-null/sparse
+  claim is only ever created when extraction ran successfully and the
+  source genuinely had little to say (a real "insufficient information"
+  outcome, not a masked failure).
 """
 import hashlib
 import io
+import logging
 import os
 import uuid
-from datetime import date, datetime
+from dataclasses import dataclass
+from datetime import date
 from pathlib import Path
 from typing import List, Optional
 
@@ -23,101 +57,271 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Upload
 
 from backend.shared.auth import UserProfile as CurrentUser, require_role
 from backend.shared.db import get_db
-from backend.shared.llm_extraction import extract_claim_fields
+from backend.shared.llm_extraction import (
+    LLMExtractionError,
+    extract_claim_fields,
+    extract_claim_fields_batch,
+    extract_claim_fields_from_image_batch,
+)
 from backend.shared.schemas import (
-    ClaimMode,
     ClaimResponse,
-    Discipline,
-    EventType,
+    ExtractedClaimFields,
     InputChannel,
     TextClaimRequest,
     UploadPurpose,
 )
+from backend.shared.tabular_extraction import (
+    build_claim_from_row,
+    detect_progress_columns,
+    read_tabular_file,
+)
+from backend.shared.xer_parser import (
+    XERParseError,
+    activities_with_progress as xer_activities_with_progress,
+    build_claim_from_activity as build_claim_from_xer_activity,
+    extract_activities as extract_xer_activities,
+)
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/v1", tags=["intake"])
 
-# Where evidence photos land on disk (SCANNED_DIARY images never get saved
-# here -- they're OCR'd and discarded, per the purpose contract below).
+# Where evidence photos land on disk (a SCANNED_DIARY-style image never gets
+# saved here -- it's extracted and discarded, per the purpose contract
+# below; only an EVIDENCE_PHOTO attached to an already-typed claim persists).
 UPLOAD_DIR = Path(
     os.getenv("UPLOAD_DIR") or (Path(__file__).resolve().parents[1] / "uploads")
 )
 
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png"}
-
-_DISCIPLINE_ALIASES = {
-    "civil": Discipline.CIVIL.value,
-    "piping": Discipline.PIPING.value,
-    "static/rotating equipment": Discipline.STATIC_ROTATING_EQUIPMENT.value,
-    "static rotating equipment": Discipline.STATIC_ROTATING_EQUIPMENT.value,
-    "electrical": Discipline.ELECTRICAL.value,
-    "instrumentation": Discipline.INSTRUMENTATION.value,
-    "hse": Discipline.HSE.value,
-}
+TABULAR_EXTENSIONS = {".csv", ".xlsx", ".xls"}
+_IMAGE_MIME_TYPES = {".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png"}
 
 
-def _normalize_discipline(raw: Optional[str]) -> Optional[str]:
-    if not raw:
-        return None
-    key = raw.strip().lower()
-    if key in _DISCIPLINE_ALIASES:
-        return _DISCIPLINE_ALIASES[key]
-    upper = raw.strip().upper().replace(" ", "_").replace("/", "_")
-    return upper or None
+class UnsupportedFileError(Exception):
+    """Extension not recognized at all -> 415."""
 
 
-def _extract_text_from_file(filename: str, contents: bytes) -> str:
-    """
-    Extracts plain text from a non-image file intake (#2): .txt read
-    directly, .pdf via PyMuPDF, .csv/.xlsx via pandas -- the resulting text
-    is fed into the same LLM extraction step any typed claim goes through.
-    """
-    ext = Path(filename or "").suffix.lower()
+class FileParseError(Exception):
+    """Recognized extension, but content unreadable/corrupt/empty/has
+    nothing extractable -> 422."""
 
-    if ext == ".txt":
-        return contents.decode("utf-8", errors="replace")
 
-    if ext == ".pdf":
-        import pymupdf as fitz
+class OCRUnavailableError(Exception):
+    """pytesseract/tesseract isn't installed or failed to run -- distinct
+    from "ran and found no text", so a missing OCR dependency is never
+    silently indistinguishable from a blank scan."""
 
+
+@dataclass
+class ClaimDraft:
+    raw_text: str
+    extracted: ExtractedClaimFields
+
+
+def _extract_pdf_text(contents: bytes) -> str:
+    import pymupdf as fitz
+
+    try:
         doc = fitz.open(stream=contents, filetype="pdf")
-        try:
-            return "\n".join(page.get_text() for page in doc)
-        finally:
-            doc.close()
-
-    if ext == ".csv":
-        import pandas as pd
-
-        df = pd.read_csv(io.BytesIO(contents))
-        return df.to_string(index=False)
-
-    if ext in (".xlsx", ".xls"):
-        import pandas as pd
-
-        df = pd.read_excel(io.BytesIO(contents))
-        return df.to_string(index=False)
-
-    raise HTTPException(
-        status_code=415,
-        detail=f"Unsupported file type '{ext}'. Accepted: .pdf, .xlsx, .csv, .txt, .jpg, .png",
-    )
+    except Exception as e:
+        raise FileParseError(f"Could not open PDF file: {e}") from e
+    try:
+        text = "\n".join(page.get_text() for page in doc)
+    finally:
+        doc.close()
+    if not text.strip():
+        raise FileParseError(
+            "PDF contains no extractable text — likely a scanned/image-only "
+            "PDF. Re-upload as a photo/scan (.jpg/.png) for OCR/vision "
+            "extraction, or as a text-based PDF."
+        )
+    return text
 
 
 def _run_ocr(contents: bytes) -> str:
     """
-    pytesseract by default, per the shared context's OCR decision -- no
-    vision-LLM call in the default path. Never raises: a malformed/blank
-    scan just yields empty text, which the caller falls back on.
+    Best-effort OCR fallback for images, used only when vision-LLM
+    extraction is unavailable/fails (see _build_image_claim_drafts). Raises
+    OCRUnavailableError when the tesseract binary itself isn't
+    installed/working -- that must never be confused with "OCR ran and the
+    scan was genuinely blank", which legitimately returns "".
     """
+    from PIL import Image
+
     try:
         import pytesseract
-        from PIL import Image
+    except ImportError as e:
+        raise OCRUnavailableError(f"pytesseract is not installed: {e}") from e
 
+    try:
         image = Image.open(io.BytesIO(contents))
+    except Exception as e:
+        raise FileParseError(f"Could not open image file: {e}") from e
+
+    try:
         text = pytesseract.image_to_string(image)
-        return (text or "").strip()
-    except Exception:
-        return ""
+    except Exception as e:
+        raise OCRUnavailableError(
+            f"OCR failed — tesseract binary not available or errored: {e}"
+        ) from e
+    return (text or "").strip()
+
+
+def _batch_text_drafts(text: str) -> list[ClaimDraft]:
+    claims = extract_claim_fields_batch(text)
+    if not claims:
+        raise FileParseError(
+            "No extractable claim/progress information found in this file's text."
+        )
+    return [ClaimDraft(raw_text=text, extracted=c) for c in claims]
+
+
+def _tabular_claim_drafts(filename: str, contents: bytes) -> list[ClaimDraft]:
+    try:
+        sheets = read_tabular_file(filename, contents)
+    except ValueError as e:
+        raise FileParseError(str(e)) from e
+
+    drafts: list[ClaimDraft] = []
+    unstructured_chunks: list[str] = []
+
+    for sheet_name, df in sheets.items():
+        cols = detect_progress_columns(list(df.columns))
+        if cols is None:
+            # No recognizable activity-id column on this sheet -- don't
+            # drop it, fall back to LLM extraction on its flattened text
+            # (still batched together with any other unstructured sheets
+            # below, in one pass).
+            label = f"Sheet: {sheet_name}\n" if sheet_name else ""
+            unstructured_chunks.append(label + df.to_string(index=False))
+            continue
+        for _, row in df.iterrows():
+            result = build_claim_from_row(row.to_dict(), cols, discipline_hint=sheet_name or None)
+            if result is not None:
+                raw_text, extracted = result
+                drafts.append(ClaimDraft(raw_text=raw_text, extracted=extracted))
+
+    if unstructured_chunks:
+        combined = "\n\n".join(unstructured_chunks)
+        try:
+            drafts.extend(_batch_text_drafts(combined))
+        except FileParseError:
+            # Only raise if this leaves us with nothing at all -- a file
+            # that's part-structured, part-narrative-with-nothing-useful
+            # shouldn't lose its structured claims over the narrative half
+            # coming up empty.
+            if not drafts:
+                raise
+
+    if not drafts:
+        raise FileParseError(
+            "No extractable claim/progress information found in this file "
+            "(no recognizable activity-id column, and no claim found in the "
+            "remaining text)."
+        )
+    return drafts
+
+
+def _xer_claim_drafts(contents: bytes) -> list[ClaimDraft]:
+    try:
+        activities = extract_xer_activities(contents)
+    except XERParseError as e:
+        raise FileParseError(str(e)) from e
+
+    progressed = xer_activities_with_progress(activities)
+    if not progressed:
+        raise FileParseError(
+            "XER file parsed successfully but contains no activities with "
+            "reportable progress (all activities are not-yet-started)."
+        )
+    return [
+        ClaimDraft(raw_text=raw_text, extracted=extracted)
+        for raw_text, extracted in (build_claim_from_xer_activity(a) for a in progressed)
+    ]
+
+
+def _image_claim_drafts(contents: bytes, filename: str, raw_claim_text_fallback: Optional[str]) -> list[ClaimDraft]:
+    """
+    Image-as-claim extraction: try vision-LLM first (per project preference
+    for reusing the existing LLM architecture over a second OCR-only
+    service), fall back to pytesseract OCR + the same batch text extractor
+    used by PDF/TXT if vision is unavailable/fails, and only fall back to a
+    caller-supplied raw_claim_text as a last resort. Raises if every path
+    fails -- never silently returns a null-filled claim.
+    """
+    ext = Path(filename or "").suffix.lower()
+    mime_type = _IMAGE_MIME_TYPES.get(ext, "image/png")
+
+    vision_error: Optional[str] = None
+    try:
+        claims = extract_claim_fields_from_image_batch(contents, mime_type=mime_type)
+        if claims:
+            return [ClaimDraft(raw_text=f"[Vision-extracted from {filename}]", extracted=c) for c in claims]
+        vision_error = "vision model found no claims in the image"
+    except LLMExtractionError as e:
+        vision_error = str(e)
+        logger.warning("Vision extraction failed for %s, falling back to OCR: %s", filename, e)
+
+    ocr_error: Optional[str] = None
+    try:
+        ocr_text = _run_ocr(contents)
+        if ocr_text:
+            return _batch_text_drafts(ocr_text)
+        ocr_error = "OCR produced no text"
+    except OCRUnavailableError as e:
+        ocr_error = str(e)
+    except FileParseError as e:
+        ocr_error = str(e)
+
+    if raw_claim_text_fallback:
+        return _batch_text_drafts(raw_claim_text_fallback)
+
+    raise FileParseError(
+        f"Could not extract claim information from image '{filename}': "
+        f"vision extraction failed ({vision_error}); OCR fallback also "
+        f"failed ({ocr_error}). Provide raw_claim_text as a fallback, or "
+        "configure LLM_PROVIDER=gemini / LLM_VISION_MODEL for image support."
+    )
+
+
+def _build_claim_drafts(
+    filename: str, contents: bytes, raw_claim_text_fallback: Optional[str] = None
+) -> tuple[list[ClaimDraft], str, InputChannel]:
+    """
+    Dispatch a non-EVIDENCE_PHOTO file upload to the right extraction
+    strategy by extension. Returns (drafts, document_type, input_channel).
+    Raises UnsupportedFileError / FileParseError / LLMExtractionError.
+    """
+    ext = Path(filename or "").suffix.lower()
+
+    if ext in IMAGE_EXTENSIONS:
+        return _image_claim_drafts(contents, filename, raw_claim_text_fallback), "SCANNED_DIARY", InputChannel.SCANNED_OCR
+
+    if ext == ".txt":
+        text = contents.decode("utf-8", errors="replace")
+        if not text.strip():
+            raise FileParseError("Text file is empty.")
+        return _batch_text_drafts(text), "DPR", InputChannel.FILE_UPLOAD
+
+    if ext == ".pdf":
+        text = _extract_pdf_text(contents)
+        return _batch_text_drafts(text), "DPR", InputChannel.FILE_UPLOAD
+
+    if ext in TABULAR_EXTENSIONS:
+        return _tabular_claim_drafts(filename, contents), "DPR", InputChannel.FILE_UPLOAD
+
+    if ext == ".xer":
+        # XER rows already carry a real activity_id, same as a P6/MSP
+        # schedule-export CSV -- SCHEDULE_EXPORT is the correct channel
+        # label for "structured, pre-identified progress source", not a
+        # generic FILE_UPLOAD.
+        return _xer_claim_drafts(contents), "SCHEDULE_EXPORT_PROGRESS", InputChannel.SCHEDULE_EXPORT
+
+    raise UnsupportedFileError(
+        f"Unsupported file type '{ext}'. Accepted: .pdf, .xlsx, .xls, .csv, "
+        ".txt, .xer, .jpg, .jpeg, .png"
+    )
 
 
 @router.get("/intake/health")
@@ -168,6 +372,61 @@ def _row_to_claim_response(row) -> ClaimResponse:
     )
 
 
+def _insert_execution_event(
+    cur,
+    *,
+    event_id: str,
+    document_id: str,
+    schedule_id: str,
+    event_date_val: date,
+    raw_claim_text: str,
+    input_channel: str,
+    language_detected: Optional[str],
+    reported_activity_id: Optional[str],
+    discipline: Optional[str],
+    action: Optional[str],
+    event_type: Optional[str],
+    claim_mode: str,
+    asset_tag: Optional[str],
+    location: Optional[str],
+    claimed_quantity: Optional[float],
+    claimed_uom: Optional[str],
+    claimed_pct: Optional[float],
+    delay_reason: Optional[str],
+    supervisor_id: str,
+    photo_path: Optional[str] = None,
+) -> None:
+    """
+    Shared INSERT for every intake path (text, file, schedule-export) --
+    factored out so a file that yields N claims doesn't need N copies of
+    this statement, and so every path stays in sync on the same column list.
+    """
+    cur.execute(
+        """INSERT INTO execution_events (
+            event_id, document_id, schedule_id, event_date, raw_claim_text,
+            input_channel, language_detected, reported_activity_id, discipline,
+            action, event_type, claim_mode, asset_tag, location,
+            claimed_quantity, claimed_uom, claimed_pct, delay_reason,
+            supervisor_id, photo_path, status
+        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'EXTRACTED')""",
+        (
+            event_id, document_id, schedule_id, event_date_val, raw_claim_text,
+            input_channel, language_detected, reported_activity_id, discipline,
+            action, event_type, claim_mode, asset_tag, location,
+            claimed_quantity, claimed_uom, claimed_pct, delay_reason,
+            supervisor_id, photo_path,
+        ),
+    )
+
+
+def _insert_source_reference(cur, *, event_id: str, file_name: Optional[str], raw_snippet: str) -> None:
+    cur.execute(
+        """INSERT INTO source_references (reference_id, event_id, file_name, sheet_name, row_cell_ref, message_id, raw_snippet)
+           VALUES (%s, %s, %s, %s, %s, %s, %s)""",
+        (str(uuid.uuid4()), event_id, file_name, None, None, None, raw_snippet[:2000]),
+    )
+
+
 @router.post("/claims/text", response_model=ClaimResponse)
 def create_text_claim(
     payload: TextClaimRequest,
@@ -200,41 +459,52 @@ def create_text_claim(
             (document_id, f"[{payload.input_channel.value}]", "CHAT_LOG", current_user.id, text_hash),
         )
 
-        # 2. Run extraction.
-        extracted = extract_claim_fields(payload.raw_claim_text)
+        # 2. Run extraction. A genuine extraction failure (bad/missing LLM
+        #    config, network error, malformed model output) must not
+        #    masquerade as a successful-but-empty claim -- surface it as a
+        #    clear error instead of silently writing an all-null row.
+        try:
+            extracted = extract_claim_fields(payload.raw_claim_text)
+        except LLMExtractionError as e:
+            conn.rollback()
+            raise HTTPException(
+                status_code=502,
+                detail=f"Claim extraction failed: {e}. The claim was not created — please retry.",
+            )
 
         # 3. Insert the claim at EXTRACTED (the only status M2 is allowed to write).
         event_id = str(uuid.uuid4())
-        event_date = extracted.event_date or date.today()
+        event_date_val = extracted.event_date or date.today()
 
-        cur.execute(
-            """INSERT INTO execution_events (
-                event_id, document_id, schedule_id, event_date, raw_claim_text,
-                input_channel, language_detected, reported_activity_id, discipline,
-                action, event_type, claim_mode, asset_tag, location,
-                claimed_quantity, claimed_uom, claimed_pct, delay_reason,
-                supervisor_id, status
-            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'EXTRACTED')""",
-            (
-                event_id, document_id, schedule_id, event_date, payload.raw_claim_text,
-                payload.input_channel.value, extracted.language_detected, extracted.reported_activity_id,
-                extracted.discipline.value if extracted.discipline else None,
-                extracted.action, extracted.event_type.value if extracted.event_type else None,
-                extracted.claim_mode.value, extracted.asset_tag, extracted.location,
-                extracted.claimed_quantity, extracted.claimed_uom, extracted.claimed_pct,
-                extracted.delay_reason.value if extracted.delay_reason else None,
-                current_user.id,
-            ),
+        _insert_execution_event(
+            cur,
+            event_id=event_id,
+            document_id=document_id,
+            schedule_id=schedule_id,
+            event_date_val=event_date_val,
+            raw_claim_text=payload.raw_claim_text,
+            input_channel=payload.input_channel.value,
+            language_detected=extracted.language_detected,
+            reported_activity_id=extracted.reported_activity_id,
+            discipline=extracted.discipline.value if extracted.discipline else None,
+            action=extracted.action,
+            event_type=extracted.event_type.value if extracted.event_type else None,
+            claim_mode=extracted.claim_mode.value,
+            asset_tag=extracted.asset_tag,
+            location=extracted.location,
+            claimed_quantity=extracted.claimed_quantity,
+            claimed_uom=extracted.claimed_uom,
+            claimed_pct=extracted.claimed_pct,
+            delay_reason=extracted.delay_reason.value if extracted.delay_reason else None,
+            supervisor_id=current_user.id,
         )
 
         # Provenance (feature #2's "Provenance" requirement): for typed/voice
         # claims there's no source file, so the raw claim text itself is the
         # snippet -- kept consistent with the file-intake endpoints below,
         # which record source_references the same way.
-        cur.execute(
-            """INSERT INTO source_references (reference_id, event_id, file_name, sheet_name, row_cell_ref, message_id, raw_snippet)
-               VALUES (%s, %s, %s, %s, %s, %s, %s)""",
-            (str(uuid.uuid4()), event_id, None, None, None, None, payload.raw_claim_text[:2000]),
+        _insert_source_reference(
+            cur, event_id=event_id, file_name=None, raw_snippet=payload.raw_claim_text
         )
 
         conn.commit()
@@ -281,7 +551,7 @@ def list_claims(
     return [_row_to_claim_response(r) for r in rows]
 
 
-@router.post("/claims/file", response_model=ClaimResponse)
+@router.post("/claims/file", response_model=List[ClaimResponse])
 def create_file_claim(
     file: UploadFile = File(...),
     purpose: UploadPurpose = Form(UploadPurpose.EVIDENCE_PHOTO),
@@ -290,11 +560,23 @@ def create_file_claim(
     current_user: CurrentUser = Depends(require_role("SITE_ENGINEER")),
 ):
     """
-    File intake (#2): .pdf/.xlsx/.csv/.txt, or an image disambiguated by
-    `purpose`. EVIDENCE_PHOTO (default) is proof attached to a claim --
-    saved to disk, its path recorded in photo_path for M4's evidence
-    check. SCANNED_DIARY (#21) means the image IS the claim -- routed
-    through pytesseract OCR instead, never written to photo_path.
+    File intake (#2): .pdf/.xlsx/.xls/.csv/.txt/.xer, or an image. A single
+    file commonly reports progress on several distinct activities (a daily
+    report table, a multi-sheet discipline spreadsheet, a schedule export,
+    a multi-section site diary photo) -- this returns one ClaimResponse per
+    activity actually found, not one per file. See the module docstring for
+    the extraction architecture.
+
+    Images are handled by `purpose`:
+      - EVIDENCE_PHOTO (default) + raw_claim_text supplied: the photo is
+        evidence attached to that already-typed claim -- saved to disk, its
+        path recorded in photo_path for M4's evidence check. Unchanged from
+        the original contract.
+      - Anything else (explicit SCANNED_DIARY, or an image with no
+        raw_claim_text at all): the image itself IS the claim -- extracted
+        via vision-LLM/OCR (see _image_claim_drafts), never written to
+        photo_path. This is what makes a bare photo upload (no typed text)
+        a legitimate claim source instead of a guaranteed 422.
     """
     schedule_id = _get_active_schedule_id(conn)
     if not schedule_id:
@@ -313,46 +595,35 @@ def create_file_claim(
     photo_path: Optional[str] = None
     document_type = "DPR"
     input_channel = InputChannel.FILE_UPLOAD
+    drafts: list[ClaimDraft]
 
-    if ext in IMAGE_EXTENSIONS:
-        if purpose == UploadPurpose.SCANNED_DIARY:
-            document_type = "SCANNED_DIARY"
-            input_channel = InputChannel.SCANNED_OCR
-            ocr_text = _run_ocr(contents)
-            # A poor/degraded scan can legitimately OCR to nothing --
-            # fall back to an accompanying raw_claim_text rather than
-            # hard-failing the whole intake, since OCR here is explicitly
-            # not required to be production-grade.
-            text_content = ocr_text or (raw_claim_text or "")
-        else:  # EVIDENCE_PHOTO
-            document_type = "QC_INSPECTION"
-            if not raw_claim_text:
-                raise HTTPException(
-                    status_code=422,
-                    detail=(
-                        "raw_claim_text is required when purpose=EVIDENCE_PHOTO "
-                        "-- the photo is evidence attached to a claim, not the "
-                        "claim itself."
-                    ),
-                )
-            text_content = raw_claim_text
-            UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
-            saved_name = f"{uuid.uuid4()}_{file.filename}"
-            saved_path = UPLOAD_DIR / saved_name
-            saved_path.write_bytes(contents)
-            photo_path = str(saved_path)
+    if ext in IMAGE_EXTENSIONS and purpose == UploadPurpose.EVIDENCE_PHOTO and raw_claim_text:
+        # Original EVIDENCE_PHOTO contract, unchanged: the photo is proof
+        # attached to a claim the caller already typed out.
+        document_type = "QC_INSPECTION"
+        UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+        saved_name = f"{uuid.uuid4()}_{file.filename}"
+        saved_path = UPLOAD_DIR / saved_name
+        saved_path.write_bytes(contents)
+        photo_path = str(saved_path)
+        drafts = [ClaimDraft(raw_text=raw_claim_text, extracted=_extract_single_or_raise(raw_claim_text))]
     else:
-        text_content = _extract_text_from_file(file.filename or "upload", contents)
-        if raw_claim_text:
-            text_content = f"{text_content}\n\n{raw_claim_text}"
-
-    if not text_content or not text_content.strip():
-        raise HTTPException(
-            status_code=422,
-            detail="No extractable text content in uploaded file.",
-        )
+        try:
+            drafts, document_type, input_channel = _build_claim_drafts(
+                file.filename or "upload", contents, raw_claim_text_fallback=raw_claim_text
+            )
+        except UnsupportedFileError as e:
+            raise HTTPException(status_code=415, detail=str(e))
+        except FileParseError as e:
+            raise HTTPException(status_code=422, detail=str(e))
+        except LLMExtractionError as e:
+            raise HTTPException(
+                status_code=502,
+                detail=f"Claim extraction failed: {e}. No claims were created — please retry.",
+            )
 
     document_id = str(uuid.uuid4())
+    created_rows = []
 
     with conn.cursor() as cur:
         cur.execute(
@@ -361,63 +632,54 @@ def create_file_claim(
             (document_id, file.filename, document_type, current_user.id, file_hash),
         )
 
-        extracted = extract_claim_fields(text_content)
-        event_id = str(uuid.uuid4())
-        event_date = extracted.event_date or date.today()
+        for draft in drafts:
+            extracted = draft.extracted
+            event_id = str(uuid.uuid4())
+            event_date_val = extracted.event_date or date.today()
 
-        if photo_path is not None:
-            cur.execute(
-                """INSERT INTO execution_events (
-                    event_id, document_id, schedule_id, event_date, raw_claim_text,
-                    input_channel, language_detected, reported_activity_id, discipline,
-                    action, event_type, claim_mode, asset_tag, location,
-                    claimed_quantity, claimed_uom, claimed_pct, delay_reason,
-                    supervisor_id, photo_path, status
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'EXTRACTED')""",
-                (
-                    event_id, document_id, schedule_id, event_date, text_content,
-                    input_channel.value, extracted.language_detected, extracted.reported_activity_id,
-                    extracted.discipline.value if extracted.discipline else None,
-                    extracted.action, extracted.event_type.value if extracted.event_type else None,
-                    extracted.claim_mode.value, extracted.asset_tag, extracted.location,
-                    extracted.claimed_quantity, extracted.claimed_uom, extracted.claimed_pct,
-                    extracted.delay_reason.value if extracted.delay_reason else None,
-                    current_user.id, photo_path,
-                ),
+            _insert_execution_event(
+                cur,
+                event_id=event_id,
+                document_id=document_id,
+                schedule_id=schedule_id,
+                event_date_val=event_date_val,
+                raw_claim_text=draft.raw_text,
+                input_channel=input_channel.value,
+                language_detected=extracted.language_detected,
+                reported_activity_id=extracted.reported_activity_id,
+                discipline=extracted.discipline.value if extracted.discipline else None,
+                action=extracted.action,
+                event_type=extracted.event_type.value if extracted.event_type else None,
+                claim_mode=extracted.claim_mode.value,
+                asset_tag=extracted.asset_tag,
+                location=extracted.location,
+                claimed_quantity=extracted.claimed_quantity,
+                claimed_uom=extracted.claimed_uom,
+                claimed_pct=extracted.claimed_pct,
+                delay_reason=extracted.delay_reason.value if extracted.delay_reason else None,
+                supervisor_id=current_user.id,
+                photo_path=photo_path,
             )
-        else:
-            cur.execute(
-                """INSERT INTO execution_events (
-                    event_id, document_id, schedule_id, event_date, raw_claim_text,
-                    input_channel, language_detected, reported_activity_id, discipline,
-                    action, event_type, claim_mode, asset_tag, location,
-                    claimed_quantity, claimed_uom, claimed_pct, delay_reason,
-                    supervisor_id, status
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'EXTRACTED')""",
-                (
-                    event_id, document_id, schedule_id, event_date, text_content,
-                    input_channel.value, extracted.language_detected, extracted.reported_activity_id,
-                    extracted.discipline.value if extracted.discipline else None,
-                    extracted.action, extracted.event_type.value if extracted.event_type else None,
-                    extracted.claim_mode.value, extracted.asset_tag, extracted.location,
-                    extracted.claimed_quantity, extracted.claimed_uom, extracted.claimed_pct,
-                    extracted.delay_reason.value if extracted.delay_reason else None,
-                    current_user.id,
-                ),
+            _insert_source_reference(
+                cur, event_id=event_id, file_name=file.filename, raw_snippet=draft.raw_text
             )
 
-        cur.execute(
-            """INSERT INTO source_references (reference_id, event_id, file_name, sheet_name, row_cell_ref, message_id, raw_snippet)
-               VALUES (%s, %s, %s, %s, %s, %s, %s)""",
-            (str(uuid.uuid4()), event_id, file.filename, None, None, None, text_content[:2000]),
-        )
+            cur.execute("SELECT * FROM execution_events WHERE event_id = %s", (event_id,))
+            created_rows.append(cur.fetchone())
 
         conn.commit()
 
-        cur.execute("SELECT * FROM execution_events WHERE event_id = %s", (event_id,))
-        row = cur.fetchone()
+    return [_row_to_claim_response(r) for r in created_rows]
 
-    return _row_to_claim_response(row)
+
+def _extract_single_or_raise(text: str) -> ExtractedClaimFields:
+    try:
+        return extract_claim_fields(text)
+    except LLMExtractionError as e:
+        raise HTTPException(
+            status_code=502,
+            detail=f"Claim extraction failed: {e}. The claim was not created — please retry.",
+        )
 
 
 @router.post("/claims/schedule-export", response_model=List[ClaimResponse])
@@ -433,6 +695,11 @@ def create_schedule_export_claims(
     entirely and go straight to M3's matching as EXACT_ID candidates. Only
     rows with actual progress data produce a claim -- an empty/not-started
     row is not a progress report.
+
+    Column detection and per-row claim construction are shared with
+    /claims/file's structured CSV/XLSX path (shared/tabular_extraction.py)
+    so both endpoints agree on what "the activity id column" means for the
+    same file shape.
     """
     schedule_id = _get_active_schedule_id(conn)
     if not schedule_id:
@@ -445,52 +712,17 @@ def create_schedule_export_claims(
     if not contents:
         raise HTTPException(status_code=422, detail="Uploaded file is empty.")
 
-    import pandas as pd
-
-    ext = Path(file.filename or "").suffix.lower()
     try:
-        if ext in (".xlsx", ".xls"):
-            df = pd.read_excel(io.BytesIO(contents))
-        else:
-            df = pd.read_csv(io.BytesIO(contents))
-    except Exception as e:
-        raise HTTPException(
-            status_code=422, detail=f"Could not parse schedule-export file: {e}"
-        )
+        sheets = read_tabular_file(file.filename or "upload", contents)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=f"Could not parse schedule-export file: {e}")
 
-    df.columns = [str(c).strip() for c in df.columns]
-    col_map = {c.lower(): c for c in df.columns}
-
-    def _col(*names: str) -> Optional[str]:
-        for n in names:
-            if n in col_map:
-                return col_map[n]
-        return None
-
-    activity_col = _col("activity id", "l6 task id")
-    name_col = _col("activity name", "work description", "activity")
-    discipline_col = _col("discipline")
-    qty_col = _col("today actual")
-    pct_col = _col("progress pct", "cumulative pct", "% complete")
-    status_col = _col("status")
-    date_col = _col("report date", "date", "data date")
-
-    if activity_col is None:
+    sheet_cols = {name: detect_progress_columns(list(df.columns)) for name, df in sheets.items()}
+    if not any(cols is not None for cols in sheet_cols.values()):
         raise HTTPException(
             status_code=422,
             detail="Schedule-export file has no 'Activity ID' column.",
         )
-
-    def _to_float(value) -> Optional[float]:
-        if value is None:
-            return None
-        text = str(value).strip()
-        if not text or text.lower() == "nan":
-            return None
-        try:
-            return float(text)
-        except ValueError:
-            return None
 
     file_hash = hashlib.sha256(contents).hexdigest()
     document_id = str(uuid.uuid4())
@@ -503,61 +735,48 @@ def create_schedule_export_claims(
             (document_id, file.filename, "SCHEDULE_EXPORT_PROGRESS", current_user.id, file_hash),
         )
 
-        for _, row in df.iterrows():
-            activity_id = str(row.get(activity_col) or "").strip()
-            if not activity_id or activity_id.lower() == "nan":
+        for sheet_name, df in sheets.items():
+            cols = sheet_cols[sheet_name]
+            if cols is None:
                 continue
 
-            pct = _to_float(row.get(pct_col)) if pct_col else None
-            qty = _to_float(row.get(qty_col)) if qty_col else None
+            for _, row in df.iterrows():
+                result = build_claim_from_row(row.to_dict(), cols, discipline_hint=sheet_name or None)
+                if result is None:
+                    continue
+                raw_text, extracted = result
 
-            has_progress_data = (pct is not None and pct > 0) or (qty is not None and qty > 0)
-            if not has_progress_data:
-                continue
+                event_id = str(uuid.uuid4())
+                event_date_val = extracted.event_date or date.today()
 
-            name = str(row.get(name_col) or "").strip() if name_col else ""
-            discipline_raw = str(row.get(discipline_col) or "").strip() if discipline_col else ""
-            status_val = str(row.get(status_col) or "").strip() if status_col else ""
+                _insert_execution_event(
+                    cur,
+                    event_id=event_id,
+                    document_id=document_id,
+                    schedule_id=schedule_id,
+                    event_date_val=event_date_val,
+                    raw_claim_text=raw_text,
+                    input_channel=InputChannel.SCHEDULE_EXPORT.value,
+                    language_detected=extracted.language_detected,
+                    reported_activity_id=extracted.reported_activity_id,
+                    discipline=extracted.discipline.value if extracted.discipline else None,
+                    action=extracted.action,
+                    event_type=extracted.event_type.value if extracted.event_type else None,
+                    claim_mode=extracted.claim_mode.value,
+                    asset_tag=extracted.asset_tag,
+                    location=extracted.location,
+                    claimed_quantity=extracted.claimed_quantity,
+                    claimed_uom=extracted.claimed_uom,
+                    claimed_pct=extracted.claimed_pct,
+                    delay_reason=extracted.delay_reason.value if extracted.delay_reason else None,
+                    supervisor_id=current_user.id,
+                )
+                _insert_source_reference(
+                    cur, event_id=event_id, file_name=file.filename, raw_snippet=str(row.to_dict())
+                )
 
-            event_date = date.today()
-            if date_col:
-                try:
-                    event_date = pd.to_datetime(row.get(date_col)).date()
-                except Exception:
-                    pass
-
-            event_type = (
-                EventType.ACTUAL_FINISH.value
-                if pct is not None and pct >= 100
-                else EventType.PROGRESS_UPDATE.value
-            )
-
-            event_id = str(uuid.uuid4())
-            raw_text = f"Schedule export progress update for {activity_id}: {name} — {status_val}".strip()
-
-            cur.execute(
-                """INSERT INTO execution_events (
-                    event_id, document_id, schedule_id, event_date, raw_claim_text,
-                    input_channel, reported_activity_id, discipline,
-                    action, event_type, claim_mode, claimed_quantity, claimed_uom, claimed_pct,
-                    supervisor_id, status
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'EXTRACTED')""",
-                (
-                    event_id, document_id, schedule_id, event_date, raw_text,
-                    InputChannel.SCHEDULE_EXPORT.value, activity_id, _normalize_discipline(discipline_raw),
-                    name, event_type, ClaimMode.CUMULATIVE_PCT.value, None, None, pct,
-                    current_user.id,
-                ),
-            )
-
-            cur.execute(
-                """INSERT INTO source_references (reference_id, event_id, file_name, sheet_name, row_cell_ref, message_id, raw_snippet)
-                   VALUES (%s, %s, %s, %s, %s, %s, %s)""",
-                (str(uuid.uuid4()), event_id, file.filename, None, None, None, str(row.to_dict())[:2000]),
-            )
-
-            cur.execute("SELECT * FROM execution_events WHERE event_id = %s", (event_id,))
-            claim_rows.append(cur.fetchone())
+                cur.execute("SELECT * FROM execution_events WHERE event_id = %s", (event_id,))
+                claim_rows.append(cur.fetchone())
 
         conn.commit()
 
