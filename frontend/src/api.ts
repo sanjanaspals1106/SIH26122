@@ -643,7 +643,16 @@ export const claimsApi = {
     return { event: data as any };
   },
 
-  submitFile: async (file: File, scheduleId: string = 'sched-OIL-2026'): Promise<{ event: ExecutionEvent }> => {
+  // A single uploaded file (a multi-row daily report, a multi-sheet
+  // spreadsheet, a P6 export, a multi-section scanned diary) commonly
+  // describes several distinct activity claims, not one -- POST
+  // /api/v1/claims/file returns one ClaimResponse per activity actually
+  // found, so this returns `events`, not a single `event`.
+  submitFile: async (
+    file: File,
+    options?: { purpose?: 'EVIDENCE_PHOTO' | 'SCANNED_DIARY'; rawClaimText?: string },
+    scheduleId: string = 'sched-OIL-2026'
+  ): Promise<{ events: ExecutionEvent[] }> => {
     if (USE_MOCKS) {
       await sleep(1500);
       const ev: ExecutionEvent = {
@@ -671,10 +680,12 @@ export const claimsApi = {
         status: 'EXTRACTED',
         created_at: new Date().toISOString(),
       };
-      return { event: ev };
+      return { events: [ev] };
     }
     const form = new FormData();
     form.append('file', file);
+    if (options?.purpose) form.append('purpose', options.purpose);
+    if (options?.rawClaimText) form.append('raw_claim_text', options.rawClaimText);
     const token = localStorage.getItem('supabase_access_token') || localStorage.getItem('auth_token');
     const headers: Record<string, string> = {};
     if (token) headers['Authorization'] = `Bearer ${token}`;
@@ -686,7 +697,7 @@ export const claimsApi = {
     });
     if (!res.ok) throw new Error(await res.text().catch(() => 'File submit failed'));
     const data = await res.json();
-    return { event: data as any };
+    return { events: data as ExecutionEvent[] };
   },
 
   match: async (eventId: string): Promise<{ status: ClaimStatus; matches: CandidateMatch[] }> => {
@@ -763,6 +774,20 @@ export const digestApi = {
       return MOCK_EVENTS;
     }
     return apiFetch(`/api/v1/digest?date=${dateStr}`);
+  },
+
+  // No `date` param -> GET /api/v1/digest returns every claim regardless of
+  // event_date (see backend/routers/decisions.py's get_digest). Used only
+  // to resolve which date to default the Daily Digest view to -- claims
+  // carry the date reported in the source document/text, not the date they
+  // were uploaded, so "today" (the real calendar date) can easily have zero
+  // claims even when plenty exist on whatever date the data actually spans.
+  getAll: async (): Promise<ExecutionEvent[]> => {
+    if (USE_MOCKS) {
+      await sleep(500);
+      return MOCK_EVENTS;
+    }
+    return apiFetch('/api/v1/digest');
   },
 
   bulkApprove: async (eventIds: string[]): Promise<{ approved: string[]; failed: string[] }> => {

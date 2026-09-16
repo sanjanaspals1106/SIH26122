@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import {
   claimsApi,
   decisionsApi,
@@ -26,6 +27,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { cn } from '@/lib/utils';
 
 export default function ReviewWorkspace() {
+  const { t } = useTranslation();
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
   const eventIdParam = searchParams.get('event_id');
@@ -67,7 +69,7 @@ export default function ReviewWorkspace() {
       setApprovedPct(ev.claimed_pct ?? 100);
       setApprovedQty(ev.claimed_quantity ?? '');
     } catch (err: any) {
-      setSubmitError('Failed to load claim details: ' + err.message);
+      setSubmitError(t('review.errLoadFailed', { message: err.message }));
     } finally {
       setIsLoading(false);
     }
@@ -84,12 +86,12 @@ export default function ReviewWorkspace() {
   if (!eventIdParam) {
     return (
       <Card className="bg-white dark:bg-[#001E60] border-slate-200 dark:border-blue-900/60 text-center p-12 space-y-4">
-        <CardTitle className="text-slate-900 dark:text-slate-100 text-lg font-bold">Select a Claim to Review</CardTitle>
+        <CardTitle className="text-slate-900 dark:text-slate-100 text-lg font-bold">{t('review.selectClaimTitle')}</CardTitle>
         <p className="text-slate-500 dark:text-slate-400 text-xs max-w-md mx-auto">
-          Please select a specific field progress claim from the Daily Digest or Intake Pipeline to inspect candidate matches and record supervisor approval decisions.
+          {t('review.selectClaimDesc')}
         </p>
         <Button onClick={() => navigate('/digest')} className="bg-[#FC4C02] hover:bg-[#e04302] text-white text-xs font-semibold">
-          Go to Daily Digest & Claims Log
+          {t('review.goToDigest')}
         </Button>
       </Card>
     );
@@ -100,11 +102,11 @@ export default function ReviewWorkspace() {
     setSubmitError(null);
 
     if (!justification.trim()) {
-      setSubmitError('Mandatory justification is required for all supervisor decisions.');
+      setSubmitError(t('review.errJustificationRequired'));
       return;
     }
     if (!selectedActivityId) {
-      setSubmitError('Please select a Primavera/MSP schedule activity.');
+      setSubmitError(t('review.errActivityRequired'));
       return;
     }
 
@@ -120,7 +122,7 @@ export default function ReviewWorkspace() {
       });
       setDecisionSuccess(true);
     } catch (err: any) {
-      setSubmitError(err.message || 'Failed to record supervisor decision');
+      setSubmitError(err.message || t('review.errDecisionFailed'));
     } finally {
       setIsSubmitting(false);
     }
@@ -141,8 +143,8 @@ export default function ReviewWorkspace() {
   if (!event) {
     return (
       <Card className="bg-white dark:bg-[#001E60] border-slate-200 dark:border-blue-900/60 text-center p-12">
-        <CardTitle className="text-slate-900 dark:text-slate-100">Claim Event Not Found</CardTitle>
-        <Button onClick={() => navigate('/digest')} className="mt-4 bg-[#FC4C02] text-white">Return to Daily Digest</Button>
+        <CardTitle className="text-slate-900 dark:text-slate-100">{t('review.claimNotFound')}</CardTitle>
+        <Button onClick={() => navigate('/digest')} className="mt-4 bg-[#FC4C02] text-white">{t('review.returnToDigest')}</Button>
       </Card>
     );
   }
@@ -153,12 +155,12 @@ export default function ReviewWorkspace() {
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-200 dark:border-blue-900/50 pb-4">
         <div>
           <div className="flex items-center gap-2 text-xs font-mono text-[#FC4C02] font-bold">
-            <span>CLAIM ID: {event.event_id}</span>
+            <span>{t('review.claimIdLabel')}: {event.event_id}</span>
             <span>·</span>
-            <span>DATE: {event.event_date}</span>
+            <span>{t('review.dateLabel')}: {event.event_date}</span>
           </div>
           <h1 className="text-2xl font-bold text-slate-900 dark:text-slate-100 tracking-tight mt-0.5">
-            Supervisor Review & Human Approval Workspace
+            {t('review.title')}
           </h1>
         </div>
 
@@ -167,23 +169,23 @@ export default function ReviewWorkspace() {
           onClick={() => navigate('/digest')}
           className="bg-white dark:bg-[#001E60] border-slate-300 dark:border-blue-800 text-slate-700 dark:text-slate-200 text-xs h-9"
         >
-          Back to Digest
+          {t('review.backToDigest')}
         </Button>
       </div>
 
       {/* 4-Step Pipeline Flow Bar */}
       <div className="grid grid-cols-4 gap-2 text-center text-xs">
         <div className="p-3 rounded-xl bg-white dark:bg-[#001E60] border border-slate-200 dark:border-blue-800 text-slate-700 dark:text-slate-200 font-bold flex items-center justify-center gap-1.5 shadow-sm">
-          <FileText className="w-4 h-4 text-blue-500" /> 1. Field Claim
+          <FileText className="w-4 h-4 text-blue-500" /> 1. {t('review.step1')}
         </div>
         <div className="p-3 rounded-xl bg-white dark:bg-[#001E60] border border-purple-500/40 text-purple-700 dark:text-purple-300 font-bold flex items-center justify-center gap-1.5 shadow-sm">
-          <Sparkles className="w-4 h-4 text-purple-500" /> 2. AI Match Tier
+          <Sparkles className="w-4 h-4 text-purple-500" /> 2. {t('review.step2')}
         </div>
         <div className="p-3 rounded-xl bg-white dark:bg-[#001E60] border border-amber-500/40 text-amber-700 dark:text-amber-300 font-bold flex items-center justify-center gap-1.5 shadow-sm">
-          <ShieldAlert className="w-4 h-4 text-amber-500" /> 3. Checks
+          <ShieldAlert className="w-4 h-4 text-amber-500" /> 3. {t('review.step3')}
         </div>
         <div className="p-3 rounded-xl bg-[#FC4C02] text-white font-bold flex items-center justify-center gap-1.5 shadow-md">
-          <CheckCircle2 className="w-4 h-4" /> 4. Human Decision
+          <CheckCircle2 className="w-4 h-4" /> 4. {t('review.step4')}
         </div>
       </div>
 
@@ -192,15 +194,15 @@ export default function ReviewWorkspace() {
           <div className="flex items-center gap-3">
             <CheckCircle2 className="w-6 h-6 text-emerald-600 dark:text-emerald-400 shrink-0" />
             <div>
-              <h3 className="font-bold text-base">Supervisor Decision Committed</h3>
+              <h3 className="font-bold text-base">{t('review.decisionCommitted')}</h3>
               <p className="text-xs text-emerald-800 dark:text-emerald-300">
-                Claim <span className="font-mono font-bold text-emerald-950 dark:text-white">{event.event_id}</span> action <span className="font-mono font-bold uppercase text-emerald-950 dark:text-white">{action}</span> has been logged to the immutable audit trail.
+                {t('review.decisionLoggedTo', { eventId: event.event_id, action })}
               </p>
             </div>
           </div>
           <div className="flex gap-2 pt-2">
             <Button size="sm" onClick={() => navigate('/digest')} className="bg-emerald-600 hover:bg-emerald-500 text-white text-xs">
-              Return to Daily Digest
+              {t('review.returnToDigest')}
             </Button>
           </div>
         </div>
@@ -214,7 +216,7 @@ export default function ReviewWorkspace() {
             <CardHeader className="pb-3 border-b border-slate-100 dark:border-blue-900/40">
               <CardTitle className="text-sm font-semibold flex items-center gap-2 text-slate-900 dark:text-slate-100">
                 <FileText className="w-4 h-4 text-blue-500" />
-                Original Field Claim Provenance
+                {t('review.provenanceTitle')}
               </CardTitle>
             </CardHeader>
             <CardContent className="pt-4 space-y-4 text-xs">
@@ -224,34 +226,34 @@ export default function ReviewWorkspace() {
 
               <div className="grid grid-cols-2 gap-3 text-slate-600 dark:text-slate-400">
                 <div>
-                  <span className="text-[10px] uppercase font-bold text-slate-500 block">Discipline</span>
-                  <span className="font-mono text-slate-900 dark:text-slate-100 font-bold">{event.discipline || 'UNASSIGNED'}</span>
+                  <span className="text-[10px] uppercase font-bold text-slate-500 block">{t('review.discipline')}</span>
+                  <span className="font-mono text-slate-900 dark:text-slate-100 font-bold">{event.discipline || t('review.unassigned')}</span>
                 </div>
                 <div>
-                  <span className="text-[10px] uppercase font-bold text-slate-500 block">Channel</span>
+                  <span className="text-[10px] uppercase font-bold text-slate-500 block">{t('review.channel')}</span>
                   <span className="font-mono text-[#FC4C02] font-bold">{event.input_channel}</span>
                 </div>
                 <div>
-                  <span className="text-[10px] uppercase font-bold text-slate-500 block">Claim Mode</span>
+                  <span className="text-[10px] uppercase font-bold text-slate-500 block">{t('review.claimMode')}</span>
                   <span className="font-mono text-slate-900 dark:text-slate-100">{event.claim_mode}</span>
                 </div>
                 <div>
-                  <span className="text-[10px] uppercase font-bold text-slate-500 block">Event Type</span>
+                  <span className="text-[10px] uppercase font-bold text-slate-500 block">{t('review.eventType')}</span>
                   <span className="font-mono text-slate-900 dark:text-slate-100">{event.event_type}</span>
                 </div>
                 <div>
-                  <span className="text-[10px] uppercase font-bold text-slate-500 block">Location</span>
-                  <span className="text-slate-900 dark:text-slate-100">{event.location || 'N/A'}</span>
+                  <span className="text-[10px] uppercase font-bold text-slate-500 block">{t('review.location')}</span>
+                  <span className="text-slate-900 dark:text-slate-100">{event.location || t('review.notAvailable')}</span>
                 </div>
                 <div>
-                  <span className="text-[10px] uppercase font-bold text-slate-500 block">Asset Tag</span>
-                  <span className="font-mono text-slate-900 dark:text-slate-100">{event.asset_tag || 'N/A'}</span>
+                  <span className="text-[10px] uppercase font-bold text-slate-500 block">{t('review.assetTag')}</span>
+                  <span className="font-mono text-slate-900 dark:text-slate-100">{event.asset_tag || t('review.notAvailable')}</span>
                 </div>
               </div>
 
               {event.delay_reason && (
                 <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-800 dark:text-amber-300 space-y-1">
-                  <span className="font-bold text-[10px] uppercase block text-amber-600 dark:text-amber-400">Stated Delay Reason</span>
+                  <span className="font-bold text-[10px] uppercase block text-amber-600 dark:text-amber-400">{t('review.statedDelayReason')}</span>
                   <p className="text-xs">{event.delay_reason}</p>
                 </div>
               )}
@@ -263,14 +265,14 @@ export default function ReviewWorkspace() {
             <CardHeader className="pb-3 border-b border-slate-100 dark:border-blue-900/40">
               <CardTitle className="text-sm font-semibold flex items-center gap-2 text-slate-900 dark:text-slate-100">
                 <ShieldAlert className="w-4 h-4 text-amber-500" />
-                Automated Validation & Conflicts
+                {t('review.validationTitle')}
               </CardTitle>
             </CardHeader>
             <CardContent className="pt-4 space-y-3 text-xs">
               {issues.length === 0 && conflicts.length === 0 ? (
                 <div className="p-3 bg-emerald-500/10 border border-emerald-500/30 text-emerald-800 dark:text-emerald-300 rounded-xl flex items-center gap-2">
                   <CheckCircle2 className="w-4 h-4 text-emerald-500" />
-                  <span>No automated rule warnings or quantity conflicts detected.</span>
+                  <span>{t('review.noWarnings')}</span>
                 </div>
               ) : (
                 <>
@@ -288,10 +290,10 @@ export default function ReviewWorkspace() {
                     <div key={cnf.conflict_id} className="p-3 bg-rose-500/10 border border-rose-500/30 text-rose-800 dark:text-rose-300 rounded-xl space-y-1">
                       <div className="font-bold text-[10px] uppercase flex items-center gap-1.5 text-rose-600 dark:text-rose-400">
                         <ShieldAlert className="w-3.5 h-3.5" />
-                        DUPLICATE CLAIM ({cnf.variance_pct}% variance)
+                        {t('review.duplicateClaim', { variance: cnf.variance_pct })}
                       </div>
                       <p className="text-xs">
-                        Conflicting event <span className="font-mono font-bold">{cnf.event_id_b}</span> reported value {cnf.value_b} vs current claim {cnf.value_a}.
+                        {t('review.conflictingEvent', { eventId: cnf.event_id_b, valueB: cnf.value_b, valueA: cnf.value_a })}
                       </p>
                     </div>
                   ))}
@@ -308,10 +310,10 @@ export default function ReviewWorkspace() {
               <CardTitle className="text-sm font-semibold flex items-center justify-between text-slate-900 dark:text-slate-100">
                 <span className="flex items-center gap-2">
                   <Sparkles className="w-4 h-4 text-purple-500" />
-                  Top-3 AI Candidate Matches
+                  {t('review.topMatchesTitle')}
                 </span>
                 <span className="text-[10px] bg-purple-500/10 text-purple-700 dark:text-purple-300 border border-purple-500/30 px-2 py-0.5 rounded-full font-mono font-bold">
-                  FAISS Matching
+                  {t('review.faissMatching')}
                 </span>
               </CardTitle>
             </CardHeader>
@@ -351,10 +353,10 @@ export default function ReviewWorkspace() {
                     </div>
 
                     <div className="grid grid-cols-4 gap-1 text-[10px] font-mono text-slate-500 dark:text-slate-400 pt-1 border-t border-slate-200 dark:border-blue-900/40">
-                      <div>Sem: <span className="font-bold">{Math.round((cand.semantic_score || 0) * 100)}%</span></div>
-                      <div>Fuz: <span className="font-bold">{Math.round((cand.fuzzy_score || 0) * 100)}%</span></div>
-                      <div>Loc: <span className="font-bold">{Math.round((cand.location_score || 0) * 100)}%</span></div>
-                      <div>Dis: <span className="font-bold">{Math.round((cand.discipline_score || 0) * 100)}%</span></div>
+                      <div>{t('review.semShort')}: <span className="font-bold">{Math.round((cand.semantic_score || 0) * 100)}%</span></div>
+                      <div>{t('review.fuzShort')}: <span className="font-bold">{Math.round((cand.fuzzy_score || 0) * 100)}%</span></div>
+                      <div>{t('review.locShort')}: <span className="font-bold">{Math.round((cand.location_score || 0) * 100)}%</span></div>
+                      <div>{t('review.disShort')}: <span className="font-bold">{Math.round((cand.discipline_score || 0) * 100)}%</span></div>
                     </div>
 
                     {cand.supporting_signals && (
@@ -375,10 +377,10 @@ export default function ReviewWorkspace() {
             <CardHeader className="pb-3 border-b border-slate-100 dark:border-blue-900/50">
               <CardTitle className="text-sm font-bold flex items-center gap-2 text-slate-900 dark:text-white">
                 <CheckCircle2 className="w-4 h-4 text-[#FC4C02]" />
-                Human Supervisor Decision
+                {t('review.decisionTitle')}
               </CardTitle>
               <CardDescription className="text-slate-500 dark:text-blue-200/80 text-xs">
-                Official approval requires mandatory planner justification.
+                {t('review.decisionSubtitle')}
               </CardDescription>
             </CardHeader>
 
@@ -391,7 +393,7 @@ export default function ReviewWorkspace() {
 
               <form onSubmit={handleSubmitDecision} className="space-y-4 text-xs">
                 <div className="space-y-1.5">
-                  <Label className="text-xs text-slate-700 dark:text-slate-200 font-bold">Selected Primavera Activity</Label>
+                  <Label className="text-xs text-slate-700 dark:text-slate-200 font-bold">{t('review.selectedActivity')}</Label>
                   <Input
                     value={selectedActivityId}
                     onChange={(e) => setSelectedActivityId(e.target.value)}
@@ -400,7 +402,7 @@ export default function ReviewWorkspace() {
                 </div>
 
                 <div className="space-y-1.5">
-                  <Label className="text-xs text-slate-700 dark:text-slate-200 font-bold">Action Type</Label>
+                  <Label className="text-xs text-slate-700 dark:text-slate-200 font-bold">{t('review.actionType')}</Label>
                   <div className="grid grid-cols-2 gap-2">
                     {(['APPROVE', 'EDIT', 'HOLD', 'REJECT'] as DecisionAction[]).map((act) => (
                       <button
@@ -420,7 +422,13 @@ export default function ReviewWorkspace() {
                             : 'bg-slate-50 dark:bg-[#001438] border-slate-200 dark:border-blue-800 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-blue-950'
                         )}
                       >
-                        {act}
+                        {act === 'APPROVE'
+                          ? t('review.actionApprove')
+                          : act === 'EDIT'
+                          ? t('review.actionEdit')
+                          : act === 'HOLD'
+                          ? t('review.actionHold')
+                          : t('review.actionReject')}
                       </button>
                     ))}
                   </div>
@@ -429,7 +437,7 @@ export default function ReviewWorkspace() {
                 {action === 'EDIT' && (
                   <div className="grid grid-cols-2 gap-3 p-3 bg-slate-50 dark:bg-[#001438] rounded-xl border border-slate-200 dark:border-blue-800">
                     <div className="space-y-1">
-                      <Label className="text-[11px] text-slate-600 dark:text-slate-400">Approved %</Label>
+                      <Label className="text-[11px] text-slate-600 dark:text-slate-400">{t('review.approvedPct')}</Label>
                       <Input
                         type="number"
                         value={approvedPct}
@@ -438,7 +446,7 @@ export default function ReviewWorkspace() {
                       />
                     </div>
                     <div className="space-y-1">
-                      <Label className="text-[11px] text-slate-600 dark:text-slate-400">Approved Qty</Label>
+                      <Label className="text-[11px] text-slate-600 dark:text-slate-400">{t('review.approvedQty')}</Label>
                       <Input
                         type="number"
                         value={approvedQty}
@@ -451,12 +459,12 @@ export default function ReviewWorkspace() {
 
                 <div className="space-y-1.5">
                   <Label className="text-xs text-slate-700 dark:text-slate-200 font-bold flex items-center justify-between">
-                    <span>Supervisor Justification</span>
-                    <span className="text-[10px] text-rose-500 uppercase font-bold">Mandatory</span>
+                    <span>{t('review.justification')}</span>
+                    <span className="text-[10px] text-rose-500 uppercase font-bold">{t('review.mandatory')}</span>
                   </Label>
                   <Textarea
                     rows={4}
-                    placeholder="Enter reason for approval/edit/rejection..."
+                    placeholder={t('review.justificationPlaceholder')}
                     value={justification}
                     onChange={(e) => setJustification(e.target.value)}
                     className="bg-slate-50 dark:bg-[#001438] border-slate-300 dark:border-blue-800 text-slate-900 dark:text-slate-100 text-xs rounded-xl"
@@ -468,7 +476,7 @@ export default function ReviewWorkspace() {
                   disabled={isSubmitting || decisionSuccess}
                   className="w-full bg-[#FC4C02] hover:bg-[#e04302] text-white font-bold h-10 shadow-lg shadow-[#FC4C02]/25 rounded-xl"
                 >
-                  {isSubmitting ? 'Recording Decision...' : 'Commit Official Decision'}
+                  {isSubmitting ? t('review.recordingDecision') : t('review.commitDecision')}
                 </Button>
               </form>
             </CardContent>

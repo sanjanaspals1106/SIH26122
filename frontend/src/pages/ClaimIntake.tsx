@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import { useAuth } from '@/auth/AuthProvider';
 import {
   Mic,
@@ -32,6 +33,7 @@ type InputTab = 'text' | 'voice' | 'file';
 export default function ClaimIntake() {
   const { user } = useAuth();
   const navigate = useNavigate();
+  const { t } = useTranslation();
 
   const [activeTab, setActiveTab] = useState<InputTab>('text');
 
@@ -56,7 +58,7 @@ export default function ClaimIntake() {
   // Pipeline Stepper State
   const [pipelineStep, setPipelineStep] = useState<number>(0);
   const [isProcessing, setIsProcessing] = useState(false);
-  const [createdEvent, setCreatedEvent] = useState<ExecutionEvent | null>(null);
+  const [createdEvents, setCreatedEvents] = useState<ExecutionEvent[]>([]);
   const [pipelineError, setPipelineError] = useState<string | null>(null);
 
   // Web Speech API Initialization
@@ -89,13 +91,14 @@ export default function ClaimIntake() {
 
       recognitionRef.current = recognition;
     } else {
-      setSpeechError('Browser Web Speech API is not supported in this browser. Please type transcript or upload an audio file.');
+      setSpeechError(t('intake.speechUnsupported'));
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const toggleRecording = () => {
     if (!recognitionRef.current) {
-      setSpeechError('Web Speech API unsupported.');
+      setSpeechError(t('intake.speechUnsupported'));
       return;
     }
 
@@ -128,37 +131,48 @@ export default function ClaimIntake() {
     setAudioUrl(null);
   };
 
-  // Submit Claim & Execute Pipeline
+  // Submit Claim & Execute Pipeline. A file upload can legitimately yield
+  // several claims at once (a multi-row daily report, a multi-sheet
+  // spreadsheet, a P6 export, a multi-section scanned diary) -- match/check
+  // run for every claim created, not just the first.
   const runPipeline = async (claimText: string, file: File | null = null) => {
     setIsProcessing(true);
     setPipelineError(null);
     setPipelineStep(1); // Intake
 
     try {
-      let evResult: ExecutionEvent;
+      let events: ExecutionEvent[];
       if (file) {
         const res = await claimsApi.submitFile(file);
-        evResult = res.event;
+        events = res.events;
       } else {
         const res = await claimsApi.submitText(claimText);
-        evResult = res.event;
+        events = [res.event];
       }
 
       setPipelineStep(2); // Extraction
       await new Promise((r) => setTimeout(r, 600));
 
       setPipelineStep(3); // Matching
-      const matchRes = await claimsApi.match(evResult.event_id);
-      evResult.status = matchRes.status;
+      await Promise.all(
+        events.map(async (ev) => {
+          const matchRes = await claimsApi.match(ev.event_id);
+          ev.status = matchRes.status;
+        })
+      );
 
       setPipelineStep(4); // Checks
-      const checkRes = await claimsApi.check(evResult.event_id);
-      evResult.status = checkRes.status;
+      await Promise.all(
+        events.map(async (ev) => {
+          const checkRes = await claimsApi.check(ev.event_id);
+          ev.status = checkRes.status;
+        })
+      );
 
       setPipelineStep(5); // Supervisor Review
-      setCreatedEvent(evResult);
+      setCreatedEvents(events);
     } catch (err: any) {
-      setPipelineError(err.message || 'Pipeline failed during ingestion processing');
+      setPipelineError(err.message || t('intake.pipelineFailed'));
     } finally {
       setIsProcessing(false);
     }
@@ -180,11 +194,11 @@ export default function ClaimIntake() {
   };
 
   const pipelineSteps = [
-    { title: 'Intake', desc: 'Ingesting update' },
-    { title: 'Extraction', desc: 'LLM field parsing' },
-    { title: 'Matching', desc: 'FAISS + Vector' },
-    { title: 'Checks', desc: 'Rules & Validation' },
-    { title: 'Supervisor Review', desc: 'Ready for approval' },
+    { title: t('intake.stepIntakeTitle'), desc: t('intake.stepIntakeDesc') },
+    { title: t('intake.stepExtractionTitle'), desc: t('intake.stepExtractionDesc') },
+    { title: t('intake.stepMatchingTitle'), desc: t('intake.stepMatchingDesc') },
+    { title: t('intake.stepChecksTitle'), desc: t('intake.stepChecksDesc') },
+    { title: t('intake.stepReviewTitle'), desc: t('intake.stepReviewDesc') },
   ];
 
   return (
@@ -193,10 +207,10 @@ export default function ClaimIntake() {
       <div>
         <h1 className="text-2xl font-bold text-slate-100 tracking-tight flex items-center gap-2">
           <PlusCircle className="w-6 h-6 text-indigo-400" />
-          Site Engineer Progress Claim Intake
+          {t('intake.title')}
         </h1>
         <p className="text-slate-400 text-xs mt-1">
-          Submit raw daily field updates via Natural Language Text, Web Speech Recording, or Document Upload.
+          {t('intake.subtitle')}
         </p>
       </div>
 
@@ -215,7 +229,7 @@ export default function ClaimIntake() {
                   : 'text-slate-400 hover:text-slate-200'
               )}
             >
-              <FileText className="w-4 h-4" /> Type Update
+              <FileText className="w-4 h-4" /> {t('intake.tabText')}
             </button>
 
             <button
@@ -228,7 +242,7 @@ export default function ClaimIntake() {
                   : 'text-slate-400 hover:text-slate-200'
               )}
             >
-              <Mic className="w-4 h-4" /> Voice Input
+              <Mic className="w-4 h-4" /> {t('intake.tabVoice')}
             </button>
 
             <button
@@ -241,7 +255,7 @@ export default function ClaimIntake() {
                   : 'text-slate-400 hover:text-slate-200'
               )}
             >
-              <Upload className="w-4 h-4" /> File / Export
+              <Upload className="w-4 h-4" /> {t('intake.tabFile')}
             </button>
           </div>
 
@@ -249,9 +263,9 @@ export default function ClaimIntake() {
           {activeTab === 'text' && (
             <Card className="bg-slate-900 border-slate-800 text-slate-100">
               <CardHeader>
-                <CardTitle className="text-sm font-semibold">Natural Language Progress Claim</CardTitle>
+                <CardTitle className="text-sm font-semibold">{t('intake.textCardTitle')}</CardTitle>
                 <CardDescription className="text-slate-400 text-xs">
-                  Type field execution notes in plain English or Hindi (e.g., "Finished pouring 50 cu.m concrete for F4 in Block-4").
+                  {t('intake.textCardDesc')}
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
@@ -259,7 +273,7 @@ export default function ClaimIntake() {
                   rows={5}
                   value={textValue}
                   onChange={(e) => setTextValue(e.target.value)}
-                  placeholder="Enter detailed site execution update..."
+                  placeholder={t('intake.textPlaceholder')}
                   className="bg-slate-950 border-slate-800 text-slate-100 focus:border-indigo-500 text-sm"
                 />
 
@@ -268,7 +282,7 @@ export default function ClaimIntake() {
                   disabled={isProcessing || !textValue.trim()}
                   className="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-semibold h-10 shadow-lg shadow-indigo-600/20"
                 >
-                  {isProcessing ? 'Processing Claim...' : 'Submit Claim Through AI Pipeline'}
+                  {isProcessing ? t('intake.processingClaim') : t('intake.submitText')}
                 </Button>
               </CardContent>
             </Card>
@@ -279,9 +293,9 @@ export default function ClaimIntake() {
             <Card className="bg-slate-900 border-slate-800 text-slate-100">
               <CardHeader>
                 <CardTitle className="text-sm font-semibold flex items-center justify-between">
-                  <span>Browser Web Speech & Audio Ingestion</span>
+                  <span>{t('intake.voiceCardTitle')}</span>
                   <span className="text-[10px] bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 px-2 py-0.5 rounded-full font-mono">
-                    Live Recognition
+                    {t('intake.liveRecognition')}
                   </span>
                 </CardTitle>
               </CardHeader>
@@ -308,25 +322,25 @@ export default function ClaimIntake() {
                   </button>
 
                   <span className="text-xs text-slate-300 font-semibold">
-                    {isRecording ? 'Listening... Speak your site update now' : 'Click microphone to record voice update'}
+                    {isRecording ? t('intake.listening') : t('intake.clickToRecord')}
                   </span>
                 </div>
 
                 {/* Live Transcript Editable Area */}
                 <div className="space-y-1.5">
-                  <label className="text-xs text-slate-300 font-semibold">Live / Editable Transcript</label>
+                  <label className="text-xs text-slate-300 font-semibold">{t('intake.liveTranscript')}</label>
                   <Textarea
                     rows={4}
                     value={voiceTranscript}
                     onChange={(e) => setVoiceTranscript(e.target.value)}
-                    placeholder="Transcript will appear here in real-time as you speak..."
+                    placeholder={t('intake.transcriptPlaceholder')}
                     className="bg-slate-950 border-slate-800 text-slate-100 text-xs"
                   />
                 </div>
 
                 {/* Upload Audio File Section */}
                 <div className="pt-3 border-t border-slate-800 space-y-3">
-                  <span className="text-xs font-semibold text-slate-300 block">Upload Pre-recorded Audio File</span>
+                  <span className="text-xs font-semibold text-slate-300 block">{t('intake.uploadAudioSection')}</span>
                   <input
                     type="file"
                     ref={audioInputRef}
@@ -343,13 +357,13 @@ export default function ClaimIntake() {
                       className="w-full bg-slate-950 border-slate-800 text-slate-300 hover:bg-slate-800 text-xs h-9"
                     >
                       <FileAudio className="w-4 h-4 mr-2 text-indigo-400" />
-                      Select Audio Recording (.wav, .mp3, .m4a)
+                      {t('intake.selectAudioFile')}
                     </Button>
                   ) : (
                     <div className="p-3 bg-slate-950 rounded-xl border border-slate-800 space-y-2 text-xs">
                       <div className="flex items-center justify-between">
                         <span className="font-mono font-bold text-indigo-300 truncate">{audioFile.name}</span>
-                        <Button variant="ghost" size="sm" onClick={removeAudioFile} className="h-6 text-xs text-rose-400">Remove</Button>
+                        <Button variant="ghost" size="sm" onClick={removeAudioFile} className="h-6 text-xs text-rose-400">{t('intake.removeAudio')}</Button>
                       </div>
                       {audioUrl && <audio src={audioUrl} controls className="w-full h-8" />}
                     </div>
@@ -361,7 +375,7 @@ export default function ClaimIntake() {
                   disabled={isProcessing || (!voiceTranscript.trim() && !audioFile)}
                   className="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-semibold h-10 shadow-lg shadow-indigo-600/20"
                 >
-                  {isProcessing ? 'Processing Voice Claim...' : 'Submit Voice Claim Through Pipeline'}
+                  {isProcessing ? t('intake.processingVoice') : t('intake.submitVoice')}
                 </Button>
               </CardContent>
             </Card>
@@ -371,16 +385,16 @@ export default function ClaimIntake() {
           {activeTab === 'file' && (
             <Card className="bg-slate-900 border-slate-800 text-slate-100">
               <CardHeader>
-                <CardTitle className="text-sm font-semibold">Document & Progress Export Ingestion</CardTitle>
+                <CardTitle className="text-sm font-semibold">{t('intake.fileCardTitle')}</CardTitle>
                 <CardDescription className="text-slate-400 text-xs">
-                  Upload PDF reports, Excel spreadsheets, CSV progress logs, or Primavera P6 exports.
+                  {t('intake.fileCardDesc')}
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
                 <input
                   type="file"
                   ref={fileInputRef}
-                  accept=".pdf,.xlsx,.csv,.txt,.xer"
+                  accept=".pdf,.xlsx,.xls,.csv,.txt,.xer,.jpg,.jpeg,.png"
                   onChange={(e) => setSelectedFile(e.target.files?.[0] || null)}
                   className="hidden"
                 />
@@ -391,9 +405,9 @@ export default function ClaimIntake() {
                 >
                   <Upload className="w-8 h-8 text-slate-500 mx-auto" />
                   <div className="text-xs text-slate-300 font-semibold">
-                    {selectedFile ? selectedFile.name : 'Click to browse or drop document file here'}
+                    {selectedFile ? selectedFile.name : t('intake.clickToBrowse')}
                   </div>
-                  <div className="text-[10px] text-slate-500">Supported: PDF, XLSX, CSV, TXT, P6 Export</div>
+                  <div className="text-[10px] text-slate-500">{t('intake.supportedFormats')}</div>
                 </div>
 
                 <Button
@@ -401,7 +415,7 @@ export default function ClaimIntake() {
                   disabled={isProcessing || !selectedFile}
                   className="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-semibold h-10 shadow-lg shadow-indigo-600/20"
                 >
-                  {isProcessing ? 'Extracting & Parsing Document...' : 'Ingest Document Update'}
+                  {isProcessing ? t('intake.extractingDocument') : t('intake.ingestDocument')}
                 </Button>
               </CardContent>
             </Card>
@@ -414,7 +428,7 @@ export default function ClaimIntake() {
             <CardHeader className="pb-3 border-b border-slate-800">
               <CardTitle className="text-sm font-semibold flex items-center gap-2">
                 <Sparkles className="w-4 h-4 text-indigo-400" />
-                Real-Time AI Pipeline Execution
+                {t('intake.pipelineTitle')}
               </CardTitle>
             </CardHeader>
 
@@ -458,21 +472,31 @@ export default function ClaimIntake() {
                 })}
               </div>
 
-              {/* Created Event Result Card */}
-              {createdEvent && (
+              {/* Created Events Result Card(s) -- a file upload can yield
+                  several claims at once (a multi-row report, a multi-sheet
+                  spreadsheet, a P6 export), so this lists every claim
+                  created, not just one. */}
+              {createdEvents.length > 0 && (
                 <div className="p-4 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-900 dark:text-emerald-200 space-y-3 animate-in fade-in duration-300">
                   <div className="flex items-center gap-2 text-xs font-bold text-emerald-800 dark:text-emerald-300">
                     <CheckCircle2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
-                    Ingestion Complete — Queued for Supervisor
+                    {t('intake.ingestionComplete')} — {createdEvents.length === 1 ? t('intake.oneClaim') : t('intake.nClaims', { count: createdEvents.length })} {t('intake.queuedForSupervisor')}
                   </div>
-                  <p className="text-xs text-slate-700 dark:text-slate-300 leading-relaxed">
-                    Claim ID <span className="font-mono font-bold text-slate-900 dark:text-white">{createdEvent.event_id}</span> status set to <span className="font-mono text-amber-600 dark:text-amber-400 font-bold">{createdEvent.status}</span>.
-                  </p>
+                  <div className="space-y-2 max-h-48 overflow-y-auto">
+                    {createdEvents.map((ev) => (
+                      <p key={ev.event_id} className="text-xs text-slate-700 dark:text-slate-300 leading-relaxed">
+                        {ev.reported_activity_id && (
+                          <span className="font-mono text-indigo-600 dark:text-indigo-300 mr-1">{ev.reported_activity_id}</span>
+                        )}
+                        {t('intake.claimIdLabel')} <span className="font-mono font-bold text-slate-900 dark:text-white">{ev.event_id}</span> {t('intake.statusSetTo')} <span className="font-mono text-amber-600 dark:text-amber-400 font-bold">{ev.status}</span>.
+                      </p>
+                    ))}
+                  </div>
                   <Button
-                    onClick={() => navigate(`/review?event_id=${createdEvent.event_id}`)}
+                    onClick={() => navigate(`/review?event_id=${createdEvents[0].event_id}`)}
                     className="w-full bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold h-8"
                   >
-                    Open in Supervisor Review Workspace
+                    {t('intake.openReviewWorkspace')}
                   </Button>
                 </div>
               )}

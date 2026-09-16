@@ -1,10 +1,12 @@
 import React, { useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useAuth } from '@/auth/AuthProvider';
 import { useTheme } from '@/theme/ThemeProvider';
 import { Navigate, useLocation } from 'react-router-dom';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
+import LanguageSwitcher from '@/components/LanguageSwitcher';
 import {
   Lock,
   Mail,
@@ -28,6 +30,7 @@ const BLUE = '#1565C0';
 export default function LoginScreen() {
   const { login, isAuthenticated, user, error, clearError, isLoading } = useAuth();
   const { theme, toggleTheme } = useTheme();
+  const { t } = useTranslation();
   const location = useLocation();
 
   const [email, setEmail] = useState('');
@@ -46,9 +49,9 @@ export default function LoginScreen() {
     setFieldError('');
     clearError();
 
-    if (!email.trim()) { setFieldError('Please enter your email address.'); return; }
-    if (!email.includes('@')) { setFieldError('Please enter a valid email address.'); return; }
-    if (!password.trim()) { setFieldError('Please enter your password.'); return; }
+    if (!email.trim()) { setFieldError(t('login.errEmailRequired')); return; }
+    if (!email.includes('@')) { setFieldError(t('login.errEmailInvalid')); return; }
+    if (!password.trim()) { setFieldError(t('login.errPasswordRequired')); return; }
 
     try {
       await login(email.trim(), password);
@@ -102,29 +105,28 @@ export default function LoginScreen() {
                 Setu <span style={{ color: ORANGE }}>AI</span>
               </div>
               <div className="text-xs font-medium" style={{ color: 'rgba(255,255,255,0.5)' }}>
-                SIH26122 · Oil India Progress Verification
+                {t('login.tagline')}
               </div>
             </div>
           </div>
 
           <h2 className="text-3xl font-bold text-white leading-snug mt-12">
-            Smart Infrastructure<br />
-            <span style={{ color: ORANGE }}>Progress Tracking</span><br />
-            for Oil India
+            {t('login.heroTitleLine1')}<br />
+            <span style={{ color: ORANGE }}>{t('login.heroTitleLine2')}</span><br />
+            {t('login.heroTitleLine3')}
           </h2>
 
           <p className="text-sm mt-4" style={{ color: 'rgba(255,255,255,0.6)', lineHeight: '1.7' }}>
-            AI-assisted field progress claims, Primavera P6 schedule compliance,
-            and real-time supervisor approval workflow for Oil India infrastructure projects.
+            {t('login.heroDescription')}
           </p>
         </div>
 
         {/* Feature Highlights */}
         <div className="relative z-10 space-y-3">
           {[
-            { icon: ShieldCheck, label: 'Human-in-the-Loop Supervisor Sign-off' },
-            { icon: Droplets, label: 'Primavera P6 Baseline Integration' },
-            { icon: Flame, label: 'Voice & OCR Claim Ingestion' },
+            { icon: ShieldCheck, label: t('login.featureHitl') },
+            { icon: Droplets, label: t('login.featureP6') },
+            { icon: Flame, label: t('login.featureOcr') },
           ].map(({ icon: Icon, label }) => (
             <div key={label} className="flex items-center gap-3">
               <div
@@ -137,7 +139,7 @@ export default function LoginScreen() {
             </div>
           ))}
           <p className="text-xs pt-4" style={{ color: 'rgba(255,255,255,0.3)' }}>
-            Smart India Hackathon 2026 · Problem Statement SIH26122
+            {t('login.footerTagline')}
           </p>
         </div>
       </div>
@@ -145,8 +147,9 @@ export default function LoginScreen() {
       {/* ── RIGHT PANEL — Login Form ─────────────────────────────────────────── */}
       <div className="flex-1 flex flex-col items-center justify-center p-6 lg:p-12 relative">
 
-        {/* Theme Toggle — top right */}
-        <div className="absolute top-4 right-4">
+        {/* Language & Theme Toggle — top right */}
+        <div className="absolute top-4 right-4 flex items-center gap-2">
+          <LanguageSwitcher variant="adaptive" />
           <Button
             variant="outline"
             size="sm"
@@ -154,8 +157,8 @@ export default function LoginScreen() {
             className="border-slate-300 dark:border-blue-800 text-slate-600 dark:text-white/70 h-9 px-3 gap-2 text-xs rounded-xl shadow-sm bg-white dark:bg-white/5 hover:bg-slate-50 dark:hover:bg-white/10"
           >
             {theme === 'dark'
-              ? <><Sun className="w-4 h-4 text-amber-400" />Light Mode</>
-              : <><Moon className="w-4 h-4" style={{ color: BLUE }} />Dark Mode</>
+              ? <><Sun className="w-4 h-4 text-amber-400" />{t('common.lightMode')}</>
+              : <><Moon className="w-4 h-4" style={{ color: BLUE }} />{t('common.darkMode')}</>
             }
           </Button>
         </div>
@@ -172,7 +175,7 @@ export default function LoginScreen() {
             <div className="font-bold text-xl tracking-tight" style={{ color: NAVY }}>
               Setu <span style={{ color: ORANGE }}>AI</span>
             </div>
-            <div className="text-[10px] text-slate-500 font-medium">SIH26122 · Oil India</div>
+            <div className="text-[10px] text-slate-500 font-medium">{t('common.brandTagline')}</div>
           </div>
         </div>
 
@@ -190,9 +193,9 @@ export default function LoginScreen() {
             style={{ backgroundColor: NAVY }}
           >
             <div>
-              <h1 className="text-lg font-bold text-white">Sign in to your account</h1>
+              <h1 className="text-lg font-bold text-white">{t('login.signInTitle')}</h1>
               <p className="text-xs mt-0.5" style={{ color: 'rgba(255,255,255,0.55)' }}>
-                Authorized Site & Planning Personnel Only
+                {t('login.signInSubtitle')}
               </p>
             </div>
             <div
@@ -221,13 +224,13 @@ export default function LoginScreen() {
               {/* Email */}
               <div className="space-y-1.5">
                 <Label className="text-xs font-semibold" style={{ color: theme === 'dark' ? 'rgba(255,255,255,0.8)' : '#374151' }}>
-                  Email Address
+                  {t('login.emailLabel')}
                 </Label>
                 <div className="relative">
                   <Mail className="w-4 h-4 absolute left-3 top-3 text-slate-400" />
                   <Input
                     type="email"
-                    placeholder="name@oilindia.in"
+                    placeholder={t('login.emailPlaceholder')}
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
                     className="pl-9 text-sm h-11 rounded-xl"
@@ -242,7 +245,7 @@ export default function LoginScreen() {
               {/* Password */}
               <div className="space-y-1.5">
                 <Label className="text-xs font-semibold" style={{ color: theme === 'dark' ? 'rgba(255,255,255,0.8)' : '#374151' }}>
-                  Password
+                  {t('login.passwordLabel')}
                 </Label>
                 <div className="relative">
                   <Lock className="w-4 h-4 absolute left-3 top-3 text-slate-400" />
@@ -278,10 +281,10 @@ export default function LoginScreen() {
                 }}
               >
                 {isLoading ? (
-                  <span>Authenticating...</span>
+                  <span>{t('login.authenticating')}</span>
                 ) : (
                   <>
-                    <span>Sign In</span>
+                    <span>{t('login.signIn')}</span>
                     <ArrowRight className="w-4 h-4" />
                   </>
                 )}
@@ -293,7 +296,7 @@ export default function LoginScreen() {
               <div className="flex items-center gap-3">
                 <div className="flex-1 h-px" style={{ backgroundColor: theme === 'dark' ? 'rgba(255,255,255,0.1)' : '#E2E8F0' }} />
                 <span className="text-[11px] font-bold uppercase tracking-wider" style={{ color: theme === 'dark' ? 'rgba(255,255,255,0.35)' : '#94A3B8' }}>
-                  Demo Access
+                  {t('login.demoAccess')}
                 </span>
                 <div className="flex-1 h-px" style={{ backgroundColor: theme === 'dark' ? 'rgba(255,255,255,0.1)' : '#E2E8F0' }} />
               </div>
@@ -311,7 +314,7 @@ export default function LoginScreen() {
                 >
                   <div className="flex items-center gap-1.5 text-xs font-bold" style={{ color: theme === 'dark' ? '#e2e8f0' : '#1e293b' }}>
                     <ShieldCheck className="w-4 h-4 text-emerald-500" />
-                    Supervisor
+                    {t('login.supervisor')}
                   </div>
                   <div className="text-[10px] font-mono mt-0.5 truncate text-slate-400">supervisor@sih26122.internal</div>
                 </button>
@@ -329,7 +332,7 @@ export default function LoginScreen() {
                 >
                   <div className="flex items-center gap-1.5 text-xs font-bold" style={{ color: theme === 'dark' ? '#e2e8f0' : '#1e293b' }}>
                     <HardHat className="w-4 h-4 text-amber-500" />
-                    Site Engineer
+                    {t('login.siteEngineer')}
                   </div>
                   <div className="text-[10px] font-mono mt-0.5 truncate text-slate-400">site.engineer@sih26122.internal</div>
                 </button>
@@ -339,7 +342,7 @@ export default function LoginScreen() {
         </div>
 
         <p className="text-center text-xs mt-6" style={{ color: theme === 'dark' ? 'rgba(255,255,255,0.3)' : '#94A3B8' }}>
-          Smart India Hackathon 2026 · Problem Statement SIH26122
+          {t('login.footerTagline')}
         </p>
       </div>
     </div>
