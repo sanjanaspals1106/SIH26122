@@ -229,6 +229,75 @@ def test_get_unknown_schedule_returns_404():
     print("✓ GET on an unknown schedule_id returns 404 for the schedule and its activities")
 
 
+def test_wbs_tree_groups_activities_and_excludes_blank_wbs_code():
+    activity_prefix = _new_activity_prefix()
+    csv_content = (
+        "L1,L2,L3,L4,L5 Activity ID,L6 Task ID,Discipline,Activity,Unit,"
+        "Planned Qty,Baseline Start,Baseline Finish\n"
+        # Two children of the same wbs_code ("1.01.01") -- a decomposition
+        # candidate for M3. Deliberately inserted out of activity_id order
+        # to prove the endpoint sorts, not just passes through insert order.
+        "North Field,Pump Station 3,Civil Works,Trench,1.01.01,{p}-02,Civil,"
+        "Backfill utility trench,m,25,2026-08-16,2026-08-17\n"
+        "North Field,Pump Station 3,Civil Works,Trench,1.01.01,{p}-01,Civil,"
+        "Excavate utility trench,m,40,2026-08-14,2026-08-15\n"
+        # A single-child wbs_code ("1.02.01") with no Planned Qty -> NULL.
+        "North Field,Pump Station 3,Piping Works,Header,1.02.01,{p}-03,Piping,"
+        "Weld header joint,joints,,2026-08-11,2026-08-12\n"
+        # Blank L5 Activity ID -> parsed to NULL wbs_code -> must be excluded,
+        # not bucketed under "UNASSIGNED".
+        "North Field,Pump Station 3,HSE,Inspection,,{p}-04,HSE,"
+        "Daily safety walk,ea,1,2026-08-11,2026-08-11\n"
+    ).format(p=activity_prefix)
+
+    schedule_id = None
+    try:
+        create_resp = client.post(
+            "/api/v1/schedules",
+            json={"project_name": "North Field Utility Corridor", "csv_content": csv_content},
+        )
+        assert create_resp.status_code == 201, create_resp.text
+        schedule_id = create_resp.json()["schedule_id"]
+        assert create_resp.json()["activity_count"] == 4
+
+        resp = client.get(f"/api/v1/schedules/{schedule_id}/wbs-tree")
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["schedule_id"] == schedule_id
+
+        groups = body["wbs_groups"]
+        wbs_codes = [g["wbs_code"] for g in groups]
+        assert wbs_codes == sorted(wbs_codes)  # groups ordered by wbs_code
+        assert "" not in wbs_codes and None not in wbs_codes
+
+        all_activity_ids = {a["activity_id"] for g in groups for a in g["activities"]}
+        assert all_activity_ids == {f"{activity_prefix}-01", f"{activity_prefix}-02", f"{activity_prefix}-03"}
+        assert f"{activity_prefix}-04" not in all_activity_ids  # blank-wbs activity excluded
+
+        multi_child = next(g for g in groups if g["wbs_code"] == "1.01.01")
+        assert [a["activity_id"] for a in multi_child["activities"]] == [
+            f"{activity_prefix}-01", f"{activity_prefix}-02",
+        ]  # ordered by activity_id within the group, not insertion order
+        assert {a["planned_quantity"] for a in multi_child["activities"]} == {40, 25}
+
+        single_child = next(g for g in groups if g["wbs_code"] == "1.02.01")
+        assert len(single_child["activities"]) == 1
+        assert single_child["activities"][0]["activity_id"] == f"{activity_prefix}-03"
+        assert single_child["activities"][0]["planned_quantity"] is None  # blank Planned Qty preserved as NULL
+    finally:
+        if schedule_id:
+            _cleanup(schedule_id)
+
+    print("✓ wbs-tree groups activities by wbs_code (deterministic ordering), preserves NULL planned_quantity, and excludes blank-wbs activities")
+
+
+def test_wbs_tree_unknown_schedule_returns_404():
+    resp = client.get("/api/v1/schedules/does-not-exist-m1-api-test/wbs-tree")
+    assert resp.status_code == 404
+
+    print("✓ GET wbs-tree on an unknown schedule_id returns 404")
+
+
 def test_get_unknown_activity_returns_404():
     activity_prefix = _new_activity_prefix()
 
@@ -264,6 +333,8 @@ if __name__ == "__main__":
         test_dependencies_are_parsed_persisted_and_retrievable()
         test_invalid_csv_returns_422_with_row_errors_and_persists_nothing()
         test_get_unknown_schedule_returns_404()
+        test_wbs_tree_groups_activities_and_excludes_blank_wbs_code()
+        test_wbs_tree_unknown_schedule_returns_404()
         test_get_unknown_activity_returns_404()
 
         print("\nM1 Schedule API tests passed.")

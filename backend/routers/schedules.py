@@ -9,6 +9,7 @@ Thin FastAPI wrapper over the Phase 1 parser/validator
     GET  /api/v1/schedules/{schedule_id}/activities             a schedule's activities from PostgreSQL
     GET  /api/v1/schedules/{schedule_id}/activities/{activity_id}  one activity from PostgreSQL
     GET  /api/v1/schedules/{schedule_id}/dependencies            a schedule's dependency pairs from PostgreSQL
+    GET  /api/v1/schedules/{schedule_id}/wbs-tree                 activities grouped by wbs_code (Feature #30, M1 half)
 
 No matching (EXACT_ID/EXACT_ASSET/HYBRID_FALLBACK/tiering), embeddings-as-a-
 service, OCR, or LLM extraction here — those belong to later phases.
@@ -39,10 +40,18 @@ from backend.shared.schedule_repository import (
     get_schedule_activity,
     list_schedule_activities,
     list_schedule_dependencies,
+    list_schedule_wbs_activities,
     list_schedules,
     save_schedule,
 )
-from backend.shared.schemas import Schedule, ScheduleActivity, ScheduleDependency
+from backend.shared.schemas import (
+    Schedule,
+    ScheduleActivity,
+    ScheduleDependency,
+    WBSGroup,
+    WBSGroupActivity,
+    WBSTreeResponse,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -211,3 +220,41 @@ def get_dependencies_for_schedule(schedule_id: str) -> list[ScheduleDependency]:
             detail=f"schedule_id {schedule_id!r} not found",
         )
     return list_schedule_dependencies(schedule_id)
+
+
+@router.get("/{schedule_id}/wbs-tree", response_model=WBSTreeResponse)
+def get_wbs_tree(schedule_id: str) -> WBSTreeResponse:
+    """M1 half of Feature #30 (WBS Granularity Bridge): a read-only grouping
+    of this schedule's activities by wbs_code, for M3's decomposition
+    analysis. No role gate, same as this router's other read endpoints.
+
+    Activities with a NULL/empty/whitespace-only wbs_code are excluded
+    (never bucketed as "unassigned") — see
+    backend.shared.schedule_repository.list_schedule_wbs_activities. Group
+    and within-group ordering is deterministic (by wbs_code, then
+    activity_id) because the repository query is already sorted that way.
+    """
+    schedule = get_schedule(schedule_id)
+    if schedule is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"schedule_id {schedule_id!r} not found",
+        )
+
+    rows = list_schedule_wbs_activities(schedule_id)
+
+    groups: dict[str, list[WBSGroupActivity]] = {}
+    for row in rows:
+        groups.setdefault(row["wbs_code"], []).append(
+            WBSGroupActivity(
+                activity_id=row["activity_id"],
+                planned_quantity=row["planned_quantity"],
+            )
+        )
+
+    wbs_groups = [
+        WBSGroup(wbs_code=wbs_code, activities=activities)
+        for wbs_code, activities in groups.items()
+    ]
+
+    return WBSTreeResponse(schedule_id=schedule_id, wbs_groups=wbs_groups)
