@@ -43,6 +43,23 @@ class ScheduleDependency(BaseModel):
     relationship_type: str = "FS"
 
 
+# ---------- M1 Feature #30 (WBS Granularity Bridge, schedule-side): WBS tree ----------
+
+class WBSGroupActivity(BaseModel):
+    activity_id: str
+    planned_quantity: Optional[float] = None
+
+
+class WBSGroup(BaseModel):
+    wbs_code: str
+    activities: list[WBSGroupActivity]
+
+
+class WBSTreeResponse(BaseModel):
+    schedule_id: str
+    wbs_groups: list[WBSGroup]
+
+
 # ---------- shared enums (used across M2/M3/M4) ----------
 
 class Discipline(str, Enum):
