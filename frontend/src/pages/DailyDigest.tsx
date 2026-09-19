@@ -394,9 +394,9 @@ export default function DailyDigest() {
         </Card>
       ) : (
         <div className="space-y-6">
-          {['CIVIL', 'PIPING', 'STATIC_ROTATING_EQUIPMENT', 'ELECTRICAL', 'INSTRUMENTATION', 'HSE', 'UNASSIGNED'].map((disc) => {
+          {[...DISCIPLINES, 'UNASSIGNED' as const].map((disc) => {
             const discEvents = events.filter((e) =>
-              disc === 'UNASSIGNED' ? !e.discipline || e.discipline === 'UNASSIGNED' : e.discipline === disc
+              disc === 'UNASSIGNED' ? !e.discipline : e.discipline === disc
             );
             if (discEvents.length === 0) return null;
 

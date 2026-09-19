@@ -93,17 +93,43 @@ def query_activity_history(
             decided_at
         FROM planner_decisions
         WHERE selected_activity_id = %s
-        ORDER BY decided_at DESC, decision_id DESC
-        LIMIT 1
+        ORDER BY decided_at ASC, decision_id ASC
     """
 
+    actuals_query = """
+        SELECT
+            actual_id,
+            decision_id,
+            event_id,
+            schedule_id,
+            activity_id,
+            actual_start,
+            actual_finish,
+            actual_pct_complete,
+            actual_quantity,
+            created_at
+        FROM approved_actuals
+        WHERE activity_id = %s
+        ORDER BY created_at ASC, actual_id ASC
+    """
+
+    actual_rows = []
     if conn is not None:
         event_rows = conn.execute(events_query, (activity_id, activity_id, activity_id)).fetchall()
-        decision_row = conn.execute(decision_query, (activity_id,)).fetchone()
+        decision_rows = conn.execute(decision_query, (activity_id,)).fetchall()
+        try:
+            actual_rows = conn.execute(actuals_query, (activity_id,)).fetchall()
+        except Exception:
+            actual_rows = []
     else:
         with get_connection() as c:
             event_rows = c.execute(events_query, (activity_id, activity_id, activity_id)).fetchall()
-            decision_row = c.execute(decision_query, (activity_id,)).fetchone()
+            decision_rows = c.execute(decision_query, (activity_id,)).fetchall()
+            try:
+                actual_rows = c.execute(actuals_query, (activity_id,)).fetchall()
+            except Exception:
+                actual_rows = []
+
 
     event_ids = [str(r["event_id"]) for r in event_rows]
 
@@ -171,27 +197,52 @@ def query_activity_history(
             }
         )
 
-    if decision_row:
-        dec_ts = str(decision_row["decided_at"]) if decision_row["decided_at"] is not None else None
-        timeline.append(
-            {
-                "type": "planner_decision",
-                "decision_id": str(decision_row["decision_id"]),
-                "event_id": str(decision_row["event_id"]),
-                "selected_activity_id": str(decision_row["selected_activity_id"]),
-                "action": str(decision_row["action"]),
-                "approved_pct": float(decision_row["approved_pct"]) if decision_row["approved_pct"] is not None else None,
-                "approved_qty": float(decision_row["approved_qty"]) if decision_row["approved_qty"] is not None else None,
-                "justification": str(decision_row["justification"]) if decision_row["justification"] is not None else "",
-                "timestamp": dec_ts,
-            }
+    decisions_list: List[dict] = []
+    for d in decision_rows:
+        dec_ts = str(d["decided_at"]) if d["decided_at"] is not None else None
+        d_dict = {
+            "type": "planner_decision",
+            "decision_id": str(d["decision_id"]),
+            "event_id": str(d["event_id"]),
+            "selected_activity_id": str(d["selected_activity_id"]),
+            "action": str(d["action"]),
+            "approved_pct": float(d["approved_pct"]) if d["approved_pct"] is not None else None,
+            "approved_qty": float(d["approved_qty"]) if d["approved_qty"] is not None else None,
+            "planner_id": str(d["planner_id"]) if d["planner_id"] is not None else None,
+            "justification": str(d["justification"]) if d["justification"] is not None else "",
+            "timestamp": dec_ts,
+        }
+        decisions_list.append(d_dict)
+        timeline.append(d_dict)
+
+    actuals_list: List[dict] = []
+    for a in actual_rows:
+        act_ts = str(a["created_at"]) if a["created_at"] is not None else (
+            str(a["actual_finish"]) if a["actual_finish"] is not None else (
+                str(a["actual_start"]) if a["actual_start"] is not None else None
+            )
         )
+        a_dict = {
+            "type": "approved_actual",
+            "actual_id": str(a["actual_id"]),
+            "decision_id": str(a["decision_id"]) if a["decision_id"] is not None else None,
+            "event_id": str(a["event_id"]) if a["event_id"] is not None else None,
+            "schedule_id": str(a["schedule_id"]) if a["schedule_id"] is not None else None,
+            "activity_id": str(a["activity_id"]),
+            "actual_start": str(a["actual_start"]) if a["actual_start"] is not None else None,
+            "actual_finish": str(a["actual_finish"]) if a["actual_finish"] is not None else None,
+            "actual_pct_complete": float(a["actual_pct_complete"]) if a["actual_pct_complete"] is not None else None,
+            "actual_quantity": float(a["actual_quantity"]) if a["actual_quantity"] is not None else None,
+            "timestamp": act_ts,
+        }
+        actuals_list.append(a_dict)
+        timeline.append(a_dict)
 
     timeline.sort(
         key=lambda item: (
             str(item.get("timestamp") or ""),
-            0 if item.get("type") == "execution_event" else 1,
-            str(item.get("event_id") if item.get("type") == "execution_event" else item.get("decision_id")),
+            0 if item.get("type") == "execution_event" else (1 if item.get("type") == "planner_decision" else 2),
+            str(item.get("event_id") or item.get("decision_id") or item.get("actual_id") or ""),
         )
     )
 
@@ -199,6 +250,7 @@ def query_activity_history(
         "activity_id": str(activity_id),
         "timeline": timeline,
     }
+
 
 
 @router.get("/{activity_id}/history")

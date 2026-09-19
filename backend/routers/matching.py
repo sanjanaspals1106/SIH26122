@@ -1,6 +1,7 @@
 from typing import List, Optional, Union
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 
+from backend.shared.auth import UserProfile, get_current_user
 from backend.shared.schemas import CandidateMatch, ExecutionClaim, ScheduleActivity
 
 try:
@@ -716,7 +717,11 @@ def match_claim(
 
 
 @router.post("/{event_id}/match")
-def match_claim_endpoint(event_id: str, action: str = "MATCH_CLAIM"):
+def match_claim_endpoint(
+    event_id: str,
+    action: str = "MATCH_CLAIM",
+    current_user: UserProfile = Depends(get_current_user),
+):
     """
     POST /api/v1/claims/{event_id}/match
     Loads execution claim and schedule activities from DB, executes M3 matching cascade,
@@ -895,13 +900,18 @@ def match_claim_endpoint(event_id: str, action: str = "MATCH_CLAIM"):
 
 
 @router.post("/{event_id}/rematch")
-def rematch_claim_endpoint(event_id: str):
+def rematch_claim_endpoint(
+    event_id: str,
+    current_user: UserProfile = Depends(get_current_user),
+):
     """
     POST /api/v1/claims/{event_id}/rematch
     Re-runs the M3 4-tier matching cascade for an existing execution claim.
     Updates candidate_matches and status/matched_activity_id accordingly.
     """
-    return match_claim_endpoint(event_id, action="REMATCH_CLAIM")
+    return match_claim_endpoint(
+        event_id, action="REMATCH_CLAIM", current_user=current_user
+    )
 
 
 

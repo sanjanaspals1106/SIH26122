@@ -4,6 +4,7 @@ from datetime import date
 from typing import Any, Optional, Union
 
 from backend.shared.db import get_connection
+from backend.shared.schemas import ExecutionState
 
 logger = logging.getLogger(__name__)
 
@@ -57,6 +58,59 @@ def get_approved_pct(
         return 0.0
 
     return float(actual["actual_pct_complete"] or 0.0)
+
+
+def get_execution_state(
+    activity: Optional[Any] = None,
+    approved_actual: Optional[Any] = None,
+    *,
+    actual_pct_complete: Optional[float] = None,
+    actual_start: Optional[Any] = None,
+) -> str:
+    """
+    Canonical execution-state interpretation for SIH26122 (Phase 1C Rule E).
+
+    Priority:
+        1. actual_pct_complete >= 100 -> COMPLETED (precedes actual_start)
+        2. actual_start IS NOT NULL   -> IN_PROGRESS
+        3. else                       -> NOT_STARTED
+
+    Direct keyword arguments take precedence over attributes extracted from
+    `approved_actual` or `activity`.
+    """
+    pct = actual_pct_complete
+    start = actual_start
+
+    # If not supplied as direct keyword arguments, inspect approved_actual then activity
+    if pct is None or start is None:
+        for source in (approved_actual, activity):
+            if source is None:
+                continue
+            if isinstance(source, dict):
+                if pct is None:
+                    pct = source.get("actual_pct_complete")
+                if start is None:
+                    start = source.get("actual_start")
+            else:
+                if pct is None:
+                    pct = getattr(source, "actual_pct_complete", None)
+                if start is None:
+                    start = getattr(source, "actual_start", None)
+
+    # 1. actual_pct_complete >= 100 -> COMPLETED (takes precedence over actual_start)
+    if pct is not None:
+        try:
+            if float(pct) >= 100.0:
+                return ExecutionState.COMPLETED.value
+        except (ValueError, TypeError):
+            pass
+
+    # 2. actual_start IS NOT NULL -> IN_PROGRESS
+    if start is not None and str(start).strip() != "":
+        return ExecutionState.IN_PROGRESS.value
+
+    # 3. else -> NOT_STARTED
+    return ExecutionState.NOT_STARTED.value
 
 
 def _dispatch_adapters(actual: dict) -> dict:

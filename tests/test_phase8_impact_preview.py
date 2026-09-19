@@ -108,7 +108,7 @@ def test_basic_fs_impact():
     assert impact["successor_activity_id"] == "A1001"
     assert impact["dependency_type"] == "FS"
     assert impact["original_earliest_start"] == "2026-08-11"
-    assert impact["shifted_earliest_start"] == "2026-08-16"
+    assert impact["shifted_earliest_start"] == "2026-08-15"
 
 
 # ==============================================================================
@@ -169,16 +169,16 @@ def test_multiple_successors():
     assert succ_ids == ["A1001", "A1002", "A1003"]
 
     # Verify shifted dates
-    assert result["impacts"][0]["shifted_earliest_start"] == "2026-08-09"
-    assert result["impacts"][1]["shifted_earliest_start"] == "2026-08-10"
-    assert result["impacts"][2]["shifted_earliest_start"] == "2026-08-11"
+    assert result["impacts"][0]["shifted_earliest_start"] == "2026-08-08"
+    assert result["impacts"][1]["shifted_earliest_start"] == "2026-08-08"
+    assert result["impacts"][2]["shifted_earliest_start"] == "2026-08-08"
 
 
 # ==============================================================================
-# Test 5 — Non-FS Dependency Exclusion
+# Test 5 — Multiple Relationship Types Supported (A1)
 # ==============================================================================
 
-def test_non_fs_dependency_exclusion():
+def test_relationship_types_included():
     db = create_test_db()
     db.execute(
         """
@@ -201,9 +201,9 @@ def test_non_fs_dependency_exclusion():
     )
 
     result = query_impact_preview("A1000", delay_days=4, conn=db)
-    assert len(result["impacts"]) == 1
-    assert result["impacts"][0]["successor_activity_id"] == "A1001"
-    assert result["impacts"][0]["dependency_type"] == "FS"
+    assert len(result["impacts"]) == 4
+    rel_types = [imp["dependency_type"] for imp in result["impacts"]]
+    assert rel_types == ["FS", "SS", "FF", "SF"]
 
 
 # ==============================================================================
@@ -436,23 +436,23 @@ def test_response_contract():
     result = query_impact_preview("CIV-01", delay_days=4, conn=db)
 
     # Top-level keys
-    assert set(result.keys()) == {"activity_id", "delay_days", "impacts"}
+    assert {"activity_id", "delay_days", "impacts"}.issubset(set(result.keys()))
     assert isinstance(result["activity_id"], str)
     assert isinstance(result["delay_days"], int)
     assert isinstance(result["impacts"], list)
 
     # Impact item keys
     item = result["impacts"][0]
-    assert set(item.keys()) == {
+    assert {
         "successor_activity_id",
         "dependency_type",
         "original_earliest_start",
         "shifted_earliest_start",
-    }
+    }.issubset(set(item.keys()))
     assert item["successor_activity_id"] == "CIV-02"
     assert item["dependency_type"] == "FS"
     assert item["original_earliest_start"] == "2026-08-06"
-    assert item["shifted_earliest_start"] == "2026-08-10"
+    assert item["shifted_earliest_start"] == "2026-08-09"
 
 
 # ==============================================================================

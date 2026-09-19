@@ -4,6 +4,8 @@ import { useTranslation } from 'react-i18next';
 import {
   claimsApi,
   decisionsApi,
+  investigationApi,
+  InvestigationContext,
   ExecutionEvent,
   CandidateMatch,
   ValidationIssue,
@@ -18,6 +20,7 @@ import {
   XCircle,
   Sparkles,
   Check,
+  HelpCircle,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
@@ -47,6 +50,27 @@ export default function ReviewWorkspace() {
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [decisionSuccess, setDecisionSuccess] = useState<boolean>(false);
+
+  // Ask Why State
+  const [investigation, setInvestigation] = useState<InvestigationContext | null>(null);
+  const [investigationLoading, setInvestigationLoading] = useState<boolean>(false);
+  const [investigationDepth, setInvestigationDepth] = useState<number>(1);
+  const [showInvestigation, setShowInvestigation] = useState<boolean>(false);
+
+  const handleAskWhy = async (depth = investigationDepth) => {
+    if (!selectedActivityId) return;
+    setInvestigationLoading(true);
+    setShowInvestigation(true);
+    setInvestigationDepth(depth);
+    try {
+      const data = await investigationApi.getInvestigation(selectedActivityId, depth);
+      setInvestigation(data);
+    } catch (err: any) {
+      console.error('Failed to load investigation:', err);
+    } finally {
+      setInvestigationLoading(false);
+    }
+  };
 
   const loadData = async (id: string) => {
     setIsLoading(true);
@@ -393,13 +417,105 @@ export default function ReviewWorkspace() {
 
               <form onSubmit={handleSubmitDecision} className="space-y-4 text-xs">
                 <div className="space-y-1.5">
-                  <Label className="text-xs text-slate-700 dark:text-slate-200 font-bold">{t('review.selectedActivity')}</Label>
+                  <div className="flex items-center justify-between">
+                    <Label className="text-xs text-slate-700 dark:text-slate-200 font-bold">{t('review.selectedActivity')}</Label>
+                    {selectedActivityId && (
+                      <button
+                        type="button"
+                        onClick={() => handleAskWhy(1)}
+                        className="text-[11px] font-bold text-purple-600 dark:text-purple-400 hover:text-purple-700 dark:hover:text-purple-300 flex items-center gap-1 transition-colors"
+                      >
+                        <HelpCircle className="w-3.5 h-3.5" />
+                        Ask Why?
+                      </button>
+                    )}
+                  </div>
                   <Input
                     value={selectedActivityId}
                     onChange={(e) => setSelectedActivityId(e.target.value)}
                     className="bg-slate-50 dark:bg-[#001438] border-slate-300 dark:border-blue-800 font-mono text-[#FC4C02] font-bold text-sm h-9 rounded-xl"
                   />
                 </div>
+
+                {showInvestigation && (
+                  <div className="p-3.5 rounded-xl bg-purple-500/10 border border-purple-500/30 text-slate-800 dark:text-purple-200 space-y-3">
+                    <div className="flex items-center justify-between border-b border-purple-500/20 pb-2">
+                      <span className="font-bold flex items-center gap-1.5 text-xs text-purple-900 dark:text-purple-100">
+                        <Sparkles className="w-3.5 h-3.5 text-purple-500" />
+                        Investigation: {selectedActivityId}
+                      </span>
+                      <div className="flex items-center gap-1">
+                        <span className="text-[10px] text-slate-500 dark:text-slate-400">Depth:</span>
+                        <button
+                          type="button"
+                          onClick={() => handleAskWhy(1)}
+                          className={cn("px-1.5 py-0.5 rounded text-[10px] font-bold font-mono", investigationDepth === 1 ? "bg-purple-600 text-white" : "bg-purple-500/20 text-purple-700 dark:text-purple-300")}
+                        >
+                          1
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleAskWhy(2)}
+                          className={cn("px-1.5 py-0.5 rounded text-[10px] font-bold font-mono", investigationDepth === 2 ? "bg-purple-600 text-white" : "bg-purple-500/20 text-purple-700 dark:text-purple-300")}
+                        >
+                          2
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setShowInvestigation(false)}
+                          className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 ml-1"
+                        >
+                          <XCircle className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    </div>
+
+                    {investigationLoading ? (
+                      <p className="text-[11px] text-purple-600 dark:text-purple-300 animate-pulse">Loading connected facts...</p>
+                    ) : investigation ? (
+                      <div className="space-y-2 text-[11px]">
+                        {/* Summary Badges */}
+                        <div className="flex flex-wrap gap-1.5">
+                          <span className={cn("px-1.5 py-0.5 rounded text-[10px] font-semibold", investigation.summary.conflict_status === 'present' ? "bg-rose-500/20 text-rose-700 dark:text-rose-300 border border-rose-500/30" : "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300")}>
+                            Conflict: {investigation.summary.conflict_status}
+                          </span>
+                          <span className={cn("px-1.5 py-0.5 rounded text-[10px] font-semibold", investigation.summary.validation_status === 'present' ? "bg-amber-500/20 text-amber-700 dark:text-amber-300 border border-amber-500/30" : "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300")}>
+                            Validation: {investigation.summary.validation_status}
+                          </span>
+                          <span className="bg-slate-200 dark:bg-blue-900/60 text-slate-700 dark:text-slate-300 px-1.5 py-0.5 rounded text-[10px] font-semibold">
+                            Evidence: {investigation.context.evidence.length}
+                          </span>
+                          <span className="bg-slate-200 dark:bg-blue-900/60 text-slate-700 dark:text-slate-300 px-1.5 py-0.5 rounded text-[10px] font-semibold">
+                            Dependencies: {investigation.context.dependencies.length}
+                          </span>
+                        </div>
+
+                        {/* Connected Facts */}
+                        {investigation.context.dependencies.length > 0 && (
+                          <div className="space-y-0.5 pt-1">
+                            <span className="text-[10px] font-bold uppercase text-slate-500 dark:text-slate-400 block">Precedence Chain</span>
+                            {investigation.context.dependencies.map((d, i) => (
+                              <div key={i} className="font-mono text-[10px] text-purple-700 dark:text-purple-300">
+                                {d.predecessor_activity_id} → {d.successor_activity_id} ({d.relationship_type}{d.lag_days ? ` +${d.lag_days}d` : ''})
+                              </div>
+                            ))}
+                          </div>
+                        )}
+
+                        {investigation.context.evidence.length > 0 && (
+                          <div className="space-y-0.5 pt-1">
+                            <span className="text-[10px] font-bold uppercase text-slate-500 dark:text-slate-400 block">Traceable Evidence</span>
+                            {investigation.context.evidence.slice(0, 2).map((ev, i) => (
+                              <div key={i} className="text-[10px] text-slate-600 dark:text-slate-400 truncate">
+                                • {ev.file_name}: <span className="italic">{ev.raw_snippet}</span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    ) : null}
+                  </div>
+                )}
 
                 <div className="space-y-1.5">
                   <Label className="text-xs text-slate-700 dark:text-slate-200 font-bold">{t('review.actionType')}</Label>

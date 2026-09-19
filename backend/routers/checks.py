@@ -10,10 +10,11 @@ from backend.shared.audit import get_audit_trail, list_recent_audit_logs, write_
 from backend.shared.db import get_connection
 
 try:
-    from backend.shared.auth import require_role
+    from backend.shared.auth import UserProfile, get_current_user, require_role
     _supervisor_dep = [Depends(require_role("SUPERVISOR"))]
 except Exception:
-    _supervisor_dep = []
+    from backend.shared.auth import UserProfile, get_current_user, require_role
+    _supervisor_dep = [Depends(require_role("SUPERVISOR"))]
 
 SYSTEM_ACTOR_M4 = "SYSTEM:M4"
 
@@ -87,7 +88,10 @@ def _parse_exif(photo_path: str) -> Dict[str, Any]:
 
 
 @router.post("/claims/{event_id}/check")
-def check_claim(event_id: str):
+def check_claim(
+    event_id: str,
+    current_user: UserProfile = Depends(get_current_user),
+):
     with get_connection() as conn:
         with conn.transaction():
             event_row = conn.execute(
