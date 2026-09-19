@@ -7,6 +7,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
 import LanguageSwitcher from '@/components/LanguageSwitcher';
+import { IS_MOCK_MODE } from '@/api';
 import {
   Lock,
   Mail,
@@ -211,6 +212,16 @@ export default function LoginScreen() {
 
           {/* Form body */}
           <div className="px-8 py-7 space-y-5">
+            {/* Mock Mode banner */}
+            {IS_MOCK_MODE && (
+              <div
+                id="login-mock-mode-indicator"
+                className="p-3 rounded-xl flex items-center gap-2 text-xs font-mono font-bold bg-amber-500/15 border border-amber-500/40 text-amber-600 dark:text-amber-400"
+              >
+                <span>⚠️</span>
+                <span>DEMO / MOCK DATA MODE ACTIVE</span>
+              </div>
+            )}
             {/* Error banner */}
             {(error || fieldError) && (
               <div className="p-3.5 rounded-xl flex items-start gap-2.5 text-xs"

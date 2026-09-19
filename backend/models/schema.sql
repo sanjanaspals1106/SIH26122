@@ -36,6 +36,8 @@ CREATE TABLE IF NOT EXISTS schedule_activities(
   planned_quantity REAL,
   uom TEXT,
   baseline_pct_complete REAL DEFAULT 0.0,
+  total_float REAL,
+  is_critical BOOLEAN,
   PRIMARY KEY (schedule_id, activity_id)
 );
 
@@ -44,7 +46,8 @@ CREATE TABLE IF NOT EXISTS schedule_dependencies(
   schedule_id TEXT NOT NULL,
   predecessor_activity_id TEXT NOT NULL,
   successor_activity_id TEXT NOT NULL,
-  relationship_type TEXT DEFAULT 'FS' -- FS, SS, FF, SF
+  relationship_type TEXT DEFAULT 'FS', -- FS, SS, FF, SF
+  lag_days REAL DEFAULT 0.0
 );
 
 -- ===== M2 owns everything below down to source_references =====
@@ -177,3 +180,9 @@ CREATE TABLE IF NOT EXISTS audit_logs(
   current_hash TEXT NOT NULL,
   timestamp TIMESTAMPTZ DEFAULT now()
 );
+
+-- Phase 1C: Schedule data prerequisites idempotent column migrations
+ALTER TABLE schedule_activities ADD COLUMN IF NOT EXISTS total_float REAL;
+ALTER TABLE schedule_activities ADD COLUMN IF NOT EXISTS is_critical BOOLEAN;
+ALTER TABLE schedule_dependencies ADD COLUMN IF NOT EXISTS lag_days REAL DEFAULT 0.0;
+

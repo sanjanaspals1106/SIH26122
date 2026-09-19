@@ -1,4 +1,4 @@
-import type en from './en';
+import type { TranslationDictionary } from './en';
 
 export default {
   common: {
@@ -288,4 +288,4 @@ export default {
     originalStart: 'అసలు ప్రారంభం',
     shiftedStart: 'మార్చబడిన ప్రారంభం',
   },
-} satisfies typeof en;
+} satisfies TranslationDictionary;

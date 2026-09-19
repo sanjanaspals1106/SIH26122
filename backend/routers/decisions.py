@@ -21,7 +21,7 @@ from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
-from backend.shared.actuals import upsert_approved_actual
+from backend.shared.actuals import upsert_approved_actual, _execute_upsert
 from backend.shared.audit import write_audit_log
 from backend.shared.auth import UserProfile, require_role
 from backend.shared.db import get_connection
@@ -86,65 +86,77 @@ def _record_decision(
         )
 
     with get_connection() as conn:
-        with conn.cursor() as cur:
-            claim = _fetch_claim(cur, event_id)
-            if not claim:
-                raise HTTPException(
-                    status_code=404,
-                    detail=f"Claim '{event_id}' not found.",
-                )
+        with conn.transaction():
+            with conn.cursor() as cur:
+                claim = _fetch_claim(cur, event_id)
+                if not claim:
+                    raise HTTPException(
+                        status_code=404,
+                        detail=f"Claim '{event_id}' not found.",
+                    )
 
-            if claim.get("status") not in ELIGIBLE_SOURCE_STATUSES:
-                raise HTTPException(
-                    status_code=409,
-                    detail=(
-                        f"Claim '{event_id}' has status "
-                        f"'{claim.get('status')}', which is not eligible for "
-                        f"a decision (must be one of {sorted(ELIGIBLE_SOURCE_STATUSES)})."
+                if claim.get("status") not in ELIGIBLE_SOURCE_STATUSES:
+                    raise HTTPException(
+                        status_code=409,
+                        detail=(
+                            f"Claim '{event_id}' has status "
+                            f"'{claim.get('status')}', which is not eligible for "
+                            f"a decision (must be one of {sorted(ELIGIBLE_SOURCE_STATUSES)})."
+                        ),
+                    )
+
+                # M5 pre-fills with matched_activity_id; planner may override
+                # with any top-3 candidate or a typed ID.
+                resolved_activity_id = selected_activity_id or claim.get("matched_activity_id")
+                if not resolved_activity_id:
+                    raise HTTPException(
+                        status_code=422,
+                        detail=(
+                            f"Claim '{event_id}' has no matched_activity_id and "
+                            "no selected_activity_id was provided."
+                        ),
+                    )
+
+                decision_id = str(uuid.uuid4())
+                before_state = dict(claim)
+
+                cur.execute(
+                    """
+                    INSERT INTO planner_decisions (
+                        decision_id, event_id, selected_activity_id, action,
+                        approved_pct, approved_qty, planner_id, justification
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                    """,
+                    (
+                        decision_id,
+                        event_id,
+                        resolved_activity_id,
+                        action,
+                        approved_pct,
+                        approved_qty,
+                        planner_id,
+                        justification,
                     ),
                 )
 
-            # M5 pre-fills with matched_activity_id; planner may override
-            # with any top-3 candidate or a typed ID.
-            resolved_activity_id = selected_activity_id or claim.get("matched_activity_id")
-            if not resolved_activity_id:
-                raise HTTPException(
-                    status_code=422,
-                    detail=(
-                        f"Claim '{event_id}' has no matched_activity_id and "
-                        "no selected_activity_id was provided."
-                    ),
+                new_status = ACTION_TO_STATUS[action]
+                cur.execute(
+                    "UPDATE execution_events SET status = %s WHERE event_id = %s",
+                    (new_status, event_id),
                 )
 
-            decision_id = str(uuid.uuid4())
-            before_state = dict(claim)
-
-            cur.execute(
-                """
-                INSERT INTO planner_decisions (
-                    decision_id, event_id, selected_activity_id, action,
-                    approved_pct, approved_qty, planner_id, justification
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-                """,
-                (
-                    decision_id,
-                    event_id,
-                    resolved_activity_id,
-                    action,
-                    approved_pct,
-                    approved_qty,
-                    planner_id,
-                    justification,
-                ),
-            )
-
-            new_status = ACTION_TO_STATUS[action]
-            cur.execute(
-                "UPDATE execution_events SET status = %s WHERE event_id = %s",
-                (new_status, event_id),
-            )
-
-        conn.commit()
+                approved_actual = None
+                if action in ("APPROVE", "EDIT"):
+                    # Atomic upsert inside the SAME transaction
+                    approved_actual = _execute_upsert(
+                        conn=conn,
+                        schedule_id=claim["schedule_id"],
+                        activity_id=resolved_activity_id,
+                        event_id=event_id,
+                        decision_id=decision_id,
+                        approved_pct=approved_pct,
+                        approved_qty=approved_qty,
+                    )
 
     try:
         write_audit_log(
@@ -161,29 +173,21 @@ def _record_decision(
             payload={"justification": justification},
         )
     except Exception as e:
-        # Per the shared audit contract, a logging failure must not be
-        # allowed to look like the decision itself failed -- the
-        # planner_decisions row above is already committed.
         logger.error("write_audit_log failed for decision %s: %s", decision_id, e)
 
-    approved_actual = None
-    if action in ("APPROVE", "EDIT"):
+    # Post-commit downstream adapters (non-blocking)
+    if action in ("APPROVE", "EDIT") and approved_actual:
         try:
-            approved_actual = upsert_approved_actual(
-                schedule_id=claim["schedule_id"],
-                activity_id=resolved_activity_id,
-                event_id=event_id,
-                decision_id=decision_id,
-            )
+            from backend.routers.export import trigger_auto_export
+            trigger_auto_export(schedule_id=claim["schedule_id"])
         except Exception as e:
-            # The decision itself (planner_decisions + status) is already
-            # committed above -- an actuals/export/P6 hiccup downstream
-            # must not turn a recorded decision into a failed request.
-            logger.error(
-                "upsert_approved_actual failed for decision %s: %s",
-                decision_id,
-                e,
-            )
+            logger.warning("Auto-triggered CSV export error (non-blocking): %s", e)
+
+        try:
+            from backend.shared.p6 import trigger_p6_actual_push
+            trigger_p6_actual_push(actual=approved_actual)
+        except Exception as e:
+            logger.warning("Auto-triggered P6 push error (non-blocking): %s", e)
 
     return {
         "decision_id": decision_id,

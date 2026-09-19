@@ -3,6 +3,8 @@ import { useTranslation } from 'react-i18next';
 import {
   dashboardApi,
   decisionsApi,
+  executionSummaryApi,
+  ExecutionSummaryResponse,
   ScheduleActivity,
   PlannerDecision,
 } from '@/api';
@@ -24,6 +26,10 @@ import {
   XCircle,
   BarChart3,
   Zap,
+  Sparkles,
+  Globe2,
+  Filter,
+  Calendar,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
@@ -42,6 +48,13 @@ const CHART_COLORS = {
 
 export default function Dashboard() {
   const { t } = useTranslation();
+  const [summary, setSummary] = useState<{
+    total_claims: number;
+    pending_review: number;
+    actuals: number;
+    conflicts: number;
+    discipline_breakdown: { discipline: string; name: string; count: number; value: number }[];
+  } | null>(null);
   const [delayReasons, setDelayReasons] = useState<{ reason: string; count: number }[]>([]);
   const [institutionalMemory, setInstitutionalMemory] = useState<{ topic: string; resolution: string; count: number }[]>([]);
   const [forecasts, setForecasts] = useState<{ milestone: string; target_date: string; forecast_date: string; slippage_days: number }[]>([]);
@@ -49,16 +62,51 @@ export default function Dashboard() {
   const [recentDecisions, setRecentDecisions] = useState<PlannerDecision[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(true);
 
+  // Phase 7: AI Execution Summary & Dynamic Translation
+  const [execSummary, setExecSummary] = useState<ExecutionSummaryResponse | null>(null);
+  const [summaryPeriod, setSummaryPeriod] = useState<'last_7_days' | 'this_month' | 'custom'>('last_7_days');
+  const [summaryStartDate, setSummaryStartDate] = useState<string>('');
+  const [summaryEndDate, setSummaryEndDate] = useState<string>('');
+  const [summaryDiscipline, setSummaryDiscipline] = useState<string>('ALL');
+  const [summaryLanguage, setSummaryLanguage] = useState<'en' | 'hi' | 'te'>('en');
+  const [isSummaryLoading, setIsSummaryLoading] = useState<boolean>(false);
+
+  const loadExecutionSummary = async (
+    period = summaryPeriod,
+    discipline = summaryDiscipline,
+    language = summaryLanguage,
+    startDate = summaryStartDate,
+    endDate = summaryEndDate
+  ) => {
+    setIsSummaryLoading(true);
+    try {
+      const data = await executionSummaryApi.getSummary({
+        period,
+        discipline,
+        language,
+        start_date: period === 'custom' ? startDate : undefined,
+        end_date: period === 'custom' ? endDate : undefined,
+      });
+      setExecSummary(data);
+    } catch (e) {
+      console.error('Failed to load execution summary:', e);
+    } finally {
+      setIsSummaryLoading(false);
+    }
+  };
+
   const loadDashboardData = async () => {
     setIsLoading(true);
     try {
-      const [reasons, memory, fc, silent, decisions] = await Promise.all([
+      const [sum, reasons, memory, fc, silent, decisions] = await Promise.all([
+        dashboardApi.getSummary(),
         dashboardApi.getDelayReasons(),
         dashboardApi.getInstitutionalMemory(),
         dashboardApi.getForecast(),
         dashboardApi.getSilentActivities(),
         decisionsApi.getRecent(),
       ]);
+      setSummary(sum);
       setDelayReasons(reasons);
       setInstitutionalMemory(memory);
       setForecasts(fc);
@@ -73,60 +121,71 @@ export default function Dashboard() {
 
   useEffect(() => {
     loadDashboardData();
+    loadExecutionSummary();
   }, []);
 
   const handleExportCsv = () => {
     window.open(dashboardApi.getExportCsvUrl(), '_blank');
   };
 
-  const disciplineData = [
-    { name: 'CIVIL', value: 42, fill: CHART_COLORS.orange },
-    { name: 'PIPING', value: 28, fill: CHART_COLORS.blue },
-    { name: 'ELECTRICAL', value: 18, fill: CHART_COLORS.amber },
-    { name: 'INSTRUMENTATION', value: 12, fill: CHART_COLORS.violet },
-    { name: 'HSE', value: 8, fill: CHART_COLORS.emerald },
+  const disciplinePalette = [
+    CHART_COLORS.orange,
+    CHART_COLORS.blue,
+    CHART_COLORS.amber,
+    CHART_COLORS.violet,
+    CHART_COLORS.emerald,
   ];
+
+  const disciplineData = summary?.discipline_breakdown?.length
+    ? summary.discipline_breakdown.map((item, idx) => ({
+        name: item.name || item.discipline,
+        value: item.value ?? item.count,
+        fill: disciplinePalette[idx % disciplinePalette.length],
+      }))
+    : [
+        { name: 'CIVIL', value: 0, fill: CHART_COLORS.orange },
+      ];
 
   const kpiCards = [
     {
-      label: t('dashboard.kpiTotalClaims'),
-      value: '148',
-      delta: t('dashboard.kpiTotalClaimsDelta'),
+      label: t('dashboard.totalClaims'),
+      value: summary?.total_claims ?? 0,
+      icon: Activity,
+      accent: 'text-[#001E60] dark:text-blue-300',
+      bg: 'bg-blue-50 dark:bg-blue-900/30',
+      border: 'border-blue-200 dark:border-blue-800',
+      delta: '+12% vs last week',
       deltaPositive: true,
-      icon: FileSpreadsheet,
-      accent: 'text-[#FC4C02]',
-      bg: 'bg-[#FC4C02]/10 dark:bg-[#FC4C02]/10',
-      border: 'border-[#FC4C02]/20',
     },
     {
-      label: t('dashboard.kpiPendingReview'),
-      value: '14',
-      delta: t('dashboard.kpiPendingReviewDelta'),
-      deltaPositive: null,
+      label: t('dashboard.pendingReview'),
+      value: summary?.pending_review ?? 0,
       icon: Clock,
-      accent: 'text-amber-500 dark:text-amber-400',
-      bg: 'bg-amber-500/10',
-      border: 'border-amber-500/20',
+      accent: 'text-amber-600 dark:text-amber-400',
+      bg: 'bg-amber-50 dark:bg-amber-900/30',
+      border: 'border-amber-200 dark:border-amber-800',
+      delta: 'Requires action',
+      deltaPositive: false,
     },
     {
-      label: t('dashboard.kpiActualsCommitted'),
-      value: '124',
-      delta: t('dashboard.kpiActualsCommittedDelta'),
-      deltaPositive: true,
+      label: t('dashboard.approvedActuals'),
+      value: summary?.actuals ?? 0,
       icon: CheckCircle2,
       accent: 'text-emerald-600 dark:text-emerald-400',
-      bg: 'bg-emerald-500/10',
-      border: 'border-emerald-500/20',
+      bg: 'bg-emerald-50 dark:bg-emerald-900/30',
+      border: 'border-emerald-200 dark:border-emerald-800',
+      delta: 'P6 Sync ready',
+      deltaPositive: true,
     },
     {
-      label: t('dashboard.kpiOpenConflicts'),
-      value: '2',
-      delta: t('dashboard.kpiOpenConflictsDelta'),
-      deltaPositive: false,
-      icon: XCircle,
+      label: t('dashboard.activeConflicts'),
+      value: summary?.conflicts ?? 0,
+      icon: AlertTriangle,
       accent: 'text-rose-600 dark:text-rose-400',
-      bg: 'bg-rose-500/10',
-      border: 'border-rose-500/20',
+      bg: 'bg-rose-50 dark:bg-rose-900/30',
+      border: 'border-rose-200 dark:border-rose-800',
+      delta: 'Flagged for review',
+      deltaPositive: null,
     },
   ];
 
@@ -148,7 +207,10 @@ export default function Dashboard() {
 
         <div className="flex items-center gap-2">
           <Button
-            onClick={loadDashboardData}
+            onClick={() => {
+              loadDashboardData();
+              loadExecutionSummary();
+            }}
             variant="outline"
             className="border-slate-300 dark:border-blue-800 text-slate-700 dark:text-blue-100 hover:bg-slate-100 dark:hover:bg-blue-900/50 h-9 text-xs gap-1.5"
           >
@@ -163,6 +225,229 @@ export default function Dashboard() {
           </Button>
         </div>
       </div>
+
+      {/* Phase 7: AI Execution Summary & Dynamic Translation Panel */}
+      <Card className="bg-gradient-to-br from-white to-blue-50/40 dark:from-[#001E60]/90 dark:to-[#001440] border-blue-200 dark:border-blue-900/60 shadow-sm">
+        <CardHeader className="pb-3 border-b border-blue-100 dark:border-blue-900/40">
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
+            <div className="flex items-center gap-2.5">
+              <div className="p-2 rounded-lg bg-blue-600 text-white shadow-sm shadow-blue-500/30">
+                <Sparkles className="w-4 h-4" />
+              </div>
+              <div>
+                <CardTitle className="text-sm font-bold text-slate-900 dark:text-slate-100 flex items-center gap-2">
+                  AI Execution Summary
+                  {execSummary?.generated_by === 'llm' && (
+                    <span className="text-[10px] font-semibold uppercase tracking-wider bg-blue-100 dark:bg-blue-900/60 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800 px-2 py-0.5 rounded-full">
+                      LLM Synthesized
+                    </span>
+                  )}
+                  {execSummary?.generated_by === 'deterministic_fallback' && (
+                    <span className="text-[10px] font-semibold uppercase tracking-wider bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700 px-2 py-0.5 rounded-full">
+                      Deterministic Verified
+                    </span>
+                  )}
+                  {execSummary?.cached && (
+                    <span className="text-[10px] font-semibold uppercase tracking-wider bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800 px-2 py-0.5 rounded-full">
+                      Cache HIT
+                    </span>
+                  )}
+                </CardTitle>
+                <CardDescription className="text-xs text-slate-500 dark:text-slate-400">
+                  Supervisor intelligence compiled from verified site logs, actuals, conflicts, and delay records
+                </CardDescription>
+              </div>
+            </div>
+
+            {/* Filter Toolbar: Period, Discipline, Language */}
+            <div className="flex flex-wrap items-center gap-2 text-xs">
+              {/* Period Selector */}
+              <div className="flex items-center gap-1 bg-white dark:bg-slate-900/80 border border-slate-200 dark:border-blue-900/60 rounded-lg p-0.5">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSummaryPeriod('last_7_days');
+                    loadExecutionSummary('last_7_days', summaryDiscipline, summaryLanguage);
+                  }}
+                  className={cn(
+                    'px-2.5 py-1 rounded-md font-medium transition-colors',
+                    summaryPeriod === 'last_7_days'
+                      ? 'bg-blue-600 text-white shadow-xs'
+                      : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white'
+                  )}
+                >
+                  Last 7 Days
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSummaryPeriod('this_month');
+                    loadExecutionSummary('this_month', summaryDiscipline, summaryLanguage);
+                  }}
+                  className={cn(
+                    'px-2.5 py-1 rounded-md font-medium transition-colors',
+                    summaryPeriod === 'this_month'
+                      ? 'bg-blue-600 text-white shadow-xs'
+                      : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white'
+                  )}
+                >
+                  This Month
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSummaryPeriod('custom');
+                  }}
+                  className={cn(
+                    'px-2.5 py-1 rounded-md font-medium transition-colors',
+                    summaryPeriod === 'custom'
+                      ? 'bg-blue-600 text-white shadow-xs'
+                      : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white'
+                  )}
+                >
+                  Custom
+                </button>
+              </div>
+
+              {/* Discipline Dropdown */}
+              <select
+                value={summaryDiscipline}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  setSummaryDiscipline(val);
+                  loadExecutionSummary(summaryPeriod, val, summaryLanguage, summaryStartDate, summaryEndDate);
+                }}
+                className="bg-white dark:bg-slate-900/80 border border-slate-200 dark:border-blue-900/60 text-slate-700 dark:text-slate-200 rounded-lg px-2 py-1 font-medium focus:outline-none focus:ring-1 focus:ring-blue-500"
+              >
+                <option value="ALL">All Disciplines</option>
+                <option value="CIVIL">Civil</option>
+                <option value="PIPING">Piping</option>
+                <option value="STATIC_ROTATING_EQUIPMENT">Mechanical / Equipment</option>
+                <option value="ELECTRICAL">Electrical</option>
+                <option value="INSTRUMENTATION">Instrumentation</option>
+                <option value="HSE">HSE</option>
+              </select>
+
+              {/* Language Dropdown */}
+              <div className="flex items-center gap-1 bg-white dark:bg-slate-900/80 border border-slate-200 dark:border-blue-900/60 rounded-lg px-2 py-1 text-slate-700 dark:text-slate-200">
+                <Globe2 className="w-3.5 h-3.5 text-blue-500" />
+                <select
+                  value={summaryLanguage}
+                  onChange={(e) => {
+                    const lang = e.target.value as 'en' | 'hi' | 'te';
+                    setSummaryLanguage(lang);
+                    loadExecutionSummary(summaryPeriod, summaryDiscipline, lang, summaryStartDate, summaryEndDate);
+                  }}
+                  className="bg-transparent text-slate-700 dark:text-slate-200 font-medium focus:outline-none"
+                >
+                  <option value="en">English (Canonical)</option>
+                  <option value="hi">हिन्दी (Hindi)</option>
+                  <option value="te">తెలుగు (Telugu)</option>
+                </select>
+              </div>
+            </div>
+          </div>
+
+          {/* Custom Date Range Picker */}
+          {summaryPeriod === 'custom' && (
+            <div className="flex items-center gap-2 pt-2 text-xs">
+              <span className="text-slate-500 dark:text-slate-400">From:</span>
+              <input
+                type="date"
+                value={summaryStartDate}
+                onChange={(e) => setSummaryStartDate(e.target.value)}
+                className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-blue-900/60 rounded px-2 py-1 text-slate-700 dark:text-slate-200"
+              />
+              <span className="text-slate-500 dark:text-slate-400">To:</span>
+              <input
+                type="date"
+                value={summaryEndDate}
+                onChange={(e) => setSummaryEndDate(e.target.value)}
+                className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-blue-900/60 rounded px-2 py-1 text-slate-700 dark:text-slate-200"
+              />
+              <Button
+                size="sm"
+                onClick={() => loadExecutionSummary('custom', summaryDiscipline, summaryLanguage, summaryStartDate, summaryEndDate)}
+                className="h-7 text-xs bg-blue-600 hover:bg-blue-700 text-white"
+              >
+                Apply Range
+              </Button>
+            </div>
+          )}
+        </CardHeader>
+
+        <CardContent className="pt-3 pb-4">
+          {isSummaryLoading ? (
+            <div className="py-8 flex flex-col items-center justify-center gap-2 text-slate-400 text-xs">
+              <RefreshCw className="w-5 h-5 animate-spin text-blue-500" />
+              <span>Generating verified execution summary...</span>
+            </div>
+          ) : execSummary ? (
+            <div className="space-y-3">
+              <div className="bg-white/80 dark:bg-slate-900/50 border border-slate-200/80 dark:border-blue-900/40 rounded-xl p-4 text-xs leading-relaxed text-slate-800 dark:text-slate-200 whitespace-pre-line font-normal shadow-xs">
+                {execSummary.summary}
+              </div>
+
+              {/* Verified Metrics Strip */}
+              <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 pt-1">
+                <div className="p-2 rounded-lg bg-blue-50/80 dark:bg-blue-950/40 border border-blue-100 dark:border-blue-900/40 text-[11px]">
+                  <span className="text-slate-500 dark:text-slate-400 block font-medium">Scope Activities</span>
+                  <span className="font-bold text-blue-700 dark:text-blue-300 font-mono text-sm">
+                    {execSummary.aggregate.activities.total}
+                  </span>
+                  <span className="text-[10px] text-slate-400 block">
+                    {execSummary.aggregate.activities.completed} Done · {execSummary.aggregate.activities.in_progress} Active
+                  </span>
+                </div>
+
+                <div className="p-2 rounded-lg bg-emerald-50/80 dark:bg-emerald-950/40 border border-emerald-100 dark:border-emerald-900/40 text-[11px]">
+                  <span className="text-slate-500 dark:text-slate-400 block font-medium">Progress Claims</span>
+                  <span className="font-bold text-emerald-700 dark:text-emerald-300 font-mono text-sm">
+                    {execSummary.aggregate.claims.total_claims}
+                  </span>
+                  <span className="text-[10px] text-slate-400 block">
+                    {execSummary.aggregate.approved_progress.total_approved} Approved ({execSummary.aggregate.approved_progress.avg_approved_pct}%)
+                  </span>
+                </div>
+
+                <div className="p-2 rounded-lg bg-amber-50/80 dark:bg-amber-950/40 border border-amber-100 dark:border-amber-900/40 text-[11px]">
+                  <span className="text-slate-500 dark:text-slate-400 block font-medium">Conflicts</span>
+                  <span className="font-bold text-amber-700 dark:text-amber-300 font-mono text-sm">
+                    {execSummary.aggregate.conflicts.total_conflicts}
+                  </span>
+                  <span className="text-[10px] text-slate-400 block">
+                    {execSummary.aggregate.conflicts.by_status?.OPEN || 0} Open
+                  </span>
+                </div>
+
+                <div className="p-2 rounded-lg bg-rose-50/80 dark:bg-rose-950/40 border border-rose-100 dark:border-rose-900/40 text-[11px]">
+                  <span className="text-slate-500 dark:text-slate-400 block font-medium">Delay Events</span>
+                  <span className="font-bold text-rose-700 dark:text-rose-300 font-mono text-sm">
+                    {execSummary.aggregate.delays.total_delay_events}
+                  </span>
+                  <span className="text-[10px] text-slate-400 block">
+                    {Object.keys(execSummary.aggregate.delays.reasons || {}).length} Factors Reported
+                  </span>
+                </div>
+
+                <div className="p-2 rounded-lg bg-violet-50/80 dark:bg-violet-950/40 border border-violet-100 dark:border-violet-900/40 text-[11px] col-span-2 sm:col-span-1">
+                  <span className="text-slate-500 dark:text-slate-400 block font-medium">Historical Ratio</span>
+                  <span className="font-bold text-violet-700 dark:text-violet-300 font-mono text-sm">
+                    {execSummary.aggregate.forecast.historical_ratio ? `${execSummary.aggregate.forecast.historical_ratio}×` : 'N/A'}
+                  </span>
+                  <span className="text-[10px] text-slate-400 block">
+                    {execSummary.aggregate.forecast.historical_ratio ? 'Discipline Multiplier' : 'Select Discipline'}
+                  </span>
+                </div>
+              </div>
+            </div>
+          ) : (
+            <div className="py-6 text-center text-slate-400 text-xs">
+              Click refresh to generate the project execution summary.
+            </div>
+          )}
+        </CardContent>
+      </Card>
 
       {/* Silent Activities Alert Banner */}
       {silentActivities.length > 0 && (

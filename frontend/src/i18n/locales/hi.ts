@@ -1,4 +1,4 @@
-import type en from './en';
+import type { TranslationDictionary } from './en';
 
 export default {
   common: {
@@ -288,4 +288,4 @@ export default {
     originalStart: 'मूल प्रारंभ',
     shiftedStart: 'परिवर्तित प्रारंभ',
   },
-} satisfies typeof en;
+} satisfies TranslationDictionary;

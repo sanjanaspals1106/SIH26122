@@ -50,21 +50,23 @@ _INSERT_ACTIVITY_SQL = """
     INSERT INTO schedule_activities (
         schedule_id, activity_id, activity_name, wbs_code, discipline,
         location, asset_tag, planned_start, planned_finish,
-        planned_quantity, uom, baseline_pct_complete
+        planned_quantity, uom, baseline_pct_complete,
+        total_float, is_critical
     ) VALUES (
         %(schedule_id)s, %(activity_id)s, %(activity_name)s, %(wbs_code)s, %(discipline)s,
         %(location)s, %(asset_tag)s, %(planned_start)s, %(planned_finish)s,
-        %(planned_quantity)s, %(uom)s, %(baseline_pct_complete)s
+        %(planned_quantity)s, %(uom)s, %(baseline_pct_complete)s,
+        %(total_float)s, %(is_critical)s
     )
 """
 
 _INSERT_DEPENDENCY_SQL = """
     INSERT INTO schedule_dependencies (
         dependency_id, schedule_id, predecessor_activity_id,
-        successor_activity_id, relationship_type
+        successor_activity_id, relationship_type, lag_days
     ) VALUES (
         %(dependency_id)s, %(schedule_id)s, %(predecessor_activity_id)s,
-        %(successor_activity_id)s, %(relationship_type)s
+        %(successor_activity_id)s, %(relationship_type)s, %(lag_days)s
     )
 """
 
@@ -145,7 +147,8 @@ _SELECT_ACTIVITY_COLUMNS_SQL = """
     SELECT
         schedule_id, activity_id, activity_name, wbs_code, discipline,
         location, asset_tag, planned_start, planned_finish,
-        planned_quantity, uom, baseline_pct_complete
+        planned_quantity, uom, baseline_pct_complete,
+        total_float, is_critical
     FROM schedule_activities
 """
 
@@ -196,7 +199,7 @@ def get_schedule_activity(schedule_id: str, activity_id: str) -> Optional[Schedu
 
 _LIST_DEPENDENCIES_SQL = """
     SELECT dependency_id, schedule_id, predecessor_activity_id,
-           successor_activity_id, relationship_type
+           successor_activity_id, relationship_type, lag_days
     FROM schedule_dependencies
     WHERE schedule_id = %s
     ORDER BY dependency_id

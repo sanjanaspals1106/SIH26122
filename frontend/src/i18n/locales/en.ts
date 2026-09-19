@@ -1,4 +1,4 @@
-export default {
+const en = {
   common: {
     logout: 'Logout',
     lightMode: 'Light Mode',
@@ -287,3 +287,17 @@ export default {
     shiftedStart: 'Shifted Start',
   },
 } as const;
+
+/**
+ * The translated dictionaries must retain the English dictionary's shape,
+ * while their leaf strings are intentionally allowed to differ.
+ */
+type WidenTranslationValues<T> =
+  T extends readonly (infer Item)[] ? WidenTranslationValues<Item>[] :
+  T extends string ? string :
+  T extends object ? { [Key in keyof T]: WidenTranslationValues<T[Key]> } :
+  T;
+
+export type TranslationDictionary = WidenTranslationValues<typeof en>;
+
+export default en;
