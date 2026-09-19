@@ -2,32 +2,42 @@ fastapi
 uvicorn[standard]
 pydantic>=2.0
 python-dotenv
+
+# Auth / JWT
+PyJWT
+
+# M4 (evidence/checks)
+Pillow
+exifread
+
+# NLP / matching
 sentence-transformers
 faiss-cpu
 rapidfuzz
 numpy
 
+# File uploads / LLM
 python-multipart
-openai          # also used for Groq/Gemini via their OpenAI-compatible endpoints
+openai  # also used for Groq/Gemini via their OpenAI-compatible endpoints
 
 # Database (PRD v5: Supabase Postgres, direct connection)
 psycopg2-binary
 psycopg[binary]
 
 # Auth (Supabase Auth; supabase-py used for auth only, not table access)
-pyjwt
 supabase
 
 # M1 (schedule ingestion)
 pandas
 openpyxl
-sentence-transformers
-faiss-cpu
 
 # M2 (intake/extraction)
 pymupdf
 pytesseract
-pillow
 
-# M3 (matching)
-rapidfuzz
+# Used directly by shared/auth.py's HTTP JWT-verification fallback --
+# previously only present transitively via supabase/openai
+httpx
+
+# ~200 tests across tests/ and backend/ require this to run
+pytest

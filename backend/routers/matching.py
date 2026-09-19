@@ -21,6 +21,11 @@ try:
 except ImportError:
     write_audit_log = None
 
+try:
+    from backend.shared import schedule_index
+except ImportError:
+    schedule_index = None
+
 
 # M3 Match-Tier Constants
 EXACT_ID = "EXACT_ID"
@@ -34,6 +39,46 @@ router = APIRouter(prefix="/api/v1/claims", tags=["matching"])
 @router.get("/matching/health")
 def health():
     return {"router": "matching", "status": "ok"}
+
+
+@router.get("/{event_id}/candidates")
+def get_candidates_endpoint(event_id: str):
+    """
+    GET /api/v1/claims/{event_id}/candidates
+    Fetches the stored top-3 candidate_matches rows for a claim, as written
+    by the most recent /match or /rematch call.
+    """
+    if get_connection is None:
+        raise HTTPException(
+            status_code=500, detail="Database connection module unavailable."
+        )
+
+    with get_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT 1 FROM execution_events WHERE event_id = %s",
+                (event_id,),
+            )
+            if not cur.fetchone():
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"Execution claim '{event_id}' not found.",
+                )
+
+            cur.execute(
+                """
+                SELECT * FROM candidate_matches
+                WHERE event_id = %s
+                ORDER BY rank_order ASC
+                """,
+                (event_id,),
+            )
+            rows = cur.fetchall()
+
+    return {
+        "event_id": event_id,
+        "candidates": [dict(r) for r in rows],
+    }
 
 
 def match_exact_id(
@@ -360,10 +405,18 @@ def process_semantic_results(
     for item in semantic_results:
         if isinstance(item, dict):
             act_id = item.get("activity_id")
-            raw_score = item.get("semantic_score", 0.0)
+            # Accept either key: "semantic_score" (this module's own
+            # convention) or "score" (schedule_index.SearchCandidate's
+            # field name, when passed in as a dict).
+            raw_score = item.get("semantic_score", item.get("score", 0.0))
         else:
             act_id = getattr(item, "activity_id", None)
-            raw_score = getattr(item, "semantic_score", 0.0)
+            # schedule_index.SearchCandidate exposes .score, not
+            # .semantic_score -- check both so real FAISS results aren't
+            # silently zeroed out.
+            raw_score = getattr(item, "semantic_score", None)
+            if raw_score is None:
+                raw_score = getattr(item, "score", 0.0)
 
         if not act_id:
             continue
@@ -1437,28 +1490,43 @@ def match_claim_endpoint(event_id: str, action: str = "MATCH_CLAIM"):
             act_rows = cur.fetchall()
             schedule_activities = [ScheduleActivity(**r) for r in act_rows]
 
-            # 3. Run M3 matching cascade with optional FAISS semantic search retrieval
+            # 3. Run M3 matching cascade with optional M1 FAISS semantic retrieval.
+            #
+            # M1 owns the schedule_index lifecycle. M3 consumes its search
+            # results only; if the index is unavailable or search fails,
+            # match_claim() falls back to fuzzy/location/discipline signals.
             semantic_results = None
-            try:
-                from backend.shared.schedule_index import search_schedule
 
-                search_cands = search_schedule(
-                    claim.schedule_id, claim.raw_claim_text, top_k=3
-                )
-                if search_cands:
-                    semantic_results = [
-                        {
-                            "activity_id": sc.activity_id,
-                            "semantic_score": sc.score,
-                        }
-                        for sc in search_cands
-                    ]
-            except Exception:
-                semantic_results = None
+            if claim.raw_claim_text and schedule_index is not None:
+                try:
+                    # Ensure the claim's schedule is the active indexed schedule.
+                    if schedule_index.get_active_schedule_id() != claim.schedule_id:
+                        try:
+                            schedule_index.build_index(claim.schedule_id)
+                        except Exception as build_err:
+                            print(
+                                f"[M3] FAISS auto-build index warning "
+                                f"for {claim.schedule_id}: {build_err}"
+                            )
 
+                    semantic_results = schedule_index.search_schedule(
+                        claim.schedule_id,
+                        claim.raw_claim_text,
+                    )
+
+                except Exception as search_err:
+                    print(f"[M3] FAISS search warning: {search_err}")
+                    semantic_results = None
+
+            # 4. Run M3 matching cascade.
             candidates = match_claim(
-                claim, schedule_activities, semantic_results=semantic_results
+                claim,
+                schedule_activities,
+                semantic_results=semantic_results,
             )
+
+                
+               
 
             # 4. Determine matching status and matched_activity_id with ambiguity protection
             unmatched_reason = None
@@ -1494,7 +1562,12 @@ def match_claim_endpoint(event_id: str, action: str = "MATCH_CLAIM"):
                 top_confidence = candidates[0].composite_confidence
             else:
                 status = "UNMATCHED"
-                matched_activity_id = None
+                # Per spec: matched_activity_id is set unconditionally to the
+                # rank-1 candidate on every /match and /rematch call, even
+                # when the claim ends up UNMATCHED, so there's always a
+                # best-guess fallback for the UI and for M4's checks to
+                # validate against.
+                matched_activity_id = candidates[0].activity_id if candidates else None
                 top_tier = (
                     candidates[0].match_tier if candidates else HARD_MISMATCH
                 )
@@ -1565,7 +1638,7 @@ def match_claim_endpoint(event_id: str, action: str = "MATCH_CLAIM"):
                         entity_type="execution_event",
                         entity_id=event_id,
                         action=action,
-                        actor_id="m3_router",
+                        actor_id="SYSTEM:M3",
                         before_state={"status": event_row.get("status")},
                         after_state={
                             "status": status,

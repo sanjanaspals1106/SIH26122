@@ -1,0 +1,121 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500;600&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ── IndianOil Brand Tokens ──────────────────────────────────────────────────
+   Orange  : #F47920  (primary CTA, active nav, highlights)
+   Navy    : #003087  (header, sidebar, dark surfaces)
+   Blue    : #1565C0  (accent, links, chart fills)
+   Light   : #E8F4FD  (light-mode page background)
+   White   : #FFFFFF
+   ───────────────────────────────────────────────────────────────────────── */
+
+@layer base {
+  :root {
+    /* Page surface */
+    --background: 210 60% 96%;         /* #E8F4FD */
+    --foreground: 220 80% 12%;         /* deep navy text */
+
+    /* Cards */
+    --card: 0 0% 100%;                 /* #FFFFFF */
+    --card-foreground: 220 80% 12%;
+
+    /* Popover */
+    --popover: 0 0% 100%;
+    --popover-foreground: 220 80% 12%;
+
+    /* Primary = IndianOil Orange #F47920 */
+    --primary: 27 90% 54%;
+    --primary-foreground: 0 0% 100%;
+
+    /* Secondary = Light Blue tint */
+    --secondary: 210 60% 94%;
+    --secondary-foreground: 220 80% 15%;
+
+    /* Muted */
+    --muted: 210 40% 92%;
+    --muted-foreground: 220 20% 46%;
+
+    /* Accent = IndianOil Blue #1565C0 */
+    --accent: 215 76% 42%;
+    --accent-foreground: 0 0% 100%;
+
+    /* Destructive */
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 0 0% 100%;
+
+    /* Borders & inputs */
+    --border: 210 40% 84%;
+    --input: 210 40% 84%;
+    --ring: 27 90% 54%;
+
+    --radius: 0.75rem;
+
+    /* Semantic status colors */
+    --status-approved: 142 76% 36%;
+    --status-review: 38 92% 44%;
+    --status-rejected: 0 72% 51%;
+    --status-ai: 262 83% 58%;
+  }
+
+  .dark {
+    /* Page surface = deep navy */
+    --background: 220 85% 10%;         /* #00194d approx */
+    --foreground: 210 40% 97%;
+
+    /* Cards = slightly lighter navy */
+    --card: 220 80% 15%;               /* #001E60-ish */
+    --card-foreground: 210 40% 97%;
+
+    --popover: 220 80% 15%;
+    --popover-foreground: 210 40% 97%;
+
+    /* Primary = IndianOil Orange */
+    --primary: 27 90% 54%;
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 215 60% 20%;
+    --secondary-foreground: 210 40% 97%;
+
+    --muted: 215 60% 18%;
+    --muted-foreground: 215 20% 65%;
+
+    /* Accent = lighter blue in dark mode */
+    --accent: 215 76% 58%;
+    --accent-foreground: 0 0% 100%;
+
+    --destructive: 0 63% 31%;
+    --destructive-foreground: 210 40% 98%;
+
+    --border: 215 50% 22%;
+    --input: 215 50% 22%;
+    --ring: 27 90% 54%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-[#E8F4FD] dark:bg-[#00194d] text-slate-900 dark:text-slate-100 font-sans antialiased transition-colors duration-200;
+    font-family: 'Inter', sans-serif;
+  }
+}
+
+@layer utilities {
+  .font-mono {
+    font-family: 'IBM Plex Mono', monospace;
+  }
+
+  /* IndianOil brand utility classes */
+  .brand-orange { color: #F47920; }
+  .brand-navy   { color: #003087; }
+  .brand-blue   { color: #1565C0; }
+  .bg-brand-orange { background-color: #F47920; }
+  .bg-brand-navy   { background-color: #003087; }
+  .bg-brand-blue   { background-color: #1565C0; }
+}
