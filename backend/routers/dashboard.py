@@ -72,6 +72,135 @@ def health():
     return {"router": "dashboard", "status": "ok"}
 
 
+def query_dashboard_summary(conn: Optional[Any] = None) -> dict:
+    """
+    Phase 3 Live Operational Dashboard Summary.
+
+    Consolidated database-derived operational KPIs and discipline breakdown.
+
+    Source-of-truth KPI definitions:
+    1. Total Claims: Count of all submitted execution claims from execution_events.
+    2. Pending Review: Count of claims awaiting Supervisor decision
+       (status NOT IN ('APPROVED', 'EDITED', 'REJECTED') or status IS NULL).
+    3. Actuals: Count of authoritative records committed in approved_actuals.
+       Raw claims do not count as actuals.
+    4. Conflicts: Count of open conflict records in conflict_records
+       (status = 'OPEN' or status IS NULL or status != 'RESOLVED').
+    5. Discipline Breakdown: Distribution of schedule_activities grouped by discipline,
+       providing live volume distribution for the discipline chart.
+    """
+    def _execute(query: str, params: tuple = ()):
+        if conn is not None:
+            return conn.execute(query, params)
+        with get_connection() as c:
+            return c.execute(query, params)
+
+    # 1. Total Claims
+    total_claims = 0
+    try:
+        row = _execute("SELECT COUNT(*) AS total FROM execution_events").fetchone()
+        if row:
+            total_claims = int(row["total"] if isinstance(row, dict) or hasattr(row, "keys") else row[0])
+    except Exception as e:
+        logger.warning("Could not count execution_events: %s", e)
+
+    # 2. Pending Review
+    pending_review = 0
+    try:
+        row = _execute(
+            """
+            SELECT COUNT(*) AS pending
+            FROM execution_events
+            WHERE status IS NULL
+               OR UPPER(TRIM(status)) NOT IN ('APPROVED', 'EDITED', 'REJECTED')
+            """
+        ).fetchone()
+        if row:
+            pending_review = int(row["pending"] if isinstance(row, dict) or hasattr(row, "keys") else row[0])
+    except Exception as e:
+        logger.warning("Could not count pending execution_events: %s", e)
+
+    # 3. Actuals
+    actuals = 0
+    try:
+        row = _execute("SELECT COUNT(*) AS total FROM approved_actuals").fetchone()
+        if row:
+            actuals = int(row["total"] if isinstance(row, dict) or hasattr(row, "keys") else row[0])
+    except Exception as e:
+        logger.warning("Could not count approved_actuals: %s", e)
+
+    # 4. Conflicts
+    conflicts = 0
+    try:
+        row = _execute(
+            """
+            SELECT COUNT(*) AS total
+            FROM conflict_records
+            WHERE status IS NULL
+               OR UPPER(TRIM(status)) = 'OPEN'
+               OR UPPER(TRIM(status)) != 'RESOLVED'
+            """
+        ).fetchone()
+        if row:
+            conflicts = int(row["total"] if isinstance(row, dict) or hasattr(row, "keys") else row[0])
+    except Exception as e:
+        logger.warning("Could not count conflict_records: %s", e)
+
+    # 5. Discipline Breakdown
+    discipline_breakdown: List[dict] = []
+    try:
+        rows = _execute(
+            """
+            SELECT
+                UPPER(TRIM(discipline)) AS discipline,
+                COUNT(*) AS count
+            FROM schedule_activities
+            WHERE discipline IS NOT NULL
+              AND TRIM(discipline) != ''
+            GROUP BY UPPER(TRIM(discipline))
+            ORDER BY count DESC, discipline ASC
+            """
+        ).fetchall()
+        for r in rows:
+            disc = str(r["discipline"] if isinstance(r, dict) or hasattr(r, "keys") else r[0])
+            cnt = int(r["count"] if isinstance(r, dict) or hasattr(r, "keys") else r[1])
+            discipline_breakdown.append({
+                "discipline": disc,
+                "name": disc,
+                "count": cnt,
+                "value": cnt,
+            })
+    except Exception as e:
+        logger.warning("Could not aggregate discipline breakdown: %s", e)
+
+    return {
+        "total_claims": total_claims,
+        "pending_review": pending_review,
+        "actuals": actuals,
+        "conflicts": conflicts,
+        "discipline_breakdown": discipline_breakdown,
+    }
+
+
+@router.get("/summary")
+def get_dashboard_summary(
+    current_user: UserProfile = Depends(require_role("SUPERVISOR")),
+):
+    """
+    Live dashboard summary KPIs and discipline volume breakdown.
+    Restricted to SUPERVISOR role.
+    """
+    try:
+        return query_dashboard_summary()
+    except Exception as e:
+        logger.error("Failed to query dashboard summary: %s", e)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to retrieve dashboard summary",
+        )
+
+
+
 @router.get("/delay-reasons")
 def get_delay_reasons(
     current_user: UserProfile = Depends(require_role("SUPERVISOR")),

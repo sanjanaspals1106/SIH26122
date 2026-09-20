@@ -1,4 +1,4 @@
-import type en from './en';
+import type { TranslationDictionary } from './en';
 
 export default {
   common: {
@@ -379,4 +379,4 @@ export default {
     HSE: 'एचएसई',
     UNASSIGNED: 'अनिर्दिष्ट',
   },
-} satisfies typeof en;
+} satisfies TranslationDictionary;

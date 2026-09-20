@@ -20,6 +20,12 @@ class Schedule(BaseModel):
     source_format: Optional[str] = None
 
 
+class ExecutionState(str, Enum):
+    NOT_STARTED = "NOT_STARTED"
+    IN_PROGRESS = "IN_PROGRESS"
+    COMPLETED = "COMPLETED"
+
+
 class ScheduleActivity(BaseModel):
     schedule_id: str
     activity_id: str
@@ -33,6 +39,8 @@ class ScheduleActivity(BaseModel):
     planned_quantity: Optional[float] = None
     uom: Optional[str] = None
     baseline_pct_complete: float = Field(default=0.0, ge=0.0, le=100.0)
+    total_float: Optional[float] = None
+    is_critical: Optional[bool] = None
 
 
 class ScheduleDependency(BaseModel):
@@ -41,6 +49,24 @@ class ScheduleDependency(BaseModel):
     predecessor_activity_id: str
     successor_activity_id: str
     relationship_type: str = "FS"
+    lag_days: float = 0.0
+
+
+# ---------- M1 Feature #30 (WBS Granularity Bridge, schedule-side): WBS tree ----------
+
+class WBSGroupActivity(BaseModel):
+    activity_id: str
+    planned_quantity: Optional[float] = None
+
+
+class WBSGroup(BaseModel):
+    wbs_code: str
+    activities: list[WBSGroupActivity]
+
+
+class WBSTreeResponse(BaseModel):
+    schedule_id: str
+    wbs_groups: list[WBSGroup]
 
 
 # ---------- shared enums (used across M2/M3/M4) ----------

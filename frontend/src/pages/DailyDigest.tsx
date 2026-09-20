@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
-import { digestApi, ExecutionEvent } from '@/api';
+import { digestApi, ExecutionEvent, DISCIPLINES } from '@/api';
 import {
   Calendar as CalendarIcon,
   ChevronLeft,
@@ -362,7 +362,7 @@ export default function DailyDigest() {
         />
       ) : (
         <div className="space-y-6">
-          {['CIVIL', 'PIPING', 'STATIC_ROTATING_EQUIPMENT', 'ELECTRICAL', 'INSTRUMENTATION', 'HSE', 'UNASSIGNED'].map((disc) => {
+          {[...DISCIPLINES, 'UNASSIGNED' as const].map((disc) => {
             const discEvents = events.filter((e) =>
               disc === 'UNASSIGNED' ? !e.discipline || (e.discipline as string) === 'UNASSIGNED' : e.discipline === disc
             );

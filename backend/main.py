@@ -24,6 +24,9 @@ from backend.routers import (
     activities,
     schedule,
     mock_p6,
+    graph,
+    investigation,
+    summary,
 )
 from backend.shared.db import init_db
 
@@ -69,3 +72,6 @@ app.include_router(dashboard.router)
 app.include_router(activities.router)
 app.include_router(schedule.router)
 app.include_router(mock_p6.router)
+app.include_router(graph.router)
+app.include_router(investigation.router)
+app.include_router(summary.router)

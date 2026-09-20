@@ -2,11 +2,14 @@
  * Setu AI (SIH26122) — Typed API Client & PRD Contracts
  *
  * Fully compliant with PRD v5 specification.
- * USE_MOCKS=true  → returns realistic mock data (demo mode)
- * USE_MOCKS=false → calls real FastAPI endpoints at VITE_API_BASE_URL
+ * VITE_USE_MOCKS=true → returns realistic mock data (explicit demo mode)
+ * Any other value or omission → calls real FastAPI endpoints at VITE_API_BASE_URL
  */
 
-const USE_MOCKS = import.meta.env.VITE_USE_MOCKS !== 'false';
+// Never silently substitute fabricated records for a real backend response.
+// Mock mode must be explicitly opted into by a demo build.
+const USE_MOCKS = import.meta.env.VITE_USE_MOCKS === 'true';
+export const IS_MOCK_MODE = USE_MOCKS;
 const BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -84,6 +87,15 @@ export type Discipline =
   | 'ELECTRICAL'
   | 'INSTRUMENTATION'
   | 'HSE';
+
+export const DISCIPLINES: Discipline[] = [
+  'CIVIL',
+  'PIPING',
+  'STATIC_ROTATING_EQUIPMENT',
+  'ELECTRICAL',
+  'INSTRUMENTATION',
+  'HSE',
+];
 
 export interface UserProfile {
   id: string;
@@ -385,7 +397,56 @@ export interface ExecutionSummaryMetrics {
   disciplines_active?: string[];
 }
 
+export interface ExecutionSummaryAggregate {
+  period: { type: string; start: string; end: string };
+  discipline: string;
+  claims: {
+    total_claims: number;
+    by_status: Record<string, number>;
+    by_event_type: Record<string, number>;
+  };
+  approved_progress: {
+    total_approved: number;
+    activities_with_actuals: number;
+    avg_approved_pct: number;
+  };
+  conflicts: {
+    total_conflicts: number;
+    by_status: Record<string, number>;
+  };
+  validation_issues: {
+    total_issues: number;
+    by_severity: Record<string, number>;
+  };
+  delays: {
+    total_delay_events: number;
+    reasons: Record<string, number>;
+  };
+  activities: {
+    total: number;
+    completed: number;
+    in_progress: number;
+    not_started: number;
+  };
+  forecast: {
+    status: string;
+    historical_ratio: number | null;
+    note?: string;
+  };
+}
+
 export interface ExecutionSummaryResponse {
+  period: { type: string; start: string; end: string };
+  discipline: string;
+  aggregate: ExecutionSummaryAggregate;
+  canonical_summary: string;
+  summary: string;
+  language: string;
+  cached: boolean;
+  generated_by: 'llm' | 'deterministic_fallback';
+}
+
+export interface ExecutionReportResponse {
   reporting_period: {
     start_date: string;
     end_date: string;
@@ -1320,7 +1381,34 @@ export const decisionsApi = {
 };
 
 export const dashboardApi = {
+  getSummary: async (): Promise<{
+    total_claims: number;
+    pending_review: number;
+    actuals: number;
+    conflicts: number;
+    discipline_breakdown: { discipline: string; name: string; count: number; value: number }[];
+  }> => {
+    if (USE_MOCKS) {
+      await sleep(300);
+      return {
+        total_claims: 148,
+        pending_review: 14,
+        actuals: 124,
+        conflicts: 2,
+        discipline_breakdown: [
+          { discipline: 'CIVIL', name: 'CIVIL', count: 42, value: 42 },
+          { discipline: 'PIPING', name: 'PIPING', count: 28, value: 28 },
+          { discipline: 'ELECTRICAL', name: 'ELECTRICAL', count: 18, value: 18 },
+          { discipline: 'INSTRUMENTATION', name: 'INSTRUMENTATION', count: 12, value: 12 },
+          { discipline: 'HSE', name: 'HSE', count: 8, value: 8 },
+        ],
+      };
+    }
+    return apiFetch('/api/v1/dashboard/summary');
+  },
+
   getDelayReasons: async (): Promise<{ reason: string; count: number }[]> => {
+
     if (USE_MOCKS) {
       await sleep(400);
       return [
@@ -1638,7 +1726,7 @@ export const auditApi = {
 };
 
 export const reportsApi = {
-  getExecutionSummary: async (filter?: ExecutionSummaryFilter): Promise<ExecutionSummaryResponse> => {
+  getExecutionSummary: async (filter?: ExecutionSummaryFilter): Promise<ExecutionReportResponse> => {
     const startDate = filter?.start || filter?.start_date;
     const endDate = filter?.end || filter?.end_date;
 
@@ -1683,6 +1771,133 @@ export const reportsApi = {
 
     const qs = params.toString();
     return apiFetch(`/api/v1/reports/execution-summary${qs ? `?${qs}` : ''}`);
+  },
+};
+
+export interface InvestigationContext {
+  root_activity_id: string;
+  depth: number;
+  context: {
+    activity: Record<string, any>;
+    execution_events: any[];
+    validations: any[];
+    conflicts: any[];
+    impacts: any[];
+    evidence: any[];
+    decisions: any[];
+    approved_actuals: any[];
+    dependencies: any[];
+  };
+  summary: {
+    conflict_status: string;
+    validation_status: string;
+    impact_status: string;
+    evidence_status: string;
+    approved_actual_status: string;
+    dependencies_count: number;
+    execution_events_count: number;
+    decisions_count: number;
+  };
+  graph: {
+    nodes: any[];
+    edges: any[];
+  };
+}
+
+export const investigationApi = {
+  getInvestigation: async (activityId: string, depth = 1): Promise<InvestigationContext> => {
+    if (USE_MOCKS) {
+      await sleep(300);
+      return {
+        root_activity_id: activityId,
+        depth,
+        context: {
+          activity: { activity_id: activityId, activity_name: 'Piping Section WLD-024', discipline: 'PIPING' },
+          execution_events: [{ event_id: 'EVT-DEMO-01', raw_claim_text: 'Completed welding joints 1-4', delay_reason: null }],
+          validations: [],
+          conflicts: [],
+          impacts: [],
+          evidence: [{ reference_id: 'REF-01', file_name: 'inspection_log.pdf', raw_snippet: 'Visual test accepted' }],
+          decisions: [],
+          approved_actuals: [],
+          dependencies: [],
+        },
+        summary: {
+          conflict_status: 'not_present',
+          validation_status: 'not_present',
+          impact_status: 'not_present',
+          evidence_status: 'present',
+          approved_actual_status: 'not_present',
+          dependencies_count: 0,
+          execution_events_count: 1,
+          decisions_count: 0,
+        },
+        graph: { nodes: [], edges: [] },
+      };
+    }
+    return apiFetch<InvestigationContext>(`/api/v1/investigation/activity/${activityId}?depth=${depth}`);
+  },
+};
+
+export const executionSummaryApi = {
+  getSummary: async (params?: {
+    period?: 'last_7_days' | 'this_month' | 'custom';
+    start_date?: string;
+    end_date?: string;
+    discipline?: string;
+    language?: 'en' | 'hi' | 'te';
+  }): Promise<ExecutionSummaryResponse> => {
+    const query = new URLSearchParams();
+    if (params?.period) query.set('period', params.period);
+    if (params?.start_date) query.set('start_date', params.start_date);
+    if (params?.end_date) query.set('end_date', params.end_date);
+    if (params?.discipline) query.set('discipline', params.discipline);
+    if (params?.language) query.set('language', params.language);
+
+    if (USE_MOCKS) {
+      await sleep(350);
+      const isHindi = params?.language === 'hi';
+      const isTelugu = params?.language === 'te';
+      const lang = params?.language || 'en';
+
+      const canonical =
+        "Project Execution Summary (Last 7 Days) — Scope comprises 32 scheduled activities (8 Completed, 16 In Progress, 8 Not Started). Field engineers reported 24 progress claims with 18 approved by the Supervisor (68.4% average completion). Quality controls recorded 2 open conflicts and 3 validation warnings. Four delay events were logged primarily driven by adverse monsoon rains (2) and structural steel delivery lead times (2).";
+
+      let summaryText = canonical;
+      if (isHindi) {
+        summaryText =
+          "परियोजना निष्पादन सारांश (पिछले 7 दिन) — दायरे में 32 निर्धारित गतिविधियाँ शामिल हैं (8 पूर्ण, 16 प्रगति पर, 8 प्रारंभ नहीं)। फील्ड इंजीनियरों ने 24 प्रगति दावे प्रस्तुत किए जिनमें से 18 पर्यवेक्षक द्वारा स्वीकृत हैं (68.4% औसत पूर्णता)। 2 खुले संघर्ष और 3 सत्यापन चेतावनियाँ दर्ज की गईं। प्रतिकूल मानसून बारिश (2) और स्टील वितरण (2) के कारण 4 विलंब कार्यक्रम नोट किए गए।";
+      } else if (isTelugu) {
+        summaryText =
+          "ప్రాజెక్ట్ ఎగ్జిక్యూషన్ సారాంశం (గత 7 రోజులు) — పరిధిలో 32 షెడ్యూల్డ్ కార్యకలాపాలు ఉన్నాయి (8 పూర్తయ్యాయి, 16 పురోగతిలో ఉన్నాయి, 8 ప్రారంభం కాలేదు). ఫీల్డ్ ఇంజనీర్లు 24 ప్రోగ్రెస్ క్లెయిమ్‌లను సమర్పించగా, పర్యవేక్షకుడు 18 ఆమోదించారు (68.4% సగటు పూర్తి). 2 ఓపెన్ వివాదాలు మరియు 3 ధృవీకరణ హెచ్చరికలు నమోదయ్యాయి. ప్రతికూల వర్షాలు (2) మరియు ఉక్కు డెలివరీ (2) కారణంగా 4 ఆలస్య సంఘటనలు జరిగాయి.";
+      }
+
+      return {
+        period: {
+          type: params?.period || 'last_7_days',
+          start: params?.start_date || '2026-09-11',
+          end: params?.end_date || '2026-09-18',
+        },
+        discipline: params?.discipline || 'ALL',
+        aggregate: {
+          period: { type: params?.period || 'last_7_days', start: '2026-09-11', end: '2026-09-18' },
+          discipline: params?.discipline || 'ALL',
+          claims: { total_claims: 24, by_status: { APPROVED: 18, REVIEW_REQUIRED: 4, EXTRACTED: 2 }, by_event_type: { PROGRESS_UPDATE: 20, DELAY: 4 } },
+          approved_progress: { total_approved: 18, activities_with_actuals: 14, avg_approved_pct: 68.4 },
+          conflicts: { total_conflicts: 2, by_status: { OPEN: 2 } },
+          validation_issues: { total_issues: 3, by_severity: { WARNING: 2, ERROR: 1 } },
+          delays: { total_delay_events: 4, reasons: { WEATHER: 2, MATERIAL: 2 } },
+          activities: { total: 32, completed: 8, in_progress: 16, not_started: 8 },
+          forecast: { status: 'available', historical_ratio: 1.12 },
+        },
+        canonical_summary: canonical,
+        summary: summaryText,
+        language: lang,
+        cached: false,
+        generated_by: 'llm',
+      };
+    }
+    return apiFetch<ExecutionSummaryResponse>(`/api/v1/execution-summary?${query.toString()}`);
   },
 };
 

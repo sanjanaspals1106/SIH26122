@@ -50,21 +50,23 @@ _INSERT_ACTIVITY_SQL = """
     INSERT INTO schedule_activities (
         schedule_id, activity_id, activity_name, wbs_code, discipline,
         location, asset_tag, planned_start, planned_finish,
-        planned_quantity, uom, baseline_pct_complete
+        planned_quantity, uom, baseline_pct_complete,
+        total_float, is_critical
     ) VALUES (
         %(schedule_id)s, %(activity_id)s, %(activity_name)s, %(wbs_code)s, %(discipline)s,
         %(location)s, %(asset_tag)s, %(planned_start)s, %(planned_finish)s,
-        %(planned_quantity)s, %(uom)s, %(baseline_pct_complete)s
+        %(planned_quantity)s, %(uom)s, %(baseline_pct_complete)s,
+        %(total_float)s, %(is_critical)s
     )
 """
 
 _INSERT_DEPENDENCY_SQL = """
     INSERT INTO schedule_dependencies (
         dependency_id, schedule_id, predecessor_activity_id,
-        successor_activity_id, relationship_type
+        successor_activity_id, relationship_type, lag_days
     ) VALUES (
         %(dependency_id)s, %(schedule_id)s, %(predecessor_activity_id)s,
-        %(successor_activity_id)s, %(relationship_type)s
+        %(successor_activity_id)s, %(relationship_type)s, %(lag_days)s
     )
 """
 
@@ -145,7 +147,8 @@ _SELECT_ACTIVITY_COLUMNS_SQL = """
     SELECT
         schedule_id, activity_id, activity_name, wbs_code, discipline,
         location, asset_tag, planned_start, planned_finish,
-        planned_quantity, uom, baseline_pct_complete
+        planned_quantity, uom, baseline_pct_complete,
+        total_float, is_critical
     FROM schedule_activities
 """
 
@@ -196,7 +199,7 @@ def get_schedule_activity(schedule_id: str, activity_id: str) -> Optional[Schedu
 
 _LIST_DEPENDENCIES_SQL = """
     SELECT dependency_id, schedule_id, predecessor_activity_id,
-           successor_activity_id, relationship_type
+           successor_activity_id, relationship_type, lag_days
     FROM schedule_dependencies
     WHERE schedule_id = %s
     ORDER BY dependency_id
@@ -215,3 +218,41 @@ def list_schedule_dependencies(schedule_id: str) -> list[ScheduleDependency]:
         rows = conn.execute(_LIST_DEPENDENCIES_SQL, (schedule_id,)).fetchall()
 
     return [ScheduleDependency(**row) for row in rows]
+
+
+_LIST_WBS_ACTIVITIES_SQL = """
+    SELECT wbs_code, activity_id, planned_quantity
+    FROM schedule_activities
+    WHERE schedule_id = %s
+      AND wbs_code IS NOT NULL
+      AND TRIM(wbs_code) <> ''
+    ORDER BY wbs_code, activity_id
+"""
+
+
+def list_schedule_wbs_activities(schedule_id: str) -> list[dict]:
+    """List (wbs_code, activity_id, planned_quantity) rows for a schedule,
+    for the M1 half of Feature #30 (WBS Granularity Bridge) — a read-only
+    grouping of existing activities by wbs_code for M3's decomposition
+    analysis. Never mutates schedule_activities.
+
+    Activities with a NULL, empty, or whitespace-only wbs_code are excluded
+    at the SQL level (never bucketed as "unassigned") — this covers both the
+    normal case (a blank wbs_code is normalized to NULL by
+    backend.shared.schedule's CSV parser before it ever reaches this table)
+    and any literal empty/whitespace string that might reach this table via
+    a different ingestion path.
+
+    Ordered by wbs_code then activity_id so a caller grouping these rows in
+    Python (backend.routers.schedules) gets deterministic group and
+    within-group ordering for free, without a second sort.
+
+    Returns an empty list both for a schedule with no groupable activities
+    and for an unknown schedule_id — same convention as the other list_*
+    functions in this module; callers that need to distinguish the two
+    should check get_schedule() first.
+    """
+    with get_connection() as conn:
+        rows = conn.execute(_LIST_WBS_ACTIVITIES_SQL, (schedule_id,)).fetchall()
+
+    return list(rows)

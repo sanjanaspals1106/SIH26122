@@ -321,11 +321,15 @@ def test_earlier_decision_does_not_replace_final():
 
     data = query_activity_history("ACT-REV", conn=db)
     decisions_in_timeline = [item for item in data["timeline"] if item["type"] == "planner_decision"]
-    # Only the single final planner decision appears
-    assert len(decisions_in_timeline) == 1
-    assert decisions_in_timeline[0]["decision_id"] == "DEC-LATEST"
-    assert decisions_in_timeline[0]["action"] == "EDIT"
-    assert decisions_in_timeline[0]["approved_pct"] == 60.0
+    # Multiple historical decisions appear chronologically without earlier replacing final
+    assert len(decisions_in_timeline) == 2
+    assert decisions_in_timeline[0]["decision_id"] == "DEC-EARLY"
+    assert decisions_in_timeline[0]["action"] == "HOLD"
+    assert decisions_in_timeline[1]["decision_id"] == "DEC-LATEST"
+    assert decisions_in_timeline[1]["action"] == "EDIT"
+    assert decisions_in_timeline[1]["approved_pct"] == 60.0
+
+
 
 
 # =========================================================================

@@ -27,6 +27,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import GlobalIndustrialBackground from '@/components/GlobalIndustrialBackground';
+import { IS_MOCK_MODE } from '@/api';
 
 const SIDEBAR_COLLAPSED_KEY = 'setu_sidebar_collapsed_v1';
 
@@ -255,6 +256,15 @@ export default function AppShell() {
           </div>
 
           <div className="flex items-center gap-3">
+            {IS_MOCK_MODE && (
+              <div
+                id="mock-mode-indicator"
+                className="flex items-center gap-1 px-2.5 py-1 rounded-full bg-amber-500/20 border border-amber-400 text-amber-300 text-xs font-bold font-mono tracking-wide"
+                title="Mock mode active (VITE_USE_MOCKS=true)"
+              >
+                <span>⚠️ DEMO / MOCK DATA MODE</span>
+              </div>
+            )}
             {/* Language Toggle */}
             <LanguageSwitcher variant="adaptive" />
 

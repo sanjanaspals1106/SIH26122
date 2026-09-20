@@ -13,7 +13,7 @@ import {
   CheckCircle2,
   FileText,
 } from 'lucide-react';
-import { reportsApi, ExecutionSummaryResponse, Discipline } from '../api';
+import { reportsApi, ExecutionReportResponse, Discipline } from '../api';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { ErrorState } from '../components/ui/error-state';
@@ -41,7 +41,7 @@ export default function AIExecutionSummary() {
   const [endDate, setEndDate] = useState(() => new Date().toISOString().split('T')[0]);
   const [selectedDiscipline, setSelectedDiscipline] = useState<Discipline | ''>('');
 
-  const [summaryData, setSummaryData] = useState<ExecutionSummaryResponse | null>(null);
+  const [summaryData, setSummaryData] = useState<ExecutionReportResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 

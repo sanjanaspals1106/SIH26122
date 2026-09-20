@@ -4,6 +4,8 @@ import {
   dashboardApi,
   decisionsApi,
   digestApi,
+  executionSummaryApi,
+  ExecutionSummaryResponse,
   ScheduleActivity,
   PlannerDecision,
   ExecutionEvent,
@@ -23,6 +25,8 @@ import {
   XCircle,
   BarChart3,
   Loader2,
+  Sparkles,
+  Globe2,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
@@ -53,6 +57,13 @@ const DISCIPLINE_COLORS: Record<string, string> = {
 
 export default function Dashboard() {
   const { t } = useTranslation();
+  const [summary, setSummary] = useState<{
+    total_claims: number;
+    pending_review: number;
+    actuals: number;
+    conflicts: number;
+    discipline_breakdown: { discipline: string; name: string; count: number; value: number }[];
+  } | null>(null);
   const [delayReasons, setDelayReasons] = useState<{ reason: string; count: number }[]>([]);
   const [institutionalMemory, setInstitutionalMemory] = useState<{ topic: string; resolution: string; count: number }[]>([]);
   const [forecasts, setForecasts] = useState<{ milestone: string; target_date: string; forecast_date: string; slippage_days: number }[]>([]);
@@ -64,11 +75,45 @@ export default function Dashboard() {
   const [isExporting, setIsExporting] = useState<boolean>(false);
   const [exportError, setExportError] = useState<string | null>(null);
 
+  // Phase 7: AI Execution Summary & Dynamic Translation
+  const [execSummary, setExecSummary] = useState<ExecutionSummaryResponse | null>(null);
+  const [summaryPeriod, setSummaryPeriod] = useState<'last_7_days' | 'this_month' | 'custom'>('last_7_days');
+  const [summaryStartDate, setSummaryStartDate] = useState<string>('');
+  const [summaryEndDate, setSummaryEndDate] = useState<string>('');
+  const [summaryDiscipline, setSummaryDiscipline] = useState<string>('ALL');
+  const [summaryLanguage, setSummaryLanguage] = useState<'en' | 'hi' | 'te'>('en');
+  const [isSummaryLoading, setIsSummaryLoading] = useState<boolean>(false);
+
+  const loadExecutionSummary = async (
+    period = summaryPeriod,
+    discipline = summaryDiscipline,
+    language = summaryLanguage,
+    startDate = summaryStartDate,
+    endDate = summaryEndDate
+  ) => {
+    setIsSummaryLoading(true);
+    try {
+      const data = await executionSummaryApi.getSummary({
+        period,
+        discipline,
+        language,
+        start_date: period === 'custom' ? startDate : undefined,
+        end_date: period === 'custom' ? endDate : undefined,
+      });
+      setExecSummary(data);
+    } catch (e) {
+      console.error('Failed to load execution summary:', e);
+    } finally {
+      setIsSummaryLoading(false);
+    }
+  };
+
   const loadDashboardData = async () => {
     setIsLoading(true);
     setError(null);
     try {
-      const [reasons, memory, fc, silent, decisions, allClaims] = await Promise.all([
+      const [sum, reasons, memory, fc, silent, decisions, allClaims] = await Promise.all([
+        dashboardApi.getSummary().catch(() => ({ total_claims: 0, pending_review: 0, actuals: 0, conflicts: 0, discipline_breakdown: [] })),
         dashboardApi.getDelayReasons(),
         dashboardApi.getInstitutionalMemory(),
         dashboardApi.getForecast(),
@@ -76,12 +121,13 @@ export default function Dashboard() {
         decisionsApi.getRecent(),
         digestApi.getAll(),
       ]);
+      setSummary(sum);
       setDelayReasons(reasons);
       setInstitutionalMemory(memory);
       setForecasts(fc);
       setSilentActivities(silent);
       setRecentDecisions(decisions);
-      setClaims(allClaims);
+      setClaims(allClaims || []);
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : 'Failed to load dashboard data';
       setError(msg);
@@ -92,6 +138,7 @@ export default function Dashboard() {
 
   useEffect(() => {
     loadDashboardData();
+    loadExecutionSummary();
   }, []);
 
   const handleExportCsv = async () => {
@@ -116,33 +163,50 @@ export default function Dashboard() {
   };
 
   const disciplineData = useMemo(() => {
-    if (!claims || claims.length === 0) return [];
-    const counts: Record<string, number> = {};
-    claims.forEach((c) => {
-      const d = c.discipline || 'UNASSIGNED';
-      counts[d] = (counts[d] || 0) + 1;
-    });
-    return Object.entries(counts).map(([name, value]) => ({
-      name,
-      value,
-      fill: DISCIPLINE_COLORS[name] || CHART_COLORS.indigo,
-    }));
-  }, [claims]);
+    if (claims && claims.length > 0) {
+      const counts: Record<string, number> = {};
+      claims.forEach((c) => {
+        const d = c.discipline || 'UNASSIGNED';
+        counts[d] = (counts[d] || 0) + 1;
+      });
+      return Object.entries(counts).map(([name, value]) => ({
+        name,
+        value,
+        fill: DISCIPLINE_COLORS[name] || CHART_COLORS.indigo,
+      }));
+    }
+    if (summary?.discipline_breakdown?.length) {
+      const disciplinePalette = [
+        CHART_COLORS.orange,
+        CHART_COLORS.blue,
+        CHART_COLORS.amber,
+        CHART_COLORS.violet,
+        CHART_COLORS.emerald,
+      ];
+      return summary.discipline_breakdown.map((item: any, idx: number) => ({
+        name: item.name || item.discipline,
+        value: item.value ?? item.count,
+        fill: disciplinePalette[idx % disciplinePalette.length],
+      }));
+    }
+    return [{ name: 'CIVIL', value: 0, fill: CHART_COLORS.orange }];
+  }, [claims, summary]);
 
   const kpiCards = useMemo(() => {
-    const totalClaimsCount = claims.length;
-    const pendingReviewCount = claims.filter(
-      (c) => c.status === 'REVIEW_REQUIRED' || c.status === 'VALIDATED'
-    ).length;
-    const actualsCommittedCount = claims.filter(
-      (c) => c.status === 'APPROVED' || c.status === 'EDITED'
-    ).length;
+    const totalClaimsCount = claims.length || summary?.total_claims || 0;
+    const pendingReviewCount = claims.length
+      ? claims.filter((c) => c.status === 'REVIEW_REQUIRED' || c.status === 'VALIDATED').length
+      : summary?.pending_review || 0;
+    const actualsCommittedCount = claims.length
+      ? claims.filter((c) => c.status === 'APPROVED' || c.status === 'EDITED').length
+      : summary?.actuals || 0;
+    const openConflictsCount = summary?.conflicts != null ? summary.conflicts : t('review.notAvailable');
 
     return [
       {
-        label: t('dashboard.kpiTotalClaims'),
+        label: t('dashboard.kpiTotalClaims', { defaultValue: t('dashboard.totalClaims', { defaultValue: 'Total Claims Ingested' }) }),
         value: isLoading ? '...' : String(totalClaimsCount),
-        delta: t('dashboard.kpiTotalClaimsDelta'),
+        delta: t('dashboard.kpiTotalClaimsDelta', { defaultValue: '+12% vs last week' }),
         deltaPositive: true,
         icon: FileSpreadsheet,
         accent: 'text-[#14B8A6] dark:text-[#22D3EE]',
@@ -150,9 +214,9 @@ export default function Dashboard() {
         border: 'border-teal-200 dark:border-[#1E3A5F]',
       },
       {
-        label: t('dashboard.kpiPendingReview'),
+        label: t('dashboard.kpiPendingReview', { defaultValue: t('dashboard.pendingReview', { defaultValue: 'Pending Supervisor Review' }) }),
         value: isLoading ? '...' : String(pendingReviewCount),
-        delta: t('dashboard.kpiPendingReviewDelta'),
+        delta: t('dashboard.kpiPendingReviewDelta', { defaultValue: 'Action required' }),
         deltaPositive: null,
         icon: Clock,
         accent: 'text-amber-600 dark:text-amber-400',
@@ -160,9 +224,9 @@ export default function Dashboard() {
         border: 'border-amber-200 dark:border-amber-900/60',
       },
       {
-        label: t('dashboard.kpiActualsCommitted'),
+        label: t('dashboard.kpiActualsCommitted', { defaultValue: t('dashboard.approvedActuals', { defaultValue: 'Approved Actuals' }) }),
         value: isLoading ? '...' : String(actualsCommittedCount),
-        delta: t('dashboard.kpiActualsCommittedDelta'),
+        delta: t('dashboard.kpiActualsCommittedDelta', { defaultValue: 'P6 Sync ready' }),
         deltaPositive: true,
         icon: CheckCircle2,
         accent: 'text-emerald-600 dark:text-emerald-400',
@@ -170,9 +234,9 @@ export default function Dashboard() {
         border: 'border-emerald-200 dark:border-emerald-900/60',
       },
       {
-        label: t('dashboard.kpiOpenConflicts'),
-        value: t('review.notAvailable'), // Open conflicts cannot be computed without a project-wide conflicts endpoint
-        delta: t('dashboard.kpiOpenConflictsDelta'),
+        label: t('dashboard.kpiOpenConflicts', { defaultValue: t('dashboard.activeConflicts', { defaultValue: 'Active Conflicts' }) }),
+        value: isLoading ? '...' : String(openConflictsCount),
+        delta: t('dashboard.kpiOpenConflictsDelta', { defaultValue: 'Flagged for review' }),
         deltaPositive: false,
         icon: XCircle,
         accent: 'text-rose-600 dark:text-rose-400',
@@ -180,7 +244,7 @@ export default function Dashboard() {
         border: 'border-rose-200 dark:border-rose-900/60',
       },
     ];
-  }, [claims, isLoading, t]);
+  }, [claims, summary, isLoading, t]);
 
   return (
     <div className="space-y-6">
@@ -200,7 +264,10 @@ export default function Dashboard() {
 
         <div className="flex items-center gap-2">
           <Button
-            onClick={loadDashboardData}
+            onClick={() => {
+              loadDashboardData();
+              loadExecutionSummary();
+            }}
             variant="outline"
             disabled={isLoading}
             className="border-slate-300 dark:border-[#1E3A5F] text-foreground hover:bg-secondary h-9 text-xs gap-1.5"
@@ -239,6 +306,229 @@ export default function Dashboard() {
           retryText={t('common.retry')}
         />
       )}
+
+      {/* Phase 7: AI Execution Summary & Dynamic Translation Panel */}
+      <Card className="bg-gradient-to-br from-white to-blue-50/40 dark:from-[#001E60]/90 dark:to-[#001440] border-blue-200 dark:border-blue-900/60 shadow-sm">
+        <CardHeader className="pb-3 border-b border-blue-100 dark:border-blue-900/40">
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
+            <div className="flex items-center gap-2.5">
+              <div className="p-2 rounded-lg bg-blue-600 text-white shadow-sm shadow-blue-500/30">
+                <Sparkles className="w-4 h-4" />
+              </div>
+              <div>
+                <CardTitle className="text-sm font-bold text-slate-900 dark:text-slate-100 flex items-center gap-2">
+                  AI Execution Summary
+                  {execSummary?.generated_by === 'llm' && (
+                    <span className="text-[10px] font-semibold uppercase tracking-wider bg-blue-100 dark:bg-blue-900/60 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800 px-2 py-0.5 rounded-full">
+                      LLM Synthesized
+                    </span>
+                  )}
+                  {execSummary?.generated_by === 'deterministic_fallback' && (
+                    <span className="text-[10px] font-semibold uppercase tracking-wider bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700 px-2 py-0.5 rounded-full">
+                      Deterministic Verified
+                    </span>
+                  )}
+                  {execSummary?.cached && (
+                    <span className="text-[10px] font-semibold uppercase tracking-wider bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800 px-2 py-0.5 rounded-full">
+                      Cache HIT
+                    </span>
+                  )}
+                </CardTitle>
+                <CardDescription className="text-xs text-slate-500 dark:text-slate-400">
+                  Supervisor intelligence compiled from verified site logs, actuals, conflicts, and delay records
+                </CardDescription>
+              </div>
+            </div>
+
+            {/* Filter Toolbar: Period, Discipline, Language */}
+            <div className="flex flex-wrap items-center gap-2 text-xs">
+              {/* Period Selector */}
+              <div className="flex items-center gap-1 bg-white dark:bg-slate-900/80 border border-slate-200 dark:border-blue-900/60 rounded-lg p-0.5">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSummaryPeriod('last_7_days');
+                    loadExecutionSummary('last_7_days', summaryDiscipline, summaryLanguage);
+                  }}
+                  className={cn(
+                    'px-2.5 py-1 rounded-md font-medium transition-colors',
+                    summaryPeriod === 'last_7_days'
+                      ? 'bg-blue-600 text-white shadow-xs'
+                      : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white'
+                  )}
+                >
+                  Last 7 Days
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSummaryPeriod('this_month');
+                    loadExecutionSummary('this_month', summaryDiscipline, summaryLanguage);
+                  }}
+                  className={cn(
+                    'px-2.5 py-1 rounded-md font-medium transition-colors',
+                    summaryPeriod === 'this_month'
+                      ? 'bg-blue-600 text-white shadow-xs'
+                      : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white'
+                  )}
+                >
+                  This Month
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSummaryPeriod('custom');
+                  }}
+                  className={cn(
+                    'px-2.5 py-1 rounded-md font-medium transition-colors',
+                    summaryPeriod === 'custom'
+                      ? 'bg-blue-600 text-white shadow-xs'
+                      : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white'
+                  )}
+                >
+                  Custom
+                </button>
+              </div>
+
+              {/* Discipline Dropdown */}
+              <select
+                value={summaryDiscipline}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  setSummaryDiscipline(val);
+                  loadExecutionSummary(summaryPeriod, val, summaryLanguage, summaryStartDate, summaryEndDate);
+                }}
+                className="bg-white dark:bg-slate-900/80 border border-slate-200 dark:border-blue-900/60 text-slate-700 dark:text-slate-200 rounded-lg px-2 py-1 font-medium focus:outline-none focus:ring-1 focus:ring-blue-500"
+              >
+                <option value="ALL">All Disciplines</option>
+                <option value="CIVIL">Civil</option>
+                <option value="PIPING">Piping</option>
+                <option value="STATIC_ROTATING_EQUIPMENT">Mechanical / Equipment</option>
+                <option value="ELECTRICAL">Electrical</option>
+                <option value="INSTRUMENTATION">Instrumentation</option>
+                <option value="HSE">HSE</option>
+              </select>
+
+              {/* Language Dropdown */}
+              <div className="flex items-center gap-1 bg-white dark:bg-slate-900/80 border border-slate-200 dark:border-blue-900/60 rounded-lg px-2 py-1 text-slate-700 dark:text-slate-200">
+                <Globe2 className="w-3.5 h-3.5 text-blue-500" />
+                <select
+                  value={summaryLanguage}
+                  onChange={(e) => {
+                    const lang = e.target.value as 'en' | 'hi' | 'te';
+                    setSummaryLanguage(lang);
+                    loadExecutionSummary(summaryPeriod, summaryDiscipline, lang, summaryStartDate, summaryEndDate);
+                  }}
+                  className="bg-transparent text-slate-700 dark:text-slate-200 font-medium focus:outline-none"
+                >
+                  <option value="en">English (Canonical)</option>
+                  <option value="hi">हिन्दी (Hindi)</option>
+                  <option value="te">తెలుగు (Telugu)</option>
+                </select>
+              </div>
+            </div>
+          </div>
+
+          {/* Custom Date Range Picker */}
+          {summaryPeriod === 'custom' && (
+            <div className="flex items-center gap-2 pt-2 text-xs">
+              <span className="text-slate-500 dark:text-slate-400">From:</span>
+              <input
+                type="date"
+                value={summaryStartDate}
+                onChange={(e) => setSummaryStartDate(e.target.value)}
+                className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-blue-900/60 rounded px-2 py-1 text-slate-700 dark:text-slate-200"
+              />
+              <span className="text-slate-500 dark:text-slate-400">To:</span>
+              <input
+                type="date"
+                value={summaryEndDate}
+                onChange={(e) => setSummaryEndDate(e.target.value)}
+                className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-blue-900/60 rounded px-2 py-1 text-slate-700 dark:text-slate-200"
+              />
+              <Button
+                size="sm"
+                onClick={() => loadExecutionSummary('custom', summaryDiscipline, summaryLanguage, summaryStartDate, summaryEndDate)}
+                className="h-7 text-xs bg-blue-600 hover:bg-blue-700 text-white"
+              >
+                Apply Range
+              </Button>
+            </div>
+          )}
+        </CardHeader>
+
+        <CardContent className="pt-3 pb-4">
+          {isSummaryLoading ? (
+            <div className="py-8 flex flex-col items-center justify-center gap-2 text-slate-400 text-xs">
+              <RefreshCw className="w-5 h-5 animate-spin text-blue-500" />
+              <span>Generating verified execution summary...</span>
+            </div>
+          ) : execSummary ? (
+            <div className="space-y-3">
+              <div className="bg-white/80 dark:bg-slate-900/50 border border-slate-200/80 dark:border-blue-900/40 rounded-xl p-4 text-xs leading-relaxed text-slate-800 dark:text-slate-200 whitespace-pre-line font-normal shadow-xs">
+                {execSummary.summary}
+              </div>
+
+              {/* Verified Metrics Strip */}
+              <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 pt-1">
+                <div className="p-2 rounded-lg bg-blue-50/80 dark:bg-blue-950/40 border border-blue-100 dark:border-blue-900/40 text-[11px]">
+                  <span className="text-slate-500 dark:text-slate-400 block font-medium">Scope Activities</span>
+                  <span className="font-bold text-blue-700 dark:text-blue-300 font-mono text-sm">
+                    {execSummary.aggregate.activities.total}
+                  </span>
+                  <span className="text-[10px] text-slate-400 block">
+                    {execSummary.aggregate.activities.completed} Done · {execSummary.aggregate.activities.in_progress} Active
+                  </span>
+                </div>
+
+                <div className="p-2 rounded-lg bg-emerald-50/80 dark:bg-emerald-950/40 border border-emerald-100 dark:border-emerald-900/40 text-[11px]">
+                  <span className="text-slate-500 dark:text-slate-400 block font-medium">Progress Claims</span>
+                  <span className="font-bold text-emerald-700 dark:text-emerald-300 font-mono text-sm">
+                    {execSummary.aggregate.claims.total_claims}
+                  </span>
+                  <span className="text-[10px] text-slate-400 block">
+                    {execSummary.aggregate.approved_progress.total_approved} Approved ({execSummary.aggregate.approved_progress.avg_approved_pct}%)
+                  </span>
+                </div>
+
+                <div className="p-2 rounded-lg bg-amber-50/80 dark:bg-amber-950/40 border border-amber-100 dark:border-amber-900/40 text-[11px]">
+                  <span className="text-slate-500 dark:text-slate-400 block font-medium">Conflicts</span>
+                  <span className="font-bold text-amber-700 dark:text-amber-300 font-mono text-sm">
+                    {execSummary.aggregate.conflicts.total_conflicts}
+                  </span>
+                  <span className="text-[10px] text-slate-400 block">
+                    {execSummary.aggregate.conflicts.by_status?.OPEN || 0} Open
+                  </span>
+                </div>
+
+                <div className="p-2 rounded-lg bg-rose-50/80 dark:bg-rose-950/40 border border-rose-100 dark:border-rose-900/40 text-[11px]">
+                  <span className="text-slate-500 dark:text-slate-400 block font-medium">Delay Events</span>
+                  <span className="font-bold text-rose-700 dark:text-rose-300 font-mono text-sm">
+                    {execSummary.aggregate.delays.total_delay_events}
+                  </span>
+                  <span className="text-[10px] text-slate-400 block">
+                    {Object.keys(execSummary.aggregate.delays.reasons || {}).length} Factors Reported
+                  </span>
+                </div>
+
+                <div className="p-2 rounded-lg bg-violet-50/80 dark:bg-violet-950/40 border border-violet-100 dark:border-violet-900/40 text-[11px] col-span-2 sm:col-span-1">
+                  <span className="text-slate-500 dark:text-slate-400 block font-medium">Historical Ratio</span>
+                  <span className="font-bold text-violet-700 dark:text-violet-300 font-mono text-sm">
+                    {execSummary.aggregate.forecast.historical_ratio ? `${execSummary.aggregate.forecast.historical_ratio}×` : 'N/A'}
+                  </span>
+                  <span className="text-[10px] text-slate-400 block">
+                    {execSummary.aggregate.forecast.historical_ratio ? 'Discipline Multiplier' : 'Select Discipline'}
+                  </span>
+                </div>
+              </div>
+            </div>
+          ) : (
+            <div className="py-6 text-center text-slate-400 text-xs">
+              Click refresh to generate the project execution summary.
+            </div>
+          )}
+        </CardContent>
+      </Card>
 
       {/* Silent Activities Alert Banner */}
       {silentActivities.length > 0 && (
