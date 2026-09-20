@@ -21,12 +21,17 @@ import {
   Sparkles,
   Check,
   HelpCircle,
+  Network,
+  Maximize2,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
+import { ProvenancePipelineStepper } from '@/components/review/ProvenancePipelineStepper';
+import { KnowledgeGraphView } from '@/components/graph/KnowledgeGraphView';
 import { cn } from '@/lib/utils';
 
 export default function ReviewWorkspace() {
@@ -56,11 +61,13 @@ export default function ReviewWorkspace() {
   const [investigationLoading, setInvestigationLoading] = useState<boolean>(false);
   const [investigationDepth, setInvestigationDepth] = useState<number>(1);
   const [showInvestigation, setShowInvestigation] = useState<boolean>(false);
+  const [isGraphModalOpen, setIsGraphModalOpen] = useState<boolean>(false);
 
   const handleAskWhy = async (depth = investigationDepth) => {
     if (!selectedActivityId) return;
     setInvestigationLoading(true);
     setShowInvestigation(true);
+    setIsGraphModalOpen(true);
     setInvestigationDepth(depth);
     try {
       const data = await investigationApi.getInvestigation(selectedActivityId, depth);
@@ -197,21 +204,14 @@ export default function ReviewWorkspace() {
         </Button>
       </div>
 
-      {/* 4-Step Pipeline Flow Bar */}
-      <div className="grid grid-cols-4 gap-2 text-center text-xs">
-        <div className="p-3 rounded-xl bg-white dark:bg-[#001E60] border border-slate-200 dark:border-blue-800 text-slate-700 dark:text-slate-200 font-bold flex items-center justify-center gap-1.5 shadow-sm">
-          <FileText className="w-4 h-4 text-blue-500" /> 1. {t('review.step1')}
-        </div>
-        <div className="p-3 rounded-xl bg-white dark:bg-[#001E60] border border-purple-500/40 text-purple-700 dark:text-purple-300 font-bold flex items-center justify-center gap-1.5 shadow-sm">
-          <Sparkles className="w-4 h-4 text-purple-500" /> 2. {t('review.step2')}
-        </div>
-        <div className="p-3 rounded-xl bg-white dark:bg-[#001E60] border border-amber-500/40 text-amber-700 dark:text-amber-300 font-bold flex items-center justify-center gap-1.5 shadow-sm">
-          <ShieldAlert className="w-4 h-4 text-amber-500" /> 3. {t('review.step3')}
-        </div>
-        <div className="p-3 rounded-xl bg-[#FC4C02] text-white font-bold flex items-center justify-center gap-1.5 shadow-md">
-          <CheckCircle2 className="w-4 h-4" /> 4. {t('review.step4')}
-        </div>
-      </div>
+      {/* 7-Stage Provenance Pipeline Flow */}
+      <ProvenancePipelineStepper
+        event={event}
+        candidates={candidates}
+        issues={issues}
+        conflicts={conflicts}
+        decisionCommitted={decisionSuccess}
+      />
 
       {decisionSuccess && (
         <div className="p-6 rounded-2xl bg-emerald-500/15 border border-emerald-500/40 text-emerald-900 dark:text-emerald-200 space-y-3">
@@ -512,6 +512,17 @@ export default function ReviewWorkspace() {
                             ))}
                           </div>
                         )}
+
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          onClick={() => setIsGraphModalOpen(true)}
+                          className="w-full mt-2 h-8 text-[11px] gap-1.5 border-purple-300 dark:border-purple-700 text-purple-700 dark:text-purple-300 bg-white/90 dark:bg-purple-950/40 hover:bg-purple-50"
+                        >
+                          <Network className="w-3.5 h-3.5" />
+                          Explore Full Knowledge Graph
+                        </Button>
                       </div>
                     ) : null}
                   </div>
@@ -526,47 +537,38 @@ export default function ReviewWorkspace() {
                         type="button"
                         onClick={() => setAction(act)}
                         className={cn(
-                          'p-2.5 rounded-xl border text-xs font-bold transition-all text-center uppercase tracking-wider',
+                          "py-2 px-3 rounded-xl border text-xs font-bold transition-all",
                           action === act
-                            ? act === 'APPROVE'
-                              ? 'bg-emerald-600 border-emerald-500 text-white shadow-md'
-                              : act === 'EDIT'
-                              ? 'bg-[#FC4C02] border-[#FC4C02] text-white shadow-md'
-                              : act === 'HOLD'
-                              ? 'bg-amber-600 border-amber-500 text-white shadow-md'
-                              : 'bg-rose-600 border-rose-500 text-white shadow-md'
-                            : 'bg-slate-50 dark:bg-[#001438] border-slate-200 dark:border-blue-800 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-blue-950'
+                            ? "bg-[#001E60] text-white border-transparent shadow-md"
+                            : "bg-slate-50 dark:bg-[#001438] border-slate-200 dark:border-blue-900/60 text-slate-600 dark:text-slate-300"
                         )}
                       >
-                        {act === 'APPROVE'
-                          ? t('review.actionApprove')
-                          : act === 'EDIT'
-                          ? t('review.actionEdit')
-                          : act === 'HOLD'
-                          ? t('review.actionHold')
-                          : t('review.actionReject')}
+                        {act}
                       </button>
                     ))}
                   </div>
                 </div>
 
                 {action === 'EDIT' && (
-                  <div className="grid grid-cols-2 gap-3 p-3 bg-slate-50 dark:bg-[#001438] rounded-xl border border-slate-200 dark:border-blue-800">
+                  <div className="grid grid-cols-2 gap-3 p-3 bg-amber-50 dark:bg-amber-500/10 border border-amber-300 dark:border-amber-500/30 rounded-xl animate-in fade-in text-xs">
                     <div className="space-y-1">
-                      <Label className="text-[11px] text-slate-600 dark:text-slate-400">{t('review.approvedPct')}</Label>
+                      <Label className="text-[10px] font-bold text-amber-900 dark:text-amber-200">{t('review.approvedPct')}</Label>
                       <Input
                         type="number"
+                        min="0"
+                        max="100"
                         value={approvedPct}
-                        onChange={(e) => setApprovedPct(e.target.value !== '' ? Number(e.target.value) : '')}
+                        onChange={(e) => setApprovedPct(e.target.value === '' ? '' : Number(e.target.value))}
                         className="bg-white dark:bg-[#001E60] border-slate-300 dark:border-blue-700 text-slate-900 dark:text-slate-100 font-mono h-8"
                       />
                     </div>
                     <div className="space-y-1">
-                      <Label className="text-[11px] text-slate-600 dark:text-slate-400">{t('review.approvedQty')}</Label>
+                      <Label className="text-[10px] font-bold text-amber-900 dark:text-amber-200">{t('review.approvedQty')}</Label>
                       <Input
                         type="number"
+                        min="0"
                         value={approvedQty}
-                        onChange={(e) => setApprovedQty(e.target.value !== '' ? Number(e.target.value) : '')}
+                        onChange={(e) => setApprovedQty(e.target.value === '' ? '' : Number(e.target.value))}
                         className="bg-white dark:bg-[#001E60] border-slate-300 dark:border-blue-700 text-slate-900 dark:text-slate-100 font-mono h-8"
                       />
                     </div>
@@ -599,6 +601,71 @@ export default function ReviewWorkspace() {
           </Card>
         </div>
       </div>
+
+      {/* Full Two-Layer Knowledge Graph & Ask Why Modal */}
+      <Dialog open={isGraphModalOpen} onOpenChange={setIsGraphModalOpen}>
+        <DialogContent className="max-w-6xl max-h-[90vh] overflow-y-auto bg-slate-50 dark:bg-[#001438] border-slate-200 dark:border-blue-900/60 p-6">
+          <DialogHeader className="pb-3 border-b border-slate-200 dark:border-blue-900/40">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div>
+                <DialogTitle className="text-base font-bold flex items-center gap-2 text-slate-900 dark:text-slate-100">
+                  <Sparkles className="w-4 h-4 text-purple-600" />
+                  Knowledge Graph & Ask Why Investigation: {selectedActivityId}
+                </DialogTitle>
+                <DialogDescription className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                  Two-layer relationship visualization connecting authenticated database records (Activities, Execution Events, Decisions, Actuals) with Ask Why context (Validation issues, Conflicts, Source Evidence).
+                </DialogDescription>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-slate-500 font-medium">Traversal Depth:</span>
+                <button
+                  type="button"
+                  onClick={() => handleAskWhy(1)}
+                  className={cn(
+                    'px-2.5 py-1 rounded text-xs font-bold font-mono transition-all',
+                    investigationDepth === 1
+                      ? 'bg-purple-600 text-white shadow-xs'
+                      : 'bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300'
+                  )}
+                >
+                  Hop 1 (Direct)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleAskWhy(2)}
+                  className={cn(
+                    'px-2.5 py-1 rounded text-xs font-bold font-mono transition-all',
+                    investigationDepth === 2
+                      ? 'bg-purple-600 text-white shadow-xs'
+                      : 'bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300'
+                  )}
+                >
+                  Hop 2 (Multi-Hop)
+                </button>
+              </div>
+            </div>
+          </DialogHeader>
+
+          {investigationLoading ? (
+            <div className="py-16 text-center space-y-3">
+              <Sparkles className="w-8 h-8 text-purple-600 animate-spin mx-auto" />
+              <p className="text-sm font-semibold text-slate-700 dark:text-slate-300">
+                Loading authentic connected database records...
+              </p>
+            </div>
+          ) : investigation ? (
+            <KnowledgeGraphView
+              investigation={investigation}
+              onClose={() => setIsGraphModalOpen(false)}
+            />
+          ) : (
+            <div className="py-12 text-center text-slate-400 text-xs">
+              No investigation context found for {selectedActivityId}.
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

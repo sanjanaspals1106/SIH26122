@@ -7,6 +7,8 @@ import {
   ExecutionSummaryResponse,
   ScheduleActivity,
   PlannerDecision,
+  DisciplineForecastData,
+  DisciplineForecastItem,
 } from '@/api';
 import {
   AlertTriangle,
@@ -57,7 +59,9 @@ export default function Dashboard() {
   } | null>(null);
   const [delayReasons, setDelayReasons] = useState<{ reason: string; count: number }[]>([]);
   const [institutionalMemory, setInstitutionalMemory] = useState<{ topic: string; resolution: string; count: number }[]>([]);
-  const [forecasts, setForecasts] = useState<{ milestone: string; target_date: string; forecast_date: string; slippage_days: number }[]>([]);
+  const [forecastData, setForecastData] = useState<DisciplineForecastData | null>(null);
+  const [selectedDiscipline, setSelectedDiscipline] = useState<string>('CIVIL');
+  const [isForecastLoading, setIsForecastLoading] = useState<boolean>(false);
   const [silentActivities, setSilentActivities] = useState<ScheduleActivity[]>([]);
   const [recentDecisions, setRecentDecisions] = useState<PlannerDecision[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(true);
@@ -70,6 +74,19 @@ export default function Dashboard() {
   const [summaryDiscipline, setSummaryDiscipline] = useState<string>('ALL');
   const [summaryLanguage, setSummaryLanguage] = useState<'en' | 'hi' | 'te'>('en');
   const [isSummaryLoading, setIsSummaryLoading] = useState<boolean>(false);
+
+  const handleDisciplineChange = async (discipline: string) => {
+    setSelectedDiscipline(discipline);
+    setIsForecastLoading(true);
+    try {
+      const data = await dashboardApi.getForecast(discipline);
+      setForecastData(data);
+    } catch (err) {
+      console.error('Failed to load forecast for discipline:', discipline, err);
+    } finally {
+      setIsForecastLoading(false);
+    }
+  };
 
   const loadExecutionSummary = async (
     period = summaryPeriod,
@@ -102,14 +119,14 @@ export default function Dashboard() {
         dashboardApi.getSummary(),
         dashboardApi.getDelayReasons(),
         dashboardApi.getInstitutionalMemory(),
-        dashboardApi.getForecast(),
+        dashboardApi.getForecast(selectedDiscipline),
         dashboardApi.getSilentActivities(),
         decisionsApi.getRecent(),
       ]);
       setSummary(sum);
       setDelayReasons(reasons);
       setInstitutionalMemory(memory);
-      setForecasts(fc);
+      setForecastData(fc);
       setSilentActivities(silent);
       setRecentDecisions(decisions);
     } catch (e) {
@@ -596,40 +613,137 @@ export default function Dashboard() {
         </Card>
 
         {/* Schedule Forecast (6 Cols) */}
-        <Card className="bg-white dark:bg-[#001E60]/80 border-slate-200 dark:border-blue-900/50 text-slate-900 dark:text-slate-100 lg:col-span-6 shadow-sm">
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-semibold flex items-center justify-between">
-              <span className="flex items-center gap-2">
-                <div className="p-1.5 rounded-lg bg-blue-100 dark:bg-blue-500/10 border border-blue-200 dark:border-blue-500/20">
-                  <Clock className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
-                </div>
-                {t('dashboard.forecastTitle')}
-              </span>
-              <span className="text-[10px] bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 px-2 py-0.5 rounded-full font-mono">
-                {t('dashboard.ratioForecast')}
-              </span>
-            </CardTitle>
-            <CardDescription className="text-slate-500 dark:text-slate-400 text-xs">
-              {t('dashboard.forecastDesc')}
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="pt-4 space-y-3 text-xs">
-            {forecasts.length === 0 ? (
-              <div className="text-center py-8 text-slate-400 dark:text-slate-500 text-xs">{t('dashboard.noForecastData')}</div>
-            ) : forecasts.map((fc, idx) => (
-              <div key={idx} className="p-3 bg-slate-50 dark:bg-slate-950/60 border border-slate-200 dark:border-slate-700 rounded-xl flex items-center justify-between hover:border-amber-300 dark:hover:border-amber-700/50 transition-colors">
-                <div>
-                  <div className="font-bold text-slate-800 dark:text-slate-200">{fc.milestone}</div>
-                  <div className="text-slate-500 dark:text-slate-400 text-[11px] mt-0.5">
-                    {t('dashboard.target')}: <span className="font-mono">{fc.target_date}</span> · {t('dashboard.forecast')}: <span className="font-mono text-amber-600 dark:text-amber-400">{fc.forecast_date}</span>
+        <Card className="bg-white dark:bg-[#001E60]/80 border-slate-200 dark:border-blue-900/50 text-slate-900 dark:text-slate-100 lg:col-span-6 shadow-sm flex flex-col">
+          <CardHeader className="pb-3 border-b border-slate-100 dark:border-blue-900/40">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+              <div>
+                <CardTitle className="text-sm font-semibold flex items-center gap-2">
+                  <div className="p-1.5 rounded-lg bg-blue-100 dark:bg-blue-500/10 border border-blue-200 dark:border-blue-500/20">
+                    <Clock className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
                   </div>
-                </div>
-                <div className="text-right font-mono">
-                  <span className="text-rose-600 dark:text-rose-400 font-bold text-sm">+{fc.slippage_days}d</span>
-                  <div className="text-[10px] text-slate-400 dark:text-slate-500">{t('dashboard.slippage')}</div>
-                </div>
+                  <span>{t('dashboard.forecastTitle')}</span>
+                  <span className="text-[10px] bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 px-2 py-0.5 rounded-full font-mono">
+                    {t('dashboard.ratioForecast')}
+                  </span>
+                </CardTitle>
+                <CardDescription className="text-slate-500 dark:text-slate-400 text-xs mt-1">
+                  {t('dashboard.forecastDesc')}
+                </CardDescription>
               </div>
-            ))}
+
+              {forecastData?.historical_ratio != null && (
+                <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-amber-500/10 border border-amber-500/20 text-amber-700 dark:text-amber-400 text-xs font-mono font-medium self-start sm:self-auto">
+                  <TrendingUp className="w-3.5 h-3.5" />
+                  <span>{forecastData.historical_ratio.toFixed(2)}× Multiplier</span>
+                </div>
+              )}
+            </div>
+
+            {/* Discipline Selector Pills */}
+            <div className="flex items-center gap-1.5 mt-3 pt-2 border-t border-slate-100 dark:border-slate-800/60 overflow-x-auto pb-1">
+              <span className="text-[11px] text-slate-500 dark:text-slate-400 font-medium mr-1 flex items-center gap-1 shrink-0">
+                <Filter className="w-3 h-3" /> Discipline:
+              </span>
+              {['CIVIL', 'PIPING', 'ELECTRICAL', 'MECHANICAL', 'STRUCTURAL'].map((disc) => {
+                const isActive = selectedDiscipline === disc;
+                return (
+                  <button
+                    key={disc}
+                    type="button"
+                    onClick={() => handleDisciplineChange(disc)}
+                    className={cn(
+                      "px-2.5 py-0.5 text-[11px] rounded-md font-medium transition-all shrink-0",
+                      isActive
+                        ? "bg-blue-600 text-white shadow-sm font-semibold"
+                        : "bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700"
+                    )}
+                  >
+                    {disc}
+                  </button>
+                );
+              })}
+            </div>
+          </CardHeader>
+
+          <CardContent className="pt-3 space-y-2.5 text-xs flex-1 max-h-[360px] overflow-y-auto">
+            {isForecastLoading ? (
+              <div className="flex flex-col items-center justify-center py-10 text-slate-400 gap-2">
+                <RefreshCw className="w-5 h-5 animate-spin text-blue-500" />
+                <span className="text-xs">Computing historical ratio forecast...</span>
+              </div>
+            ) : !forecastData || forecastData.activities.length === 0 ? (
+              <div className="text-center py-10 text-slate-400 dark:text-slate-500 text-xs flex flex-col items-center gap-1">
+                <AlertTriangle className="w-6 h-6 text-slate-400 mb-1 opacity-60" />
+                <span className="font-medium">No forecast activities for {selectedDiscipline}</span>
+                <span className="text-[11px]">No matching schedule activities or baseline durations found.</span>
+              </div>
+            ) : (
+              forecastData.activities.map((fc, idx) => {
+                const maxDuration = Math.max(fc.planned_duration || 0, fc.forecast_duration || 0, 1);
+                const plannedPct = Math.round(((fc.planned_duration || 0) / maxDuration) * 100);
+                const forecastPct = Math.round(((fc.forecast_duration || 0) / maxDuration) * 100);
+                const hasSlip = (fc.slippage_days || 0) > 0;
+
+                return (
+                  <div
+                    key={idx}
+                    className="p-3 bg-slate-50 dark:bg-slate-950/60 border border-slate-200 dark:border-slate-800 rounded-xl hover:border-blue-400/40 dark:hover:border-blue-700/50 transition-colors"
+                  >
+                    <div className="flex items-center justify-between mb-2">
+                      <div className="font-medium text-slate-800 dark:text-slate-200 truncate max-w-[70%] font-mono text-[12px]">
+                        {fc.activity_id}
+                      </div>
+                      <div className="text-right font-mono">
+                        {hasSlip ? (
+                          <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] font-bold bg-rose-500/10 text-rose-600 dark:text-rose-400 border border-rose-500/20">
+                            +{fc.slippage_days}d slip
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] font-medium bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
+                            On Schedule
+                          </span>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Dual Duration Comparison Bars */}
+                    <div className="space-y-1.5 text-[11px]">
+                      <div className="flex items-center gap-2">
+                        <span className="w-14 text-slate-500 dark:text-slate-400 text-[10px]">Planned</span>
+                        <div className="flex-1 bg-slate-200 dark:bg-slate-800 h-2 rounded-full overflow-hidden">
+                          <div
+                            className="bg-blue-500 h-full rounded-full transition-all duration-300"
+                            style={{ width: `${plannedPct}%` }}
+                          />
+                        </div>
+                        <span className="w-14 text-right font-mono text-slate-700 dark:text-slate-300">
+                          {fc.planned_duration != null ? `${fc.planned_duration}d` : 'N/A'}
+                        </span>
+                      </div>
+
+                      <div className="flex items-center gap-2">
+                        <span className="w-14 text-slate-500 dark:text-slate-400 text-[10px]">Forecast</span>
+                        <div className="flex-1 bg-slate-200 dark:bg-slate-800 h-2 rounded-full overflow-hidden">
+                          <div
+                            className={cn(
+                              "h-full rounded-full transition-all duration-300",
+                              hasSlip ? "bg-amber-500" : "bg-emerald-500"
+                            )}
+                            style={{ width: `${forecastPct}%` }}
+                          />
+                        </div>
+                        <span className={cn(
+                          "w-14 text-right font-mono font-medium",
+                          hasSlip ? "text-amber-600 dark:text-amber-400" : "text-emerald-600 dark:text-emerald-400"
+                        )}>
+                          {fc.forecast_duration != null ? `${fc.forecast_duration}d` : 'N/A'}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })
+            )}
           </CardContent>
         </Card>
       </div>

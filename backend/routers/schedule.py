@@ -334,11 +334,36 @@ def query_impact_preview(
 
         current_frontier = next_frontier
 
+    target_act = activities_cache.get(activity_id, {})
+    target_p_start = parse_date(target_act.get("planned_start"))
+    target_p_finish = parse_date(target_act.get("planned_finish"))
+    shifted_target_finish = (target_p_finish + timedelta(days=delay_days)).isoformat() if target_p_finish else ""
+
+    for imp in impacts_by_activity.values():
+        s_id = imp["successor_activity_id"]
+        act_info = activities_cache.get(s_id, {})
+        imp["activity_name"] = act_info.get("activity_name") or s_id
+        orig_fin = act_info.get("planned_finish")
+        imp["original_planned_finish"] = str(orig_fin)[:10] if orig_fin else ""
+        net_d = imp.get("net_delay_days")
+        if orig_fin and net_d is not None and imp.get("float_status") != "UNKNOWN":
+            p_fin = parse_date(orig_fin)
+            if p_fin:
+                imp["shifted_earliest_finish"] = (p_fin + timedelta(days=net_d)).isoformat()
+            else:
+                imp["shifted_earliest_finish"] = ""
+        else:
+            imp["shifted_earliest_finish"] = ""
+
     final_impacts = list(impacts_by_activity.values())
     final_impacts.sort(key=lambda x: (x.get("propagation_depth", 1), x["successor_activity_id"]))
 
     return {
         "activity_id": activity_id,
+        "activity_name": target_act.get("activity_name") or activity_id,
+        "planned_start": target_p_start.isoformat() if target_p_start else "",
+        "planned_finish": target_p_finish.isoformat() if target_p_finish else "",
+        "shifted_finish": shifted_target_finish,
         "schedule_id": resolved_schedule_id,
         "delay_days": delay_days,
         "propagation_depth_limit": MAX_IMPACT_HOPS,
