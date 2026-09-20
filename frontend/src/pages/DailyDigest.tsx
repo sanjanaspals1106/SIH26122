@@ -1,34 +1,24 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
-import { digestApi, ExecutionEvent, Discipline, ClaimStatus } from '@/api';
+import { digestApi, ExecutionEvent } from '@/api';
 import {
   Calendar as CalendarIcon,
   ChevronLeft,
   ChevronRight,
-  CheckCircle2,
-  AlertTriangle,
   Clock,
-  RefreshCw,
   ArrowRight,
-  PauseCircle,
-  XCircle,
   Sparkles,
   CheckSquare,
   ClipboardList,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent } from '@/components/ui/card';
+import { StatusBadge } from '@/components/StatusBadge';
+import { ProvenanceBadge } from '@/components/ProvenanceBadge';
+import { EmptyState } from '@/components/ui/empty-state';
+import { ErrorState } from '@/components/ui/error-state';
+import { Skeleton } from '@/components/ui/skeleton';
 import { cn } from '@/lib/utils';
-
-const DISCIPLINES: Discipline[] = [
-  'CIVIL',
-  'PIPING',
-  'STATIC_ROTATING_EQUIPMENT',
-  'ELECTRICAL',
-  'INSTRUMENTATION',
-  'HSE',
-];
 
 export default function DailyDigest() {
   const navigate = useNavigate();
@@ -158,23 +148,6 @@ export default function DailyDigest() {
   const approved = events.filter((e) => e.status === 'APPROVED').length;
   const hold = events.filter((e) => e.status === 'HOLD').length;
 
-  const getStatusBadge = (status: ClaimStatus) => {
-    switch (status) {
-      case 'APPROVED':
-        return <span className="bg-emerald-500/10 dark:bg-emerald-500/20 text-emerald-700 dark:text-emerald-400 border border-emerald-500/30 text-xs px-2.5 py-0.5 rounded-full font-semibold flex items-center gap-1"><CheckCircle2 className="w-3.5 h-3.5" /> {t('digest.statusApproved')}</span>;
-      case 'REVIEW_REQUIRED':
-        return <span className="bg-amber-500/10 dark:bg-amber-500/20 text-amber-700 dark:text-amber-400 border border-amber-500/30 text-xs px-2.5 py-0.5 rounded-full font-semibold flex items-center gap-1"><AlertTriangle className="w-3.5 h-3.5" /> {t('digest.statusReviewRequired')}</span>;
-      case 'VALIDATED':
-        return <span className="bg-blue-500/10 dark:bg-blue-500/20 text-blue-700 dark:text-blue-400 border border-blue-500/30 text-xs px-2.5 py-0.5 rounded-full font-semibold flex items-center gap-1"><CheckCircle2 className="w-3.5 h-3.5" /> {t('digest.statusMachineValidated')}</span>;
-      case 'HOLD':
-        return <span className="bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-400 border border-slate-300 dark:border-slate-700 text-xs px-2.5 py-0.5 rounded-full font-semibold flex items-center gap-1"><PauseCircle className="w-3.5 h-3.5" /> {t('digest.statusOnHold')}</span>;
-      case 'REJECTED':
-        return <span className="bg-rose-500/10 dark:bg-rose-500/20 text-rose-700 dark:text-rose-400 border border-rose-500/30 text-xs px-2.5 py-0.5 rounded-full font-semibold flex items-center gap-1"><XCircle className="w-3.5 h-3.5" /> {t('digest.statusRejected')}</span>;
-      default:
-        return <span className="bg-slate-200 dark:bg-slate-800 text-slate-800 dark:text-slate-300 text-xs px-2.5 py-0.5 rounded-full font-semibold">{status}</span>;
-    }
-  };
-
   const renderCalendar = () => {
     const year = currentMonth.getFullYear();
     const month = currentMonth.getMonth();
@@ -200,10 +173,10 @@ export default function DailyDigest() {
           className={cn(
             'h-8 w-8 rounded-lg text-xs font-semibold flex items-center justify-center transition-all',
             isSelected
-              ? 'bg-[#FC4C02] text-white shadow-md font-bold scale-105'
+              ? 'bg-gradient-to-r from-[#FF7A18] to-[#FF941F] text-white shadow-xs font-bold scale-105'
               : isTodayStr
-              ? 'border border-[#FC4C02] text-[#FC4C02] hover:bg-slate-100 dark:hover:bg-blue-900/50'
-              : 'text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-blue-900/40'
+              ? 'border border-[#FF7A18] text-[#FF7A18] hover:bg-card-subtle'
+              : 'text-foreground hover:bg-card-subtle'
           )}
         >
           {d}
@@ -214,16 +187,16 @@ export default function DailyDigest() {
     const monthNames = t('digest.months', { returnObjects: true }) as unknown as string[];
 
     return (
-      <div className="p-4 bg-white dark:bg-[#001E60] border border-slate-200 dark:border-blue-800 rounded-2xl shadow-xl w-72 space-y-3 z-50">
-        <div className="flex items-center justify-between border-b border-slate-200 dark:border-blue-800 pb-2">
-          <span className="text-xs font-bold text-slate-900 dark:text-white">
+      <div className="p-4 bg-card border border-border rounded-xl shadow-xl w-72 space-y-3 z-50 animate-in fade-in zoom-in-95 duration-150">
+        <div className="flex items-center justify-between border-b border-border pb-2">
+          <span className="text-xs font-bold text-foreground">
             {monthNames[month]} {year}
           </span>
           <div className="flex gap-1">
             <Button
               variant="ghost"
               size="icon"
-              className="h-6 w-6 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-blue-900/60"
+              className="h-6 w-6 text-muted-foreground hover:text-foreground"
               onClick={() => setCurrentMonth(new Date(year, month - 1, 1))}
             >
               <ChevronLeft className="w-4 h-4" />
@@ -231,14 +204,14 @@ export default function DailyDigest() {
             <Button
               variant="ghost"
               size="icon"
-              className="h-6 w-6 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-blue-900/60"
+              className="h-6 w-6 text-muted-foreground hover:text-foreground"
               onClick={() => setCurrentMonth(new Date(year, month + 1, 1))}
             >
               <ChevronRight className="w-4 h-4" />
             </Button>
           </div>
         </div>
-        <div className="grid grid-cols-7 gap-1 text-center text-[10px] font-bold text-slate-400 uppercase">
+        <div className="grid grid-cols-7 gap-1 text-center text-[10px] font-bold text-muted-foreground uppercase">
           <span>{t('digest.sunday')}</span><span>{t('digest.monday')}</span><span>{t('digest.tuesday')}</span><span>{t('digest.wednesday')}</span><span>{t('digest.thursday')}</span><span>{t('digest.friday')}</span><span>{t('digest.saturday')}</span>
         </div>
         <div className="grid grid-cols-7 gap-1">{days}</div>
@@ -247,15 +220,15 @@ export default function DailyDigest() {
   };
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 animate-in fade-in duration-200">
       {/* Top Header Toolbar */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-200 dark:border-blue-900/50 pb-4">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-border pb-4">
         <div>
-          <h1 className="text-2xl font-bold text-slate-900 dark:text-slate-100 tracking-tight flex items-center gap-2">
-            <ClipboardList className="w-6 h-6 text-[#FC4C02]" />
+          <h1 className="text-2xl font-extrabold text-[#071A2D] dark:text-[#F5F7FA] tracking-tight flex items-center gap-2">
+            <ClipboardList className="w-6 h-6 text-primary" />
             {t('digest.title')}
           </h1>
-          <p className="text-slate-500 dark:text-slate-400 text-xs mt-1">
+          <p className="text-[#334155] dark:text-[#CBD5E1] text-xs font-semibold mt-1">
             {t('digest.subtitle')}
           </p>
         </div>
@@ -266,7 +239,7 @@ export default function DailyDigest() {
             variant="outline"
             size="sm"
             onClick={handlePrevDay}
-            className="bg-white dark:bg-[#001E60] border-slate-300 dark:border-blue-800 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-blue-900/50 h-9"
+            className="h-9"
           >
             <ChevronLeft className="w-4 h-4" />
           </Button>
@@ -275,9 +248,9 @@ export default function DailyDigest() {
             variant="outline"
             size="sm"
             onClick={() => setShowCalendar(!showCalendar)}
-            className="bg-white dark:bg-[#001E60] border-slate-300 dark:border-blue-800 text-slate-900 dark:text-slate-100 hover:border-[#FC4C02] font-mono text-xs h-9 px-3 gap-2 shadow-sm"
+            className="font-mono text-xs h-9 px-3 gap-2 shadow-xs"
           >
-            <CalendarIcon className="w-4 h-4 text-[#FC4C02]" />
+            <CalendarIcon className="w-4 h-4 text-primary" />
             <span>{selectedDate}</span>
           </Button>
 
@@ -291,7 +264,7 @@ export default function DailyDigest() {
             variant="outline"
             size="sm"
             onClick={handleNextDay}
-            className="bg-white dark:bg-[#001E60] border-slate-300 dark:border-blue-800 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-blue-900/50 h-9"
+            className="h-9"
           >
             <ChevronRight className="w-4 h-4" />
           </Button>
@@ -300,45 +273,45 @@ export default function DailyDigest() {
             variant="ghost"
             size="sm"
             onClick={handleToday}
-            className="text-xs text-[#FC4C02] hover:text-[#e04302] hover:bg-[#FC4C02]/10 h-9 font-semibold"
+            className="text-xs text-primary hover:text-primary hover:bg-primary/10 h-9 font-semibold"
           >
             {t('digest.today')}
           </Button>
         </div>
       </div>
 
-      {/* Summary KPI Bar */}
+      {/* Summary KPI Bar — Multi-Level Surface Elevation */}
       <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
-        <div className="p-4 rounded-xl bg-white dark:bg-[#001E60] border border-slate-200 dark:border-blue-900/60 shadow-sm">
-          <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase">{t('digest.totalClaims')}</span>
-          <div className="text-2xl font-bold text-slate-900 dark:text-slate-100 mt-1 font-mono">{totalClaims}</div>
+        <div className="p-4 rounded-xl bg-card border border-border shadow-xs backdrop-blur-xs">
+          <span className="text-[11px] font-bold text-muted-foreground uppercase">{t('digest.totalClaims')}</span>
+          <div className="text-2xl font-bold text-foreground mt-1 font-mono">{totalClaims}</div>
         </div>
 
-        <div className="p-4 rounded-xl bg-white dark:bg-[#001E60] border border-amber-500/40 bg-amber-500/5 shadow-sm">
-          <span className="text-[11px] font-bold text-amber-700 dark:text-amber-400 uppercase">{t('digest.reviewRequired')}</span>
-          <div className="text-2xl font-bold text-amber-600 dark:text-amber-400 mt-1 font-mono">{reviewRequired}</div>
+        <div className="p-4 rounded-xl bg-amber-50/70 dark:bg-[#0A2340]/80 border border-amber-200/80 dark:border-amber-900/50 shadow-xs backdrop-blur-xs">
+          <span className="text-[11px] font-bold text-amber-800 dark:text-amber-300 uppercase">{t('digest.reviewRequired')}</span>
+          <div className="text-2xl font-bold text-amber-900 dark:text-amber-200 mt-1 font-mono">{reviewRequired}</div>
         </div>
 
-        <div className="p-4 rounded-xl bg-white dark:bg-[#001E60] border border-blue-500/40 bg-blue-500/5 shadow-sm">
-          <span className="text-[11px] font-bold text-blue-700 dark:text-blue-400 uppercase font-mono">{t('digest.validated')}</span>
-          <div className="text-2xl font-bold text-blue-600 dark:text-blue-400 mt-1 font-mono">{validated}</div>
+        <div className="p-4 rounded-xl bg-teal-50/70 dark:bg-[#0A2340]/80 border border-teal-200/80 dark:border-[#1E3A5F] shadow-xs backdrop-blur-xs">
+          <span className="text-[11px] font-bold text-teal-800 dark:text-[#22D3EE] uppercase font-mono">{t('digest.validated')}</span>
+          <div className="text-2xl font-bold text-teal-900 dark:text-[#22D3EE] mt-1 font-mono">{validated}</div>
         </div>
 
-        <div className="p-4 rounded-xl bg-white dark:bg-[#001E60] border border-emerald-500/40 bg-emerald-500/5 shadow-sm">
-          <span className="text-[11px] font-bold text-emerald-700 dark:text-emerald-400 uppercase font-mono">{t('digest.approved')}</span>
-          <div className="text-2xl font-bold text-emerald-600 dark:text-emerald-400 mt-1 font-mono">{approved}</div>
+        <div className="p-4 rounded-xl bg-emerald-50/70 dark:bg-[#0A2340]/80 border border-emerald-200/80 dark:border-emerald-900/50 shadow-xs backdrop-blur-xs">
+          <span className="text-[11px] font-bold text-emerald-800 dark:text-emerald-300 uppercase font-mono">{t('digest.approved')}</span>
+          <div className="text-2xl font-bold text-emerald-900 dark:text-emerald-200 mt-1 font-mono">{approved}</div>
         </div>
 
-        <div className="p-4 rounded-xl bg-white dark:bg-[#001E60] border border-slate-200 dark:border-blue-900/60 shadow-sm col-span-2 sm:col-span-1">
-          <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase">{t('digest.onHold')}</span>
-          <div className="text-2xl font-bold text-slate-700 dark:text-slate-400 mt-1 font-mono">{hold}</div>
+        <div className="p-4 rounded-xl bg-slate-50/80 dark:bg-[#0A2340]/80 border border-slate-200 dark:border-[#1E3A5F] shadow-xs backdrop-blur-xs col-span-2 sm:col-span-1">
+          <span className="text-[11px] font-bold text-muted-foreground uppercase">{t('digest.onHold')}</span>
+          <div className="text-2xl font-bold text-muted-foreground mt-1 font-mono">{hold}</div>
         </div>
       </div>
 
       {/* Bulk Action Toolbar */}
-      <div className="p-4 rounded-xl bg-white dark:bg-[#001E60] border border-slate-200 dark:border-blue-900/60 flex flex-col sm:flex-row items-center justify-between gap-3 shadow-sm">
-        <div className="text-xs text-slate-700 dark:text-slate-300 flex items-center gap-2">
-          <Sparkles className="w-4 h-4 text-[#FC4C02] shrink-0" />
+      <div className="p-4 rounded-xl bg-card border border-border flex flex-col sm:flex-row items-center justify-between gap-3 shadow-xs">
+        <div className="text-xs text-foreground flex items-center gap-2">
+          <Sparkles className="w-4 h-4 text-primary shrink-0" />
           <span>
             {t('digest.claimsReadyForSignoff', { count: reviewRequired + validated, date: selectedDate })}
           </span>
@@ -347,7 +320,8 @@ export default function DailyDigest() {
         <Button
           onClick={handleBulkApprove}
           disabled={isBulking || (reviewRequired + validated === 0)}
-          className="bg-[#FC4C02] hover:bg-[#e04302] text-white text-xs font-semibold h-9 px-4 shadow-md shadow-[#FC4C02]/20 w-full sm:w-auto rounded-xl"
+          isLoading={isBulking}
+          className="text-xs font-semibold h-9 px-4 shadow-xs w-full sm:w-auto rounded-lg"
         >
           {isBulking ? (
             <span>{t('digest.processingBulkApproval')}</span>
@@ -361,52 +335,46 @@ export default function DailyDigest() {
       </div>
 
       {bulkResult && (
-        <div className="p-3.5 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-700 dark:text-emerald-300 text-xs flex items-center justify-between">
+        <div className="p-3.5 rounded-xl bg-status-approved/10 border border-status-approved/30 text-status-approved text-xs flex items-center justify-between">
           <span>{t('digest.bulkApprovalComplete', { count: bulkResult.approved.length })}</span>
           <Button variant="ghost" size="sm" onClick={() => setBulkResult(null)} className="h-6 text-xs">{t('common.dismiss')}</Button>
         </div>
       )}
 
       {error && (
-        <div className="p-4 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-700 dark:text-rose-300 text-xs flex items-center justify-between">
-          <span>{error}</span>
-          <Button variant="outline" size="sm" onClick={() => loadDigest(selectedDate)} className="border-rose-500/40 text-xs">
-            {t('common.retry')}
-          </Button>
-        </div>
+        <ErrorState
+          message={error}
+          onRetry={() => loadDigest(selectedDate)}
+        />
       )}
 
       {isLoading ? (
         <div className="space-y-4">
           {[1, 2, 3].map((i) => (
-            <div key={i} className="h-28 rounded-2xl bg-white dark:bg-[#001E60] border border-slate-200 dark:border-blue-900/60 animate-pulse" />
+            <Skeleton key={i} className="h-28 rounded-xl" />
           ))}
         </div>
       ) : events.length === 0 ? (
-        <Card className="bg-white dark:bg-[#001E60] border-slate-200 dark:border-blue-900/60 p-12 text-center shadow-sm">
-          <div className="w-12 h-12 rounded-full bg-slate-100 dark:bg-blue-900/60 flex items-center justify-center mx-auto text-slate-400 mb-3">
-            <Clock className="w-6 h-6" />
-          </div>
-          <h3 className="text-slate-900 dark:text-slate-100 font-bold text-base">{t('digest.noClaimsForDate', { date: selectedDate })}</h3>
-          <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 max-w-sm mx-auto">
-            {t('digest.noClaimsDesc')}
-          </p>
-        </Card>
+        <EmptyState
+          icon={Clock}
+          title={t('digest.noClaimsForDate', { date: selectedDate })}
+          description={t('digest.noClaimsDesc')}
+        />
       ) : (
         <div className="space-y-6">
           {['CIVIL', 'PIPING', 'STATIC_ROTATING_EQUIPMENT', 'ELECTRICAL', 'INSTRUMENTATION', 'HSE', 'UNASSIGNED'].map((disc) => {
             const discEvents = events.filter((e) =>
-              disc === 'UNASSIGNED' ? !e.discipline || e.discipline === 'UNASSIGNED' : e.discipline === disc
+              disc === 'UNASSIGNED' ? !e.discipline || (e.discipline as string) === 'UNASSIGNED' : e.discipline === disc
             );
             if (discEvents.length === 0) return null;
 
             return (
               <div key={disc} className="space-y-3">
-                <div className="flex items-center gap-2 border-b border-slate-200 dark:border-blue-900/50 pb-2">
-                  <span className="text-xs font-bold uppercase tracking-wider text-[#FC4C02] font-mono">
-                    {disc.replace('_', ' ')}
+                <div className="flex items-center gap-2 border-b border-border/70 pb-2">
+                  <span className="text-xs font-bold uppercase tracking-wider text-primary font-mono">
+                    {t(`disciplines.${disc}` as any, { defaultValue: disc.split('_').join(' ') })}
                   </span>
-                  <span className="text-[10px] bg-slate-100 dark:bg-blue-900/60 text-slate-700 dark:text-blue-200 px-2 py-0.5 rounded-full font-mono font-semibold">
+                  <span className="text-[10px] bg-secondary text-secondary-foreground px-2 py-0.5 rounded-full font-mono font-semibold">
                     {t('digest.claimsCount', { count: discEvents.length })}
                   </span>
                 </div>
@@ -417,46 +385,46 @@ export default function DailyDigest() {
                       key={ev.event_id}
                       onClick={() => navigate(`/review?event_id=${ev.event_id}`)}
                       className={cn(
-                        'p-4 rounded-xl bg-white dark:bg-[#001E60] border transition-all cursor-pointer hover:border-[#FC4C02] shadow-sm group relative',
+                        'p-4 rounded-xl bg-card border transition-all cursor-pointer hover:border-[#FF7A18] shadow-xs group relative',
                         ev.status === 'REVIEW_REQUIRED'
-                          ? 'border-amber-500/50 bg-amber-500/[0.02]'
-                          : 'border-slate-200 dark:border-blue-900/60'
+                          ? 'border-amber-300 dark:border-amber-900/60'
+                          : 'border-border'
                       )}
                     >
                       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-2">
                         <div className="flex items-center gap-2 flex-wrap">
-                          {getStatusBadge(ev.status)}
-                          <span className="text-[11px] font-mono text-slate-500 dark:text-slate-400">{t('digest.idLabel')}: {ev.event_id}</span>
-                          <span className="text-[11px] text-slate-400 font-mono">· {t('digest.channelLabel')}: {ev.input_channel}</span>
+                          <StatusBadge status={ev.status} size="sm" />
+                          <ProvenanceBadge channel={ev.input_channel} size="sm" />
+                          <span className="text-[11px] font-mono text-muted-foreground">{t('digest.idLabel')}: {ev.event_id}</span>
                         </div>
 
-                        <div className="text-xs text-slate-500 dark:text-slate-400 font-mono flex items-center gap-1">
-                          <Clock className="w-3.5 h-3.5 text-slate-400" />
+                        <div className="text-xs text-muted-foreground font-mono flex items-center gap-1">
+                          <Clock className="w-3.5 h-3.5 text-muted-foreground" />
                           {ev.event_date}
                         </div>
                       </div>
 
-                      <p className="text-sm font-semibold text-slate-900 dark:text-slate-100 leading-relaxed mb-3 group-hover:text-[#FC4C02]">
+                      <p className="text-sm font-semibold text-foreground leading-relaxed mb-3 group-hover:text-primary transition-colors">
                         "{ev.raw_claim_text}"
                       </p>
 
-                      <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-slate-100 dark:border-blue-900/40 text-xs">
-                        <div className="flex items-center gap-4 text-slate-600 dark:text-slate-300">
+                      <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-border/50 text-xs">
+                        <div className="flex items-center gap-4 text-muted-foreground">
                           <div>
                             {t('digest.matchedActivity')}:{' '}
-                            <span className="font-mono text-slate-900 dark:text-white font-bold">
+                            <span className="font-mono text-foreground font-bold">
                               {ev.matched_activity_id || t('digest.awaitingMatch')}
                             </span>
                           </div>
                           {ev.claimed_pct !== null && (
                             <div>
                               {t('digest.progress')}:{' '}
-                              <span className="font-mono text-[#FC4C02] font-bold">{ev.claimed_pct}%</span>
+                              <span className="font-mono text-primary font-bold">{ev.claimed_pct}%</span>
                             </div>
                           )}
                         </div>
 
-                        <div className="text-[#FC4C02] font-semibold flex items-center gap-1 group-hover:translate-x-1 transition-transform">
+                        <div className="text-primary font-semibold flex items-center gap-1 group-hover:translate-x-1 transition-transform">
                           <span>{t('digest.inspectClaim')}</span>
                           <ArrowRight className="w-3.5 h-3.5" />
                         </div>

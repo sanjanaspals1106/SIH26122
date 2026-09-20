@@ -1,34 +1,57 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import {
   claimsApi,
   decisionsApi,
+  digestApi,
+  schedulesApi,
   ExecutionEvent,
   CandidateMatch,
   ValidationIssue,
   ConflictRecord,
   DecisionAction,
+  ScheduleActivity,
 } from '@/api';
 import {
   FileText,
   ShieldAlert,
   CheckCircle2,
   AlertTriangle,
-  XCircle,
   Sparkles,
   Check,
+  ListOrdered,
+  ChevronDown,
+  ChevronUp,
+  ArrowRight,
+  Flame,
+  Layers,
+  ShieldCheck,
+  Network,
+  HelpCircle,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
+import { ConfidenceBar } from '@/components/ConfidenceBar';
+import { StatusBadge } from '@/components/StatusBadge';
+import { ProvenanceBadge } from '@/components/ProvenanceBadge';
+import { SourceReferenceCard } from '@/components/SourceReferenceCard';
+import { FieldProvenanceBadge } from '@/components/FieldProvenanceBadge';
+import { AskWhyPanel } from '@/components/AskWhyPanel';
+import { WBSSplitEditor } from '@/components/WBSSplitEditor';
+import { EvidencePanel } from '@/components/EvidencePanel';
+import { KnowledgeGraph } from '@/components/KnowledgeGraph';
+import { EmptyState } from '@/components/ui/empty-state';
+import { ErrorState } from '@/components/ui/error-state';
+import { Skeleton } from '@/components/ui/skeleton';
 import { cn } from '@/lib/utils';
 
 export default function ReviewWorkspace() {
   const { t } = useTranslation();
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const navigate = useNavigate();
   const eventIdParam = searchParams.get('event_id');
 
@@ -36,7 +59,23 @@ export default function ReviewWorkspace() {
   const [candidates, setCandidates] = useState<CandidateMatch[]>([]);
   const [conflicts, setConflicts] = useState<ConflictRecord[]>([]);
   const [issues, setIssues] = useState<ValidationIssue[]>([]);
+  const [activities, setActivities] = useState<ScheduleActivity[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(true);
+
+  // Quick Queue State
+  const [queueClaims, setQueueClaims] = useState<ExecutionEvent[]>([]);
+  const [isLoadingQueue, setIsLoadingQueue] = useState<boolean>(true);
+  const [queueError, setQueueError] = useState<string | null>(null);
+  const [isQueueOpen, setIsQueueOpen] = useState<boolean>(true);
+
+  // Feature 30: Matching Mode State ('direct' vs 'split')
+  const [matchMode, setMatchMode] = useState<'direct' | 'split'>('direct');
+
+  // Feature 31: Bottom Inspection Tab ('evidence' vs 'graph')
+  const [bottomTab, setBottomTab] = useState<'evidence' | 'graph'>('evidence');
+
+  // Feature 34: Ask Why Drawer / Panel State
+  const [isAskWhyOpen, setIsAskWhyOpen] = useState<boolean>(false);
 
   // Form State
   const [selectedActivityId, setSelectedActivityId] = useState<string>('');
@@ -48,28 +87,59 @@ export default function ReviewWorkspace() {
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [decisionSuccess, setDecisionSuccess] = useState<boolean>(false);
 
+  const loadQueue = useCallback(async () => {
+    setIsLoadingQueue(true);
+    setQueueError(null);
+    try {
+      try {
+        const queue = await claimsApi.getReviewQueue('priority');
+        setQueueClaims(queue);
+      } catch {
+        // Fallback to digestApi if review-queue endpoint is unavailable
+        const all = await digestApi.getAll();
+        const reviewable = all.filter(
+          (c) => c.status === 'REVIEW_REQUIRED' || c.status === 'VALIDATED' || c.status === 'HOLD'
+        );
+        setQueueClaims(reviewable);
+      }
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Failed to load queue';
+      setQueueError(msg);
+    } finally {
+      setIsLoadingQueue(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadQueue();
+  }, [loadQueue]);
+
   const loadData = async (id: string) => {
     setIsLoading(true);
     setSubmitError(null);
     setDecisionSuccess(false);
     try {
-      const [ev, cands, confs, valIssues] = await Promise.all([
+      const [ev, cands, confs, valIssues, actList] = await Promise.all([
         claimsApi.getEvent(id),
         claimsApi.getCandidates(id),
         claimsApi.getConflicts(id),
         claimsApi.getValidation(id),
+        schedulesApi.getActivities().catch(() => []),
       ]);
       setEvent(ev);
       setCandidates(cands);
       setConflicts(confs);
       setIssues(valIssues);
+      setActivities(actList);
 
       const defaultActivity = cands[0]?.activity_id || ev.matched_activity_id || '';
       setSelectedActivityId(defaultActivity);
       setApprovedPct(ev.claimed_pct ?? 100);
       setApprovedQty(ev.claimed_quantity ?? '');
-    } catch (err: any) {
-      setSubmitError(t('review.errLoadFailed', { message: err.message }));
+      setMatchMode('direct');
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Failed to load claim details';
+      setSubmitError(t('review.errLoadFailed', { message: msg }));
     } finally {
       setIsLoading(false);
     }
@@ -83,19 +153,9 @@ export default function ReviewWorkspace() {
     }
   }, [eventIdParam]);
 
-  if (!eventIdParam) {
-    return (
-      <Card className="bg-white dark:bg-[#001E60] border-slate-200 dark:border-blue-900/60 text-center p-12 space-y-4">
-        <CardTitle className="text-slate-900 dark:text-slate-100 text-lg font-bold">{t('review.selectClaimTitle')}</CardTitle>
-        <p className="text-slate-500 dark:text-slate-400 text-xs max-w-md mx-auto">
-          {t('review.selectClaimDesc')}
-        </p>
-        <Button onClick={() => navigate('/digest')} className="bg-[#FC4C02] hover:bg-[#e04302] text-white text-xs font-semibold">
-          {t('review.goToDigest')}
-        </Button>
-      </Card>
-    );
-  }
+  const handleSelectClaim = (id: string) => {
+    setSearchParams({ event_id: id });
+  };
 
   const handleSubmitDecision = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -113,7 +173,7 @@ export default function ReviewWorkspace() {
     setIsSubmitting(true);
     try {
       await decisionsApi.submit({
-        event_id: eventIdParam,
+        event_id: eventIdParam!,
         selected_activity_id: selectedActivityId,
         action,
         approved_pct: approvedPct !== '' ? Number(approvedPct) : null,
@@ -121,20 +181,124 @@ export default function ReviewWorkspace() {
         justification: justification.trim(),
       });
       setDecisionSuccess(true);
-    } catch (err: any) {
-      setSubmitError(err.message || t('review.errDecisionFailed'));
+      loadQueue();
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : t('review.errDecisionFailed');
+      setSubmitError(msg);
     } finally {
       setIsSubmitting(false);
     }
   };
 
+  const nextPendingClaim = queueClaims.find((c) => c.event_id !== eventIdParam);
+
+  // If no claim selected via query param, display Quick Queue selector
+  if (!eventIdParam) {
+    return (
+      <div className="space-y-6 max-w-4xl mx-auto py-4 animate-in fade-in duration-200">
+        <div className="flex items-center justify-between border-b border-border pb-4">
+          <div>
+            <h1 className="text-2xl font-extrabold text-[#071A2D] dark:text-[#F5F7FA] tracking-tight flex items-center gap-2">
+              <div className="p-1.5 rounded-lg bg-primary/10 border border-primary/20">
+                <ListOrdered className="w-5 h-5 text-primary" />
+              </div>
+              {t('review.quickQueueTitle')}
+            </h1>
+            <p className="text-[#334155] dark:text-[#CBD5E1] text-xs font-semibold mt-1">
+              {t('review.selectClaimDesc')}
+            </p>
+          </div>
+          <Button onClick={() => navigate('/digest')} variant="outline" size="sm" className="text-xs h-9">
+            {t('review.goToDigest')}
+          </Button>
+        </div>
+
+        {isLoadingQueue ? (
+          <div className="space-y-3">
+            <Skeleton className="h-20 w-full rounded-xl" />
+            <Skeleton className="h-20 w-full rounded-xl" />
+            <Skeleton className="h-20 w-full rounded-xl" />
+          </div>
+        ) : queueError ? (
+          <ErrorState message={queueError} onRetry={loadQueue} retryText={t('common.retry')} />
+        ) : queueClaims.length === 0 ? (
+          <EmptyState
+            icon={FileText}
+            title={t('review.quickQueueEmpty')}
+            description={t('review.queueAllReviewed')}
+            action={
+              <Button onClick={() => navigate('/digest')} size="sm">
+                {t('review.goToDigest')}
+              </Button>
+            }
+            className="py-12"
+          />
+        ) : (
+          <div className="space-y-3">
+            <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wider px-1">
+              {t('review.quickQueueCount', { count: queueClaims.length })}
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              {queueClaims.map((claim) => (
+                <div
+                  key={claim.event_id}
+                  onClick={() => handleSelectClaim(claim.event_id)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault();
+                      handleSelectClaim(claim.event_id);
+                    }
+                  }}
+                  tabIndex={0}
+                  role="button"
+                  aria-label={`Review claim ${claim.event_id}`}
+                  className="p-4 rounded-xl bg-card border border-border hover:border-primary/60 hover:shadow-sm transition-all cursor-pointer space-y-2 text-xs group focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-primary"
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="font-mono font-bold text-foreground text-sm group-hover:text-primary transition-colors">
+                        {claim.event_id}
+                      </span>
+                      <StatusBadge status={claim.status} size="sm" />
+                      {claim.priority_score != null && (
+                        <span className="inline-flex items-center gap-1 text-[10px] font-mono font-bold px-1.5 py-0.5 rounded-full bg-red-100 text-red-700 dark:bg-red-950/70 dark:text-red-300 border border-red-200 dark:border-red-900/60">
+                          <Flame className="w-2.5 h-2.5 text-red-500" />
+                          P{claim.priority_rank ?? 1} ({Math.round(claim.priority_score * 100)}%)
+                        </span>
+                      )}
+                      {claim.is_escalated && (
+                        <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 dark:bg-amber-950/70 dark:text-amber-300 border border-amber-200 dark:border-amber-900/60">
+                          Escalated
+                        </span>
+                      )}
+                    </div>
+                    <span className="text-[11px] font-mono text-muted-foreground">{claim.event_date}</span>
+                  </div>
+
+                  <p className="text-foreground/90 font-medium line-clamp-2 italic">
+                    "{claim.raw_claim_text}"
+                  </p>
+
+                  <div className="flex items-center justify-between text-muted-foreground text-[11px] pt-1 border-t border-border/50">
+                    <span className="font-mono uppercase font-semibold">{claim.discipline || t('review.unassigned')}</span>
+                    <ProvenanceBadge channel={claim.input_channel} size="sm" />
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  }
+
   if (isLoading) {
     return (
       <div className="space-y-4 max-w-6xl mx-auto py-8">
-        <div className="h-10 w-64 bg-slate-200 dark:bg-[#001E60] rounded-xl animate-pulse" />
+        <Skeleton className="h-10 w-64 rounded-xl" />
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          <div className="h-96 bg-slate-200 dark:bg-[#001E60] rounded-2xl animate-pulse lg:col-span-2" />
-          <div className="h-96 bg-slate-200 dark:bg-[#001E60] rounded-2xl animate-pulse" />
+          <Skeleton className="h-96 rounded-xl lg:col-span-2" />
+          <Skeleton className="h-96 rounded-xl" />
         </div>
       </div>
     );
@@ -142,66 +306,200 @@ export default function ReviewWorkspace() {
 
   if (!event) {
     return (
-      <Card className="bg-white dark:bg-[#001E60] border-slate-200 dark:border-blue-900/60 text-center p-12">
-        <CardTitle className="text-slate-900 dark:text-slate-100">{t('review.claimNotFound')}</CardTitle>
-        <Button onClick={() => navigate('/digest')} className="mt-4 bg-[#FC4C02] text-white">{t('review.returnToDigest')}</Button>
-      </Card>
+      <EmptyState
+        icon={AlertTriangle}
+        title={t('review.claimNotFound')}
+        action={
+          <Button onClick={() => navigate('/digest')} size="sm">
+            {t('review.returnToDigest')}
+          </Button>
+        }
+        className="max-w-xl mx-auto my-12"
+      />
     );
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 animate-in fade-in duration-200">
       {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-200 dark:border-blue-900/50 pb-4">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-border pb-4">
         <div>
-          <div className="flex items-center gap-2 text-xs font-mono text-[#FC4C02] font-bold">
+          <div className="flex items-center gap-2 text-xs font-mono text-primary font-bold flex-wrap">
             <span>{t('review.claimIdLabel')}: {event.event_id}</span>
             <span>·</span>
             <span>{t('review.dateLabel')}: {event.event_date}</span>
+            <span>·</span>
+            <ProvenanceBadge channel={event.input_channel} size="sm" />
+            {event.priority_score != null && (
+              <>
+                <span>·</span>
+                <span className="inline-flex items-center gap-1 text-[11px] font-mono font-bold px-2 py-0.5 rounded-full bg-red-100 text-red-700 dark:bg-red-950/70 dark:text-red-300 border border-red-200 dark:border-red-900/60">
+                  <Flame className="w-3 h-3 text-red-500" />
+                  Priority Score: {Math.round(event.priority_score * 100)}% (Rank #{event.priority_rank ?? 1})
+                </span>
+              </>
+            )}
+            {event.is_escalated && (
+              <>
+                <span>·</span>
+                <span className="text-[11px] font-bold px-2 py-0.5 rounded bg-amber-100 text-amber-800 dark:bg-amber-950/70 dark:text-amber-300 border border-amber-200 dark:border-amber-900/60">
+                  Escalated Priority
+                </span>
+              </>
+            )}
           </div>
-          <h1 className="text-2xl font-bold text-slate-900 dark:text-slate-100 tracking-tight mt-0.5">
+          <h1 className="text-2xl font-bold text-foreground tracking-tight mt-0.5">
             {t('review.title')}
           </h1>
         </div>
 
-        <Button
-          variant="outline"
-          onClick={() => navigate('/digest')}
-          className="bg-white dark:bg-[#001E60] border-slate-300 dark:border-blue-800 text-slate-700 dark:text-slate-200 text-xs h-9"
-        >
-          {t('review.backToDigest')}
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setIsQueueOpen((prev) => !prev)}
+            className="text-xs h-9 gap-1.5"
+            aria-expanded={isQueueOpen}
+          >
+            <ListOrdered className="w-3.5 h-3.5 text-primary" />
+            {t('review.quickQueueTitle')} ({queueClaims.length})
+            {isQueueOpen ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+          </Button>
+
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => navigate('/digest')}
+            className="text-xs h-9"
+          >
+            {t('review.backToDigest')}
+          </Button>
+        </div>
       </div>
+
+      {/* Quick Queue Strip / Drawer */}
+      {isQueueOpen && (
+        <Card className="bg-card border-border shadow-xs">
+          <CardHeader className="py-2.5 px-4 border-b border-border flex flex-row items-center justify-between">
+            <div className="flex items-center gap-2">
+              <ListOrdered className="w-4 h-4 text-primary" />
+              <CardTitle className="text-xs font-bold text-foreground">
+                {t('review.quickQueueTitle')}
+              </CardTitle>
+              <span className="text-[10px] bg-primary/10 text-primary border border-primary/20 px-2 py-0.5 rounded-full font-mono font-semibold">
+                {t('review.quickQueueCount', { count: queueClaims.length })}
+              </span>
+            </div>
+          </CardHeader>
+          <CardContent className="p-3">
+            {isLoadingQueue ? (
+              <div className="flex gap-3 overflow-x-auto pb-1">
+                <Skeleton className="h-16 w-52 shrink-0 rounded-lg" />
+                <Skeleton className="h-16 w-52 shrink-0 rounded-lg" />
+                <Skeleton className="h-16 w-52 shrink-0 rounded-lg" />
+              </div>
+            ) : queueError ? (
+              <ErrorState message={queueError} onRetry={loadQueue} retryText={t('common.retry')} />
+            ) : queueClaims.length === 0 ? (
+              <div className="text-xs text-muted-foreground text-center py-2">
+                {t('review.quickQueueEmpty')}
+              </div>
+            ) : (
+              <div className="flex gap-3 overflow-x-auto pb-2 pt-0.5">
+                {queueClaims.map((claim) => {
+                  const isSelected = claim.event_id === eventIdParam;
+                  return (
+                    <button
+                      key={claim.event_id}
+                      type="button"
+                      onClick={() => handleSelectClaim(claim.event_id)}
+                      aria-current={isSelected ? 'true' : undefined}
+                      className={cn(
+                        'shrink-0 text-left p-2.5 rounded-xl border transition-all text-xs w-60 space-y-1.5 cursor-pointer shadow-xs focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-primary',
+                        isSelected
+                          ? 'bg-primary/10 border-primary ring-1 ring-primary text-foreground'
+                          : 'bg-card border-border hover:border-primary/50 text-foreground'
+                      )}
+                    >
+                      <div className="flex items-center justify-between gap-1 flex-wrap">
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <span className={cn('font-mono font-bold text-xs', isSelected ? 'text-primary' : 'text-foreground')}>
+                            {claim.event_id}
+                          </span>
+                          <StatusBadge status={claim.status} size="sm" />
+                          {claim.priority_score != null && (
+                            <span className="inline-flex items-center gap-0.5 text-[9px] font-mono font-bold px-1.5 py-0.2 rounded-full bg-red-100 text-red-700 dark:bg-red-950/70 dark:text-red-300">
+                              <Flame className="w-2.5 h-2.5 text-red-500" />
+                              P{claim.priority_rank ?? 1}
+                            </span>
+                          )}
+                          {claim.is_escalated && (
+                            <span className="text-[9px] font-bold px-1 py-0.2 rounded bg-amber-100 text-amber-800 dark:bg-amber-950/70 dark:text-amber-300">
+                              Escalated
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                      <p className="text-[11px] text-muted-foreground line-clamp-1 italic">
+                        "{claim.raw_claim_text}"
+                      </p>
+                      <div className="flex items-center justify-between text-[10px] text-muted-foreground font-mono">
+                        <span>{claim.discipline || t('review.unassigned')}</span>
+                        <span>{claim.event_date}</span>
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
 
       {/* 4-Step Pipeline Flow Bar */}
       <div className="grid grid-cols-4 gap-2 text-center text-xs">
-        <div className="p-3 rounded-xl bg-white dark:bg-[#001E60] border border-slate-200 dark:border-blue-800 text-slate-700 dark:text-slate-200 font-bold flex items-center justify-center gap-1.5 shadow-sm">
-          <FileText className="w-4 h-4 text-blue-500" /> 1. {t('review.step1')}
+        <div className="p-3 rounded-xl bg-card border border-border text-foreground font-semibold flex items-center justify-center gap-1.5 shadow-xs">
+          <FileText className="w-4 h-4 text-[#1565C0] dark:text-blue-400" /> 1. {t('review.step1')}
         </div>
-        <div className="p-3 rounded-xl bg-white dark:bg-[#001E60] border border-purple-500/40 text-purple-700 dark:text-purple-300 font-bold flex items-center justify-center gap-1.5 shadow-sm">
-          <Sparkles className="w-4 h-4 text-purple-500" /> 2. {t('review.step2')}
+        <div className="p-3 rounded-xl bg-teal-50/60 dark:bg-[#0A2340] border border-teal-200 dark:border-[#1E3A5F] text-[#061526] dark:text-[#F5F7FA] font-semibold flex items-center justify-center gap-1.5 shadow-xs">
+          <Sparkles className="w-4 h-4 text-[#14B8A6] dark:text-[#22D3EE]" /> 2. {t('review.step2')}
         </div>
-        <div className="p-3 rounded-xl bg-white dark:bg-[#001E60] border border-amber-500/40 text-amber-700 dark:text-amber-300 font-bold flex items-center justify-center gap-1.5 shadow-sm">
-          <ShieldAlert className="w-4 h-4 text-amber-500" /> 3. {t('review.step3')}
+        <div className="p-3 rounded-xl bg-amber-50/60 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-900/60 text-amber-800 dark:text-amber-300 font-semibold flex items-center justify-center gap-1.5 shadow-xs">
+          <ShieldAlert className="w-4 h-4 text-amber-600" /> 3. {t('review.step3')}
         </div>
-        <div className="p-3 rounded-xl bg-[#FC4C02] text-white font-bold flex items-center justify-center gap-1.5 shadow-md">
+        <div className="p-3 rounded-xl bg-gradient-to-r from-[#FF7A18] to-[#FF941F] text-white font-bold flex items-center justify-center gap-1.5 shadow-xs">
           <CheckCircle2 className="w-4 h-4" /> 4. {t('review.step4')}
         </div>
       </div>
 
       {decisionSuccess && (
-        <div className="p-6 rounded-2xl bg-emerald-500/15 border border-emerald-500/40 text-emerald-900 dark:text-emerald-200 space-y-3">
+        <div className="p-6 rounded-2xl bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-900/60 text-foreground space-y-3 animate-in fade-in duration-200">
           <div className="flex items-center gap-3">
             <CheckCircle2 className="w-6 h-6 text-emerald-600 dark:text-emerald-400 shrink-0" />
             <div>
-              <h3 className="font-bold text-base">{t('review.decisionCommitted')}</h3>
-              <p className="text-xs text-emerald-800 dark:text-emerald-300">
+              <h3 className="font-bold text-base text-emerald-700 dark:text-emerald-300">{t('review.decisionCommitted')}</h3>
+              <p className="text-xs text-muted-foreground">
                 {t('review.decisionLoggedTo', { eventId: event.event_id, action })}
               </p>
             </div>
           </div>
-          <div className="flex gap-2 pt-2">
-            <Button size="sm" onClick={() => navigate('/digest')} className="bg-emerald-600 hover:bg-emerald-500 text-white text-xs">
+          <div className="flex items-center gap-2 pt-2 flex-wrap">
+            {nextPendingClaim && (
+              <Button
+                size="sm"
+                onClick={() => handleSelectClaim(nextPendingClaim.event_id)}
+                className="bg-gradient-to-r from-[#FF7A18] to-[#FF941F] hover:from-[#E06810] hover:to-[#FF7A18] text-white text-xs gap-1.5 shadow-sm shadow-orange-500/25 font-semibold"
+              >
+                {t('review.reviewNextClaim')} ({nextPendingClaim.event_id})
+                <ArrowRight className="w-3.5 h-3.5" />
+              </Button>
+            )}
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => navigate('/digest')}
+              className="text-xs"
+            >
               {t('review.returnToDigest')}
             </Button>
           </div>
@@ -212,48 +510,81 @@ export default function ReviewWorkspace() {
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
         {/* LEFT COLUMN: Field Claim Provenance */}
         <div className="lg:col-span-4 space-y-6">
-          <Card className="bg-white dark:bg-[#001E60] border-slate-200 dark:border-blue-900/60 shadow-sm">
-            <CardHeader className="pb-3 border-b border-slate-100 dark:border-blue-900/40">
-              <CardTitle className="text-sm font-semibold flex items-center gap-2 text-slate-900 dark:text-slate-100">
-                <FileText className="w-4 h-4 text-blue-500" />
+          <Card>
+            <CardHeader className="pb-3 border-b border-border">
+              <CardTitle className="text-sm font-semibold flex items-center gap-2 text-foreground">
+                <FileText className="w-4 h-4 text-accent" />
                 {t('review.provenanceTitle')}
               </CardTitle>
             </CardHeader>
             <CardContent className="pt-4 space-y-4 text-xs">
-              <div className="p-3 bg-slate-50 dark:bg-[#001438] rounded-xl border border-slate-200 dark:border-blue-900/60 font-semibold text-slate-900 dark:text-slate-100 leading-relaxed">
+              <div className="p-3 bg-card-subtle rounded-xl border border-border font-medium text-foreground leading-relaxed">
                 "{event.raw_claim_text}"
               </div>
 
-              <div className="grid grid-cols-2 gap-3 text-slate-600 dark:text-slate-400">
+              <div className="grid grid-cols-2 gap-3 text-muted-foreground">
                 <div>
-                  <span className="text-[10px] uppercase font-bold text-slate-500 block">{t('review.discipline')}</span>
-                  <span className="font-mono text-slate-900 dark:text-slate-100 font-bold">{event.discipline || t('review.unassigned')}</span>
+                  <div className="flex items-center gap-1.5 mb-0.5">
+                    <span className="text-[10px] uppercase font-bold text-muted-foreground block">{t('review.discipline')}</span>
+                    <FieldProvenanceBadge provenance={event.field_provenance?.discipline} />
+                  </div>
+                  <span className="font-mono text-foreground font-bold">{event.discipline || t('review.unassigned')}</span>
                 </div>
                 <div>
-                  <span className="text-[10px] uppercase font-bold text-slate-500 block">{t('review.channel')}</span>
-                  <span className="font-mono text-[#FC4C02] font-bold">{event.input_channel}</span>
+                  <span className="text-[10px] uppercase font-bold text-muted-foreground block mb-1">{t('review.channel')}</span>
+                  <ProvenanceBadge channel={event.input_channel} size="sm" />
                 </div>
                 <div>
-                  <span className="text-[10px] uppercase font-bold text-slate-500 block">{t('review.claimMode')}</span>
-                  <span className="font-mono text-slate-900 dark:text-slate-100">{event.claim_mode}</span>
+                  <div className="flex items-center gap-1.5 mb-0.5">
+                    <span className="text-[10px] uppercase font-bold text-muted-foreground block">{t('review.claimMode')}</span>
+                    <FieldProvenanceBadge provenance={event.field_provenance?.claim_mode} />
+                  </div>
+                  <span className="font-mono text-foreground">{event.claim_mode}</span>
                 </div>
                 <div>
-                  <span className="text-[10px] uppercase font-bold text-slate-500 block">{t('review.eventType')}</span>
-                  <span className="font-mono text-slate-900 dark:text-slate-100">{event.event_type}</span>
+                  <div className="flex items-center gap-1.5 mb-0.5">
+                    <span className="text-[10px] uppercase font-bold text-muted-foreground block">{t('review.eventType')}</span>
+                    <FieldProvenanceBadge provenance={event.field_provenance?.event_type} />
+                  </div>
+                  <span className="font-mono text-foreground">{event.event_type}</span>
                 </div>
                 <div>
-                  <span className="text-[10px] uppercase font-bold text-slate-500 block">{t('review.location')}</span>
-                  <span className="text-slate-900 dark:text-slate-100">{event.location || t('review.notAvailable')}</span>
+                  <div className="flex items-center gap-1.5 mb-0.5">
+                    <span className="text-[10px] uppercase font-bold text-muted-foreground block">{t('review.location')}</span>
+                    <FieldProvenanceBadge provenance={event.field_provenance?.location} />
+                  </div>
+                  <span className="text-foreground">{event.location || t('review.notAvailable')}</span>
                 </div>
                 <div>
-                  <span className="text-[10px] uppercase font-bold text-slate-500 block">{t('review.assetTag')}</span>
-                  <span className="font-mono text-slate-900 dark:text-slate-100">{event.asset_tag || t('review.notAvailable')}</span>
+                  <div className="flex items-center gap-1.5 mb-0.5">
+                    <span className="text-[10px] uppercase font-bold text-muted-foreground block">{t('review.assetTag')}</span>
+                    <FieldProvenanceBadge provenance={event.field_provenance?.asset_tag} />
+                  </div>
+                  <span className="font-mono text-foreground">{event.asset_tag || t('review.notAvailable')}</span>
                 </div>
               </div>
 
+              {/* Source Evidence Context */}
+              <SourceReferenceCard event={event} />
+
+              {/* Feature 32: Smart Priority Reasoning Callout */}
+              {event.priority_reasons && event.priority_reasons.length > 0 && (
+                <div className="p-3 rounded-xl bg-red-500/10 border border-red-500/30 text-foreground space-y-1.5">
+                  <div className="flex items-center gap-1.5 text-xs font-bold text-red-600 dark:text-red-400">
+                    <Flame className="w-4 h-4 text-red-500" />
+                    <span>Priority Ranking Factors</span>
+                  </div>
+                  <ul className="list-disc list-inside text-[11px] text-muted-foreground space-y-0.5">
+                    {event.priority_reasons.map((reason, idx) => (
+                      <li key={idx}>{reason}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+
               {event.delay_reason && (
-                <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-800 dark:text-amber-300 space-y-1">
-                  <span className="font-bold text-[10px] uppercase block text-amber-600 dark:text-amber-400">{t('review.statedDelayReason')}</span>
+                <div className="p-3 rounded-xl bg-status-warning/10 border border-status-warning/30 text-foreground space-y-1">
+                  <span className="font-bold text-[10px] uppercase block text-status-warning">{t('review.statedDelayReason')}</span>
                   <p className="text-xs">{event.delay_reason}</p>
                 </div>
               )}
@@ -261,25 +592,25 @@ export default function ReviewWorkspace() {
           </Card>
 
           {/* Validation & Conflict Checks */}
-          <Card className="bg-white dark:bg-[#001E60] border-slate-200 dark:border-blue-900/60 shadow-sm">
-            <CardHeader className="pb-3 border-b border-slate-100 dark:border-blue-900/40">
-              <CardTitle className="text-sm font-semibold flex items-center gap-2 text-slate-900 dark:text-slate-100">
-                <ShieldAlert className="w-4 h-4 text-amber-500" />
+          <Card>
+            <CardHeader className="pb-3 border-b border-border">
+              <CardTitle className="text-sm font-semibold flex items-center gap-2 text-foreground">
+                <ShieldAlert className="w-4 h-4 text-status-warning" />
                 {t('review.validationTitle')}
               </CardTitle>
             </CardHeader>
             <CardContent className="pt-4 space-y-3 text-xs">
               {issues.length === 0 && conflicts.length === 0 ? (
-                <div className="p-3 bg-emerald-500/10 border border-emerald-500/30 text-emerald-800 dark:text-emerald-300 rounded-xl flex items-center gap-2">
-                  <CheckCircle2 className="w-4 h-4 text-emerald-500" />
-                  <span>{t('review.noWarnings')}</span>
+                <div className="p-3 bg-status-approved/10 border border-status-approved/30 text-status-approved rounded-xl flex items-center gap-2">
+                  <CheckCircle2 className="w-4 h-4 text-status-approved" />
+                  <span className="font-semibold">{t('review.noWarnings')}</span>
                 </div>
               ) : (
                 <>
                   {issues.map((iss) => (
-                    <div key={iss.issue_id} className="p-3 bg-amber-500/10 border border-amber-500/30 text-amber-800 dark:text-amber-300 rounded-xl space-y-1">
-                      <div className="font-bold text-[10px] uppercase flex items-center gap-1.5">
-                        <AlertTriangle className="w-3.5 h-3.5 text-amber-500" />
+                    <div key={iss.issue_id} className="p-3 bg-status-warning/10 border border-status-warning/30 text-foreground rounded-xl space-y-1">
+                      <div className="font-bold text-[10px] uppercase flex items-center gap-1.5 text-status-warning">
+                        <AlertTriangle className="w-3.5 h-3.5" />
                         {iss.rule_code || 'RULE_WARNING'}
                       </div>
                       <p className="text-xs">{iss.description}</p>
@@ -287,8 +618,8 @@ export default function ReviewWorkspace() {
                   ))}
 
                   {conflicts.map((cnf) => (
-                    <div key={cnf.conflict_id} className="p-3 bg-rose-500/10 border border-rose-500/30 text-rose-800 dark:text-rose-300 rounded-xl space-y-1">
-                      <div className="font-bold text-[10px] uppercase flex items-center gap-1.5 text-rose-600 dark:text-rose-400">
+                    <div key={cnf.conflict_id} className="p-3 bg-status-error/10 border border-status-error/30 text-foreground rounded-xl space-y-1">
+                      <div className="font-bold text-[10px] uppercase flex items-center gap-1.5 text-status-error">
                         <ShieldAlert className="w-3.5 h-3.5" />
                         {t('review.duplicateClaim', { variance: cnf.variance_pct })}
                       </div>
@@ -303,106 +634,177 @@ export default function ReviewWorkspace() {
           </Card>
         </div>
 
-        {/* MIDDLE COLUMN: Top 3 AI Matches */}
-        <div className="lg:col-span-4 space-y-6">
-          <Card className="bg-white dark:bg-[#001E60] border-slate-200 dark:border-blue-900/60 shadow-sm">
-            <CardHeader className="pb-3 border-b border-slate-100 dark:border-blue-900/40">
-              <CardTitle className="text-sm font-semibold flex items-center justify-between text-slate-900 dark:text-slate-100">
-                <span className="flex items-center gap-2">
-                  <Sparkles className="w-4 h-4 text-purple-500" />
-                  {t('review.topMatchesTitle')}
-                </span>
-                <span className="text-[10px] bg-purple-500/10 text-purple-700 dark:text-purple-300 border border-purple-500/30 px-2 py-0.5 rounded-full font-mono font-bold">
-                  {t('review.faissMatching')}
-                </span>
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="pt-4 space-y-3">
-              {candidates.map((cand) => {
-                const isSelected = selectedActivityId === cand.activity_id;
-                const confidencePct = Math.round(cand.composite_confidence * 100);
+        {/* MIDDLE COLUMN: Match Selection & WBS Granularity Bridge */}
+        <div className="lg:col-span-4 space-y-4">
+          {/* Mode Switcher */}
+          <div className="flex items-center bg-card-subtle p-1 rounded-xl border border-border">
+            <button
+              type="button"
+              onClick={() => setMatchMode('direct')}
+              className={cn(
+                'flex-1 flex items-center justify-center gap-1.5 py-1.5 text-xs font-semibold rounded-lg transition-all',
+                matchMode === 'direct'
+                  ? 'bg-gradient-to-r from-[#FF7A18] to-[#FF941F] text-white shadow-xs'
+                  : 'text-muted-foreground hover:text-foreground'
+              )}
+            >
+              <Sparkles className="w-3.5 h-3.5" />
+              Direct Match
+            </button>
+            <button
+              type="button"
+              onClick={() => setMatchMode('split')}
+              className={cn(
+                'flex-1 flex items-center justify-center gap-1.5 py-1.5 text-xs font-semibold rounded-lg transition-all',
+                matchMode === 'split'
+                  ? 'bg-gradient-to-r from-[#FF7A18] to-[#FF941F] text-white shadow-xs'
+                  : 'text-muted-foreground hover:text-foreground'
+              )}
+            >
+              <Layers className="w-3.5 h-3.5" />
+              WBS Split Allocation
+            </button>
+          </div>
 
-                return (
-                  <div
-                    key={cand.candidate_id}
-                    onClick={() => setSelectedActivityId(cand.activity_id)}
-                    className={cn(
-                      'p-4 rounded-xl border transition-all cursor-pointer relative space-y-2.5 shadow-sm',
-                      isSelected
-                        ? 'bg-purple-500/10 dark:bg-purple-950/40 border-purple-500 font-semibold'
-                        : 'bg-slate-50 dark:bg-[#001438] border-slate-200 dark:border-blue-900/60 hover:border-purple-400'
-                    )}
-                  >
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        <span className="text-[10px] font-bold bg-slate-200 dark:bg-slate-800 text-slate-800 dark:text-slate-200 px-2 py-0.5 rounded-md font-mono">
-                          #{cand.rank_order}
-                        </span>
-                        <span className="font-mono font-bold text-sm text-slate-900 dark:text-slate-100">{cand.activity_id}</span>
-                        {cand.match_tier && (
-                          <span className="text-[10px] font-bold bg-purple-500/10 text-purple-700 dark:text-purple-300 border border-purple-500/30 px-1.5 py-0.5 rounded font-mono uppercase">
-                            {cand.match_tier}
-                          </span>
+          {matchMode === 'split' ? (
+            <WBSSplitEditor
+              claim={event}
+              activities={activities}
+              onSuccess={() => {
+                setDecisionSuccess(true);
+                loadQueue();
+              }}
+              onCancel={() => setMatchMode('direct')}
+            />
+          ) : (
+            <div className="space-y-4">
+              <Card>
+                <CardHeader className="pb-3 border-b border-border">
+                  <CardTitle className="text-sm font-semibold flex items-center justify-between text-foreground">
+                    <span className="flex items-center gap-2">
+                      <Sparkles className="w-4 h-4 text-primary" />
+                      {t('review.topMatchesTitle')}
+                    </span>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setIsAskWhyOpen((prev) => !prev)}
+                        className={cn(
+                          'inline-flex items-center gap-1 text-[10px] font-bold px-2.5 py-0.5 rounded-full border transition-all cursor-pointer',
+                          isAskWhyOpen
+                            ? 'bg-[#1565C0] text-white border-[#1565C0] shadow-xs'
+                            : 'bg-blue-50 dark:bg-blue-950/60 text-[#003087] dark:text-blue-300 border-blue-200 dark:border-blue-900/60 hover:bg-blue-100 dark:hover:bg-blue-900/80'
                         )}
+                        title="Explain graph reasoning for this match"
+                      >
+                        <HelpCircle className="w-3 h-3" />
+                        Ask Why
+                      </button>
+                      <span className="text-[10px] bg-primary/10 text-primary border border-primary/30 px-2 py-0.5 rounded-full font-mono font-bold">
+                        {t('review.faissMatching')}
+                      </span>
+                    </div>
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="pt-4 space-y-3">
+                {candidates.map((cand) => {
+                  const isSelected = selectedActivityId === cand.activity_id;
+
+                  return (
+                    <div
+                      key={cand.candidate_id}
+                      onClick={() => setSelectedActivityId(cand.activity_id)}
+                      className={cn(
+                        'p-4 rounded-xl border transition-all cursor-pointer relative space-y-2.5 shadow-xs',
+                        isSelected
+                          ? 'bg-primary/5 border-primary shadow-sm ring-1 ring-primary'
+                          : 'bg-card border-border hover:border-primary/60'
+                      )}
+                    >
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <span className="text-[10px] font-bold bg-muted text-muted-foreground px-2 py-0.5 rounded-md font-mono">
+                            #{cand.rank_order}
+                          </span>
+                          <span className="font-mono font-bold text-sm text-foreground">{cand.activity_id}</span>
+                          {cand.match_tier && (
+                            <span className="text-[10px] font-bold bg-primary/10 text-primary border border-primary/30 px-1.5 py-0.5 rounded font-mono uppercase">
+                              {cand.match_tier}
+                            </span>
+                          )}
+                        </div>
+
+                        <div className="flex items-center gap-1.5">
+                          {isSelected && <Check className="w-4 h-4 text-primary font-bold" />}
+                        </div>
                       </div>
 
-                      <div className="flex items-center gap-1.5">
-                        <span className="text-[11px] font-bold font-mono text-purple-600 dark:text-purple-300">{confidencePct}% ({cand.composite_confidence.toFixed(2)})</span>
-                        {isSelected && <Check className="w-4 h-4 text-purple-600 dark:text-purple-400" />}
+                      {/* Integrated ConfidenceBar */}
+                      <ConfidenceBar score={cand.composite_confidence} />
+
+                      <div className="grid grid-cols-4 gap-1 text-[10px] font-mono text-muted-foreground pt-2 border-t border-border/60">
+                        <div>{t('review.semShort')}: <span className="font-bold text-foreground">{Math.round((cand.semantic_score || 0) * 100)}%</span></div>
+                        <div>{t('review.fuzShort')}: <span className="font-bold text-foreground">{Math.round((cand.fuzzy_score || 0) * 100)}%</span></div>
+                        <div>{t('review.locShort')}: <span className="font-bold text-foreground">{Math.round((cand.location_score || 0) * 100)}%</span></div>
+                        <div>{t('review.disShort')}: <span className="font-bold text-foreground">{Math.round((cand.discipline_score || 0) * 100)}%</span></div>
                       </div>
-                    </div>
 
-                    <div className="grid grid-cols-4 gap-1 text-[10px] font-mono text-slate-500 dark:text-slate-400 pt-1 border-t border-slate-200 dark:border-blue-900/40">
-                      <div>{t('review.semShort')}: <span className="font-bold">{Math.round((cand.semantic_score || 0) * 100)}%</span></div>
-                      <div>{t('review.fuzShort')}: <span className="font-bold">{Math.round((cand.fuzzy_score || 0) * 100)}%</span></div>
-                      <div>{t('review.locShort')}: <span className="font-bold">{Math.round((cand.location_score || 0) * 100)}%</span></div>
-                      <div>{t('review.disShort')}: <span className="font-bold">{Math.round((cand.discipline_score || 0) * 100)}%</span></div>
+                      {cand.supporting_signals && (
+                        <p className="text-[11px] text-status-approved leading-tight">
+                          ✓ {cand.supporting_signals}
+                        </p>
+                      )}
                     </div>
+                  );
+                })}
+              </CardContent>
+            </Card>
 
-                    {cand.supporting_signals && (
-                      <p className="text-[11px] text-emerald-600 dark:text-emerald-400 leading-tight">
-                        ✓ {cand.supporting_signals}
-                      </p>
-                    )}
-                  </div>
-                );
-              })}
-            </CardContent>
-          </Card>
-        </div>
+            {isAskWhyOpen && (
+              <AskWhyPanel
+                eventId={event.event_id}
+                selectedActivityId={selectedActivityId}
+                onClose={() => setIsAskWhyOpen(false)}
+              />
+            )}
+          </div>
+        )}
+      </div>
 
         {/* RIGHT COLUMN: Human Supervisor Action Form */}
         <div className="lg:col-span-4 space-y-6">
-          <Card className="bg-white dark:bg-[#001E60] border-2 border-[#FC4C02]/60 shadow-lg">
-            <CardHeader className="pb-3 border-b border-slate-100 dark:border-blue-900/50">
-              <CardTitle className="text-sm font-bold flex items-center gap-2 text-slate-900 dark:text-white">
-                <CheckCircle2 className="w-4 h-4 text-[#FC4C02]" />
+          <Card className="border-2 border-primary/60 shadow-md">
+            <CardHeader className="pb-3 border-b border-border">
+              <CardTitle className="text-sm font-bold flex items-center gap-2 text-foreground">
+                <CheckCircle2 className="w-4 h-4 text-primary" />
                 {t('review.decisionTitle')}
               </CardTitle>
-              <CardDescription className="text-slate-500 dark:text-blue-200/80 text-xs">
+              <CardDescription className="text-muted-foreground text-xs">
                 {t('review.decisionSubtitle')}
               </CardDescription>
             </CardHeader>
 
             <CardContent className="pt-4 space-y-4">
               {submitError && (
-                <div className="p-3 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-700 dark:text-rose-300 text-xs">
-                  {submitError}
-                </div>
+                <ErrorState
+                  message={submitError}
+                  onRetry={() => setSubmitError(null)}
+                  retryText="Dismiss"
+                />
               )}
 
               <form onSubmit={handleSubmitDecision} className="space-y-4 text-xs">
                 <div className="space-y-1.5">
-                  <Label className="text-xs text-slate-700 dark:text-slate-200 font-bold">{t('review.selectedActivity')}</Label>
+                  <Label className="text-xs text-foreground font-bold">{t('review.selectedActivity')}</Label>
                   <Input
                     value={selectedActivityId}
                     onChange={(e) => setSelectedActivityId(e.target.value)}
-                    className="bg-slate-50 dark:bg-[#001438] border-slate-300 dark:border-blue-800 font-mono text-[#FC4C02] font-bold text-sm h-9 rounded-xl"
+                    className="font-mono text-primary font-bold text-sm h-9 rounded-lg"
                   />
                 </div>
 
                 <div className="space-y-1.5">
-                  <Label className="text-xs text-slate-700 dark:text-slate-200 font-bold">{t('review.actionType')}</Label>
+                  <Label className="text-xs text-foreground font-bold">{t('review.actionType')}</Label>
                   <div className="grid grid-cols-2 gap-2">
                     {(['APPROVE', 'EDIT', 'HOLD', 'REJECT'] as DecisionAction[]).map((act) => (
                       <button
@@ -410,16 +812,16 @@ export default function ReviewWorkspace() {
                         type="button"
                         onClick={() => setAction(act)}
                         className={cn(
-                          'p-2.5 rounded-xl border text-xs font-bold transition-all text-center uppercase tracking-wider',
+                          'p-2.5 rounded-lg border text-xs font-bold transition-all text-center uppercase tracking-wider cursor-pointer',
                           action === act
                             ? act === 'APPROVE'
-                              ? 'bg-emerald-600 border-emerald-500 text-white shadow-md'
+                              ? 'bg-emerald-600 border-emerald-600 text-white shadow-xs'
                               : act === 'EDIT'
-                              ? 'bg-[#FC4C02] border-[#FC4C02] text-white shadow-md'
+                              ? 'bg-[#1565C0] border-[#1565C0] text-white shadow-xs'
                               : act === 'HOLD'
-                              ? 'bg-amber-600 border-amber-500 text-white shadow-md'
-                              : 'bg-rose-600 border-rose-500 text-white shadow-md'
-                            : 'bg-slate-50 dark:bg-[#001438] border-slate-200 dark:border-blue-800 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-blue-950'
+                              ? 'bg-amber-600 border-amber-600 text-white shadow-xs'
+                              : 'bg-rose-600 border-rose-600 text-white shadow-xs'
+                            : 'bg-card border-border text-foreground hover:bg-card-subtle'
                         )}
                       >
                         {act === 'APPROVE'
@@ -435,46 +837,47 @@ export default function ReviewWorkspace() {
                 </div>
 
                 {action === 'EDIT' && (
-                  <div className="grid grid-cols-2 gap-3 p-3 bg-slate-50 dark:bg-[#001438] rounded-xl border border-slate-200 dark:border-blue-800">
+                  <div className="grid grid-cols-2 gap-3 p-3 bg-card-subtle rounded-xl border border-border">
                     <div className="space-y-1">
-                      <Label className="text-[11px] text-slate-600 dark:text-slate-400">{t('review.approvedPct')}</Label>
+                      <Label className="text-[11px] text-muted-foreground">{t('review.approvedPct')}</Label>
                       <Input
                         type="number"
                         value={approvedPct}
                         onChange={(e) => setApprovedPct(e.target.value !== '' ? Number(e.target.value) : '')}
-                        className="bg-white dark:bg-[#001E60] border-slate-300 dark:border-blue-700 text-slate-900 dark:text-slate-100 font-mono h-8"
+                        className="font-mono h-8"
                       />
                     </div>
                     <div className="space-y-1">
-                      <Label className="text-[11px] text-slate-600 dark:text-slate-400">{t('review.approvedQty')}</Label>
+                      <Label className="text-[11px] text-muted-foreground">{t('review.approvedQty')}</Label>
                       <Input
                         type="number"
                         value={approvedQty}
                         onChange={(e) => setApprovedQty(e.target.value !== '' ? Number(e.target.value) : '')}
-                        className="bg-white dark:bg-[#001E60] border-slate-300 dark:border-blue-700 text-slate-900 dark:text-slate-100 font-mono h-8"
+                        className="font-mono h-8"
                       />
                     </div>
                   </div>
                 )}
 
                 <div className="space-y-1.5">
-                  <Label className="text-xs text-slate-700 dark:text-slate-200 font-bold flex items-center justify-between">
+                  <Label className="text-xs text-foreground font-bold flex items-center justify-between">
                     <span>{t('review.justification')}</span>
-                    <span className="text-[10px] text-rose-500 uppercase font-bold">{t('review.mandatory')}</span>
+                    <span className="text-[10px] text-destructive uppercase font-bold">{t('review.mandatory')}</span>
                   </Label>
                   <Textarea
                     rows={4}
                     placeholder={t('review.justificationPlaceholder')}
                     value={justification}
                     onChange={(e) => setJustification(e.target.value)}
-                    className="bg-slate-50 dark:bg-[#001438] border-slate-300 dark:border-blue-800 text-slate-900 dark:text-slate-100 text-xs rounded-xl"
+                    className="text-xs"
                   />
                 </div>
 
                 <Button
                   type="submit"
                   disabled={isSubmitting || decisionSuccess}
-                  className="w-full bg-[#FC4C02] hover:bg-[#e04302] text-white font-bold h-10 shadow-lg shadow-[#FC4C02]/25 rounded-xl"
+                  isLoading={isSubmitting}
+                  className="w-full font-bold h-10 shadow-xs"
                 >
                   {isSubmitting ? t('review.recordingDecision') : t('review.commitDecision')}
                 </Button>
@@ -482,6 +885,47 @@ export default function ReviewWorkspace() {
             </CardContent>
           </Card>
         </div>
+      </div>
+
+      {/* Feature 31: Multi-Source Evidence Fusion & Construction Knowledge Graph Section */}
+      <div className="space-y-4 pt-4 border-t border-border">
+        <div className="flex items-center justify-between flex-wrap gap-3">
+          <div className="flex items-center gap-2 bg-card p-1 rounded-xl border border-border">
+            <button
+              type="button"
+              onClick={() => setBottomTab('evidence')}
+              className={cn(
+                'flex items-center gap-2 px-3.5 py-2 text-xs font-bold rounded-lg border transition-all',
+                bottomTab === 'evidence'
+                  ? 'bg-blue-50 dark:bg-blue-950/60 border-blue-200 dark:border-blue-900 text-blue-700 dark:text-blue-300 shadow-xs'
+                  : 'bg-transparent border-transparent text-muted-foreground hover:text-foreground'
+              )}
+            >
+              <ShieldCheck className="w-4 h-4 text-blue-500" />
+              Multi-Source Evidence Fusion
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setBottomTab('graph')}
+              className={cn(
+                'flex items-center gap-2 px-3.5 py-2 text-xs font-bold rounded-lg border transition-all cursor-pointer',
+                bottomTab === 'graph'
+                  ? 'bg-blue-50 dark:bg-blue-950/60 border-blue-200 dark:border-blue-900 text-[#003087] dark:text-blue-300 shadow-xs'
+                  : 'bg-transparent border-transparent text-muted-foreground hover:text-foreground'
+              )}
+            >
+              <Network className="w-4 h-4 text-[#1565C0]" />
+              Construction Knowledge Graph
+            </button>
+          </div>
+        </div>
+
+        {bottomTab === 'evidence' ? (
+          <EvidencePanel eventId={event.event_id} />
+        ) : (
+          <KnowledgeGraph eventId={event.event_id} />
+        )}
       </div>
     </div>
   );

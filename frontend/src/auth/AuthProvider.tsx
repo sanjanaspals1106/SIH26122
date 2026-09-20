@@ -72,13 +72,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   // Resolves the authenticated role/profile from the REAL backend --
   // never trusted from anything set client-side, in either auth mode.
   const hydrateFromBackend = async (email: string): Promise<User> => {
-    const profile = await authApi.getMe();
-    return {
+    const profile = await authApi.getMe(email);
+    const resolvedUser: User = {
       id: profile.id,
-      email,
-      full_name: profile.full_name,
+      email: email || profile.email,
+      full_name: profile.full_name || (profile.role === 'SUPERVISOR' ? 'Supervisor' : 'Site Engineer'),
       role: profile.role,
     };
+    localStorage.setItem('user', JSON.stringify(resolvedUser));
+    return resolvedUser;
   };
 
   useEffect(() => {
@@ -93,6 +95,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             localStorage.setItem(TOKEN_KEY, session.access_token);
             const restored = await hydrateFromBackend(session.user?.email ?? '');
             if (!cancelled) setUser(restored);
+          } else {
+            localStorage.removeItem(TOKEN_KEY);
+            localStorage.removeItem('user');
           }
         } else {
           const token = localStorage.getItem(TOKEN_KEY);
@@ -100,6 +105,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           if (token && email) {
             const restored = await hydrateFromBackend(email);
             if (!cancelled) setUser(restored);
+          } else {
+            localStorage.removeItem(TOKEN_KEY);
+            localStorage.removeItem(DEV_EMAIL_KEY);
+            localStorage.removeItem('user');
           }
         }
       } catch {
@@ -107,6 +116,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         // rather than getting stuck on a broken session.
         localStorage.removeItem(TOKEN_KEY);
         localStorage.removeItem(DEV_EMAIL_KEY);
+        localStorage.removeItem('user');
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -120,6 +130,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           localStorage.setItem(TOKEN_KEY, session.access_token);
         } else {
           localStorage.removeItem(TOKEN_KEY);
+          localStorage.removeItem('user');
           setUser(null);
         }
       });
@@ -148,6 +159,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         if (authError || !data.session) {
           throw new Error(authError?.message || 'Sign-in failed.');
         }
+        localStorage.removeItem('user');
         localStorage.setItem(TOKEN_KEY, data.session.access_token);
         const loggedInUser = await hydrateFromBackend(data.session.user?.email ?? emailTrimmed);
         setUser(loggedInUser);
@@ -159,6 +171,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (!account || account.password !== password) {
         throw new Error('Incorrect email or password.');
       }
+      localStorage.removeItem('user');
       const devToken = mintDevToken(account.id);
       localStorage.setItem(TOKEN_KEY, devToken);
       localStorage.setItem(DEV_EMAIL_KEY, emailTrimmed);
@@ -167,6 +180,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     } catch (err: any) {
       localStorage.removeItem(TOKEN_KEY);
       localStorage.removeItem(DEV_EMAIL_KEY);
+      localStorage.removeItem('user');
       const message = err?.message || 'Login failed.';
       setError(message);
       throw new Error(message);
@@ -181,6 +195,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
     localStorage.removeItem(TOKEN_KEY);
     localStorage.removeItem(DEV_EMAIL_KEY);
+    localStorage.removeItem('user');
     setUser(null);
   };
 

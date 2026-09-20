@@ -1,49 +1,48 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
-import { useAuth } from '@/auth/AuthProvider';
 import {
   Mic,
   MicOff,
   FileText,
   Upload,
-  Loader2,
   CheckCircle2,
   AlertTriangle,
-  XCircle,
-  Radio,
-  Paperclip,
-  ChevronRight,
-  RefreshCw,
-  Play,
-  Volume2,
   FileAudio,
-  Building2,
-  Sparkles,
   PlusCircle,
+  RotateCcw,
+  Sparkles,
+  Send,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
+import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
-import { claimsApi, ExecutionEvent, ClaimStatus } from '@/api';
+import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
+import { StatusBadge } from '@/components/StatusBadge';
+import { ErrorState } from '@/components/ui/error-state';
+import { claimsApi, ExecutionEvent } from '@/api';
 import { cn } from '@/lib/utils';
 
 type InputTab = 'text' | 'voice' | 'file';
 
+const MAX_TEXT_LENGTH = 2000;
+const MIN_TEXT_LENGTH = 10;
+const MAX_FILE_SIZE_BYTES = 25 * 1024 * 1024; // 25 MB
+const ACCEPTED_FILE_EXTS = ['.pdf', '.xlsx', '.xls', '.csv', '.txt', '.xer', '.jpg', '.jpeg', '.png'];
+
 export default function ClaimIntake() {
-  const { user } = useAuth();
-  const navigate = useNavigate();
   const { t } = useTranslation();
 
   const [activeTab, setActiveTab] = useState<InputTab>('text');
 
   // Text Tab State
   const [textValue, setTextValue] = useState('');
+  const [textError, setTextError] = useState<string | null>(null);
 
   // Voice Tab — Web Speech API
   const [isRecording, setIsRecording] = useState(false);
   const [voiceTranscript, setVoiceTranscript] = useState('');
-  const [speechError, setSpeechError] = useState<string | null>(null);
+  const [speechNotice, setSpeechNotice] = useState<string | null>(null);
   const recognitionRef = useRef<any>(null);
 
   // Voice Audio File Upload State
@@ -53,13 +52,20 @@ export default function ClaimIntake() {
 
   // File Tab State
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [fileError, setFileError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Pipeline Stepper State
+  // Pipeline Stepper State (0: Idle, 1: Submitting, 2: Matching, 3: Checking, 4: Complete)
   const [pipelineStep, setPipelineStep] = useState<number>(0);
   const [isProcessing, setIsProcessing] = useState(false);
+  const isSubmittingRef = useRef(false);
   const [createdEvents, setCreatedEvents] = useState<ExecutionEvent[]>([]);
   const [pipelineError, setPipelineError] = useState<string | null>(null);
+
+  // Feature 29: Adaptive Field Copilot (Clarification State)
+  const [clarificationAnswers, setClarificationAnswers] = useState<Record<string, string>>({});
+  const [clarifyingEventId, setClarifyingEventId] = useState<string | null>(null);
+  const [clarifyError, setClarifyError] = useState<Record<string, string | null>>({});
 
   // Web Speech API Initialization
   useEffect(() => {
@@ -81,7 +87,9 @@ export default function ClaimIntake() {
       };
 
       recognition.onerror = (err: any) => {
-        setSpeechError('Microphone / Speech recognition error: ' + err.error);
+        setSpeechNotice(err.error === 'not-allowed'
+          ? 'Microphone permission denied. Please allow microphone access or upload an audio file.'
+          : `Microphone error (${err.error}). Please type or upload an audio file.`);
         setIsRecording(false);
       };
 
@@ -91,14 +99,24 @@ export default function ClaimIntake() {
 
       recognitionRef.current = recognition;
     } else {
-      setSpeechError(t('intake.speechUnsupported'));
+      setSpeechNotice(t('intake.speechUnsupported'));
     }
+
+    return () => {
+      if (recognitionRef.current) {
+        try {
+          recognitionRef.current.stop();
+        } catch {
+          // ignore cleanup errors
+        }
+      }
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const toggleRecording = () => {
     if (!recognitionRef.current) {
-      setSpeechError(t('intake.speechUnsupported'));
+      setSpeechNotice(t('intake.speechUnsupported'));
       return;
     }
 
@@ -106,12 +124,12 @@ export default function ClaimIntake() {
       recognitionRef.current.stop();
       setIsRecording(false);
     } else {
-      setSpeechError(null);
+      setSpeechNotice(null);
       try {
         recognitionRef.current.start();
         setIsRecording(true);
       } catch (e: any) {
-        setSpeechError('Could not start recording: ' + e.message);
+        setSpeechNotice(`Could not start recording: ${e.message}`);
       }
     }
   };
@@ -121,7 +139,7 @@ export default function ClaimIntake() {
     if (file) {
       setAudioFile(file);
       setAudioUrl(URL.createObjectURL(file));
-      setVoiceTranscript(`[Uploaded Audio Log: ${file.name}] Ingested field audio recording.`);
+      setVoiceTranscript(`[Uploaded Audio: ${file.name}]`);
     }
   };
 
@@ -129,16 +147,123 @@ export default function ClaimIntake() {
     setAudioFile(null);
     if (audioUrl) URL.revokeObjectURL(audioUrl);
     setAudioUrl(null);
+    if (audioInputRef.current) audioInputRef.current.value = '';
   };
 
-  // Submit Claim & Execute Pipeline. A file upload can legitimately yield
-  // several claims at once (a multi-row daily report, a multi-sheet
-  // spreadsheet, a P6 export, a multi-section scanned diary) -- match/check
-  // run for every claim created, not just the first.
-  const runPipeline = async (claimText: string, file: File | null = null) => {
+  const handleFileSelect = (file: File | null) => {
+    if (!file) {
+      setSelectedFile(null);
+      setFileError(null);
+      return;
+    }
+
+    if (file.size > MAX_FILE_SIZE_BYTES) {
+      setFileError(t('intake.errFileTooLarge'));
+      setSelectedFile(null);
+      return;
+    }
+
+    const ext = '.' + file.name.split('.').pop()?.toLowerCase();
+    if (!ACCEPTED_FILE_EXTS.includes(ext)) {
+      setFileError(t('intake.errFileType'));
+      setSelectedFile(null);
+      return;
+    }
+
+    setFileError(null);
+    setSelectedFile(file);
+  };
+
+  const handleResetForm = () => {
+    setTextValue('');
+    setTextError(null);
+    setVoiceTranscript('');
+    removeAudioFile();
+    setSelectedFile(null);
+    setFileError(null);
+    if (fileInputRef.current) fileInputRef.current.value = '';
+    setPipelineStep(0);
+    setCreatedEvents([]);
+    setPipelineError(null);
+    setClarificationAnswers({});
+    setClarifyingEventId(null);
+    setClarifyError({});
+  };
+
+  const proceedMatchingAndChecking = async (events: ExecutionEvent[]) => {
     setIsProcessing(true);
     setPipelineError(null);
-    setPipelineStep(1); // Intake
+    try {
+      setPipelineStep(2); // Matching
+      await Promise.all(
+        events.map(async (ev) => {
+          const matchRes = await claimsApi.match(ev.event_id);
+          ev.status = matchRes.status;
+        })
+      );
+
+      setPipelineStep(3); // Checking
+      await Promise.all(
+        events.map(async (ev) => {
+          const checkRes = await claimsApi.check(ev.event_id);
+          ev.status = checkRes.status;
+        })
+      );
+
+      setPipelineStep(4); // Complete
+      setCreatedEvents([...events]);
+    } catch (err: any) {
+      setPipelineError(err.message || t('intake.pipelineFailed'));
+    } finally {
+      setIsProcessing(false);
+      isSubmittingRef.current = false;
+    }
+  };
+
+  const handleClarifySubmit = async (eventId: string) => {
+    const answer = clarificationAnswers[eventId]?.trim();
+    if (!answer) {
+      setClarifyError((prev) => ({ ...prev, [eventId]: 'Please provide a clarification answer before submitting.' }));
+      return;
+    }
+
+    try {
+      setClarifyingEventId(eventId);
+      setClarifyError((prev) => ({ ...prev, [eventId]: null }));
+
+      const { event: updatedEvent } = await claimsApi.clarify(eventId, answer);
+
+      const updatedList = createdEvents.map((ev) =>
+        ev.event_id === eventId
+          ? { ...ev, ...updatedEvent, clarification_status: 'ANSWERED' as const, clarification_answer: answer }
+          : ev
+      );
+      setCreatedEvents(updatedList);
+
+      // Check if all pending clarifications are now answered
+      const hasPending = updatedList.some((ev) => ev.clarification_status === 'PENDING');
+      if (!hasPending) {
+        // Resume pipeline: proceed to Matching -> Checking -> Complete!
+        await proceedMatchingAndChecking(updatedList);
+      }
+    } catch (err: any) {
+      setClarifyError((prev) => ({
+        ...prev,
+        [eventId]: err?.message || 'Failed to submit clarification response.',
+      }));
+    } finally {
+      setClarifyingEventId(null);
+    }
+  };
+
+  // Submit Claim & Execute Pipeline (Intake -> Match -> Check -> Complete)
+  const runPipeline = async (claimText: string, file: File | null = null) => {
+    if (isSubmittingRef.current) return;
+    isSubmittingRef.current = true;
+    setIsProcessing(true);
+    setPipelineError(null);
+    setCreatedEvents([]);
+    setPipelineStep(1); // Submitting (Intake)
 
     try {
       let events: ExecutionEvent[];
@@ -150,42 +275,40 @@ export default function ClaimIntake() {
         events = [res.event];
       }
 
-      setPipelineStep(2); // Extraction
-      await new Promise((r) => setTimeout(r, 600));
-
-      setPipelineStep(3); // Matching
-      await Promise.all(
-        events.map(async (ev) => {
-          const matchRes = await claimsApi.match(ev.event_id);
-          ev.status = matchRes.status;
-        })
-      );
-
-      setPipelineStep(4); // Checks
-      await Promise.all(
-        events.map(async (ev) => {
-          const checkRes = await claimsApi.check(ev.event_id);
-          ev.status = checkRes.status;
-        })
-      );
-
-      setPipelineStep(5); // Supervisor Review
       setCreatedEvents(events);
+
+      // Feature 29: If clarification is required, STOP BEFORE MATCHING
+      const hasPending = events.some((ev) => ev.clarification_status === 'PENDING');
+      if (hasPending) {
+        setPipelineStep(1);
+        setIsProcessing(false);
+        isSubmittingRef.current = false;
+        return;
+      }
+
+      // No pending clarification: proceed to Matching -> Checking -> Complete
+      await proceedMatchingAndChecking(events);
     } catch (err: any) {
       setPipelineError(err.message || t('intake.pipelineFailed'));
-    } finally {
       setIsProcessing(false);
+      isSubmittingRef.current = false;
     }
   };
 
   const handleSubmitText = () => {
-    if (!textValue.trim()) return;
-    runPipeline(textValue.trim());
+    const trimmed = textValue.trim();
+    if (trimmed.length < MIN_TEXT_LENGTH) {
+      setTextError(t('intake.errTextTooShort'));
+      return;
+    }
+    setTextError(null);
+    runPipeline(trimmed);
   };
 
   const handleSubmitVoice = () => {
-    if (!voiceTranscript.trim() && !audioFile) return;
-    runPipeline(voiceTranscript || `Voice upload: ${audioFile?.name}`, audioFile);
+    const trimmed = voiceTranscript.trim();
+    if (!trimmed && !audioFile) return;
+    runPipeline(trimmed || `Voice upload: ${audioFile?.name}`, audioFile);
   };
 
   const handleSubmitFile = () => {
@@ -193,310 +316,530 @@ export default function ClaimIntake() {
     runPipeline(`Uploaded document: ${selectedFile.name}`, selectedFile);
   };
 
+  const hasPendingClarification = createdEvents.some((ev) => ev.clarification_status === 'PENDING');
+
   const pipelineSteps = [
-    { title: t('intake.stepIntakeTitle'), desc: t('intake.stepIntakeDesc') },
-    { title: t('intake.stepExtractionTitle'), desc: t('intake.stepExtractionDesc') },
-    { title: t('intake.stepMatchingTitle'), desc: t('intake.stepMatchingDesc') },
+    {
+      title: t('intake.stepIntakeTitle'),
+      desc: hasPendingClarification ? 'Clarification requested from engineer' : t('intake.stepIntakeDesc'),
+    },
+    {
+      title: t('intake.stepMatchingTitle'),
+      desc: hasPendingClarification ? 'Paused until clarification answered' : t('intake.stepMatchingDesc'),
+    },
     { title: t('intake.stepChecksTitle'), desc: t('intake.stepChecksDesc') },
-    { title: t('intake.stepReviewTitle'), desc: t('intake.stepReviewDesc') },
+    { title: t('intake.stepCompleteTitle'), desc: t('intake.stepCompleteDesc') },
   ];
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 animate-in fade-in duration-200">
       {/* Header */}
-      <div>
-        <h1 className="text-2xl font-bold text-slate-100 tracking-tight flex items-center gap-2">
-          <PlusCircle className="w-6 h-6 text-indigo-400" />
-          {t('intake.title')}
-        </h1>
-        <p className="text-slate-400 text-xs mt-1">
-          {t('intake.subtitle')}
-        </p>
+      <div className="flex items-center gap-3">
+        <div className="w-8 h-8 rounded-full flex items-center justify-center bg-orange-100 dark:bg-orange-950/60 border border-orange-400/80 text-[#FF7A18] dark:text-[#FF941F] shrink-0 shadow-xs">
+          <PlusCircle className="w-5 h-5" />
+        </div>
+        <div>
+          <h1 className="text-2xl font-extrabold text-[#071A2D] dark:text-[#F5F7FA] tracking-tight">
+            {t('intake.title')}
+          </h1>
+          <p className="text-[#334155] dark:text-[#CBD5E1] text-xs font-semibold mt-0.5">
+            {t('intake.subtitle')}
+          </p>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-        {/* LEFT COLUMN: Input Form Tabs (7 Cols) */}
+        {/* LEFT COLUMN: Input Form (7 Cols) */}
         <div className="lg:col-span-7 space-y-6">
-          {/* Tab Selector */}
-          <div className="flex bg-slate-900 border border-slate-800 p-1.5 rounded-2xl gap-1">
-            <button
-              type="button"
-              onClick={() => setActiveTab('text')}
-              className={cn(
-                'flex-1 py-2 rounded-xl text-xs font-semibold flex items-center justify-center gap-2 transition-all',
-                activeTab === 'text'
-                  ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/20'
-                  : 'text-slate-400 hover:text-slate-200'
-              )}
-            >
-              <FileText className="w-4 h-4" /> {t('intake.tabText')}
-            </button>
+          <Tabs
+            value={activeTab}
+            onValueChange={(val) => setActiveTab(val as InputTab)}
+            className="w-full space-y-6"
+          >
+            {/* Tab Selector */}
+            <TabsList className="grid grid-cols-3 w-full h-12 p-1.5 bg-white/95 dark:bg-[#071A2D]/95 border border-slate-200/80 dark:border-[#214766] rounded-2xl shadow-md backdrop-blur-md">
+              <TabsTrigger
+                value="text"
+                className="text-xs font-bold gap-2 text-[#071A2D] dark:text-[#C5D2DE] data-[state=active]:bg-gradient-to-r data-[state=active]:from-[#FF7A18] data-[state=active]:to-[#FF941F] data-[state=active]:text-white transition-all rounded-xl h-9 shadow-xs hover:text-[#FF7A18] dark:hover:text-[#F5F7FA]"
+              >
+                <FileText className="w-4 h-4" /> {t('intake.tabText')}
+              </TabsTrigger>
+              <TabsTrigger
+                value="voice"
+                className="text-xs font-bold gap-2 text-[#071A2D] dark:text-[#C5D2DE] data-[state=active]:bg-gradient-to-r data-[state=active]:from-[#FF7A18] data-[state=active]:to-[#FF941F] data-[state=active]:text-white transition-all rounded-xl h-9 shadow-xs hover:text-[#FF7A18] dark:hover:text-[#F5F7FA]"
+              >
+                <Mic className="w-4 h-4" /> {t('intake.tabVoice')}
+              </TabsTrigger>
+              <TabsTrigger
+                value="file"
+                className="text-xs font-bold gap-2 text-[#071A2D] dark:text-[#C5D2DE] data-[state=active]:bg-gradient-to-r data-[state=active]:from-[#FF7A18] data-[state=active]:to-[#FF941F] data-[state=active]:text-white transition-all rounded-xl h-9 shadow-xs hover:text-[#FF7A18] dark:hover:text-[#F5F7FA]"
+              >
+                <Upload className="w-4 h-4" /> {t('intake.tabFile')}
+              </TabsTrigger>
+            </TabsList>
 
-            <button
-              type="button"
-              onClick={() => setActiveTab('voice')}
-              className={cn(
-                'flex-1 py-2 rounded-xl text-xs font-semibold flex items-center justify-center gap-2 transition-all',
-                activeTab === 'voice'
-                  ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/20'
-                  : 'text-slate-400 hover:text-slate-200'
-              )}
-            >
-              <Mic className="w-4 h-4" /> {t('intake.tabVoice')}
-            </button>
+            {/* TAB 1: TEXT UPDATE */}
+            <TabsContent value="text" className="mt-0 focus-visible:outline-none">
+              <Card className="border-slate-200/80 dark:border-[#214766] bg-white/95 dark:bg-[#071A2D]/95 shadow-xl rounded-2xl">
+                <CardHeader className="p-6 pb-4">
+                  <CardTitle className="text-base font-extrabold text-[#071A2D] dark:text-[#F5F7FA]">{t('intake.textCardTitle')}</CardTitle>
+                  <CardDescription className="text-[#334155] dark:text-[#C5D2DE] text-xs font-semibold mt-1">
+                    {t('intake.textCardDesc')}
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="p-6 pt-0 space-y-4">
+                  <div className="space-y-1.5">
+                    <div className="flex items-center justify-between">
+                      <Label htmlFor="claim-text-input" className="text-xs font-bold text-[#071A2D] dark:text-[#C5D2DE]">
+                        {t('intake.textLabel')}
+                      </Label>
+                      <span
+                        className={cn(
+                          'text-xs font-mono font-medium',
+                          textValue.length > MAX_TEXT_LENGTH ? 'text-destructive font-bold' : 'text-[#475569] dark:text-[#9FB2C3]'
+                        )}
+                      >
+                        {textValue.length} / {MAX_TEXT_LENGTH}
+                      </span>
+                    </div>
 
-            <button
-              type="button"
-              onClick={() => setActiveTab('file')}
-              className={cn(
-                'flex-1 py-2 rounded-xl text-xs font-semibold flex items-center justify-center gap-2 transition-all',
-                activeTab === 'file'
-                  ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/20'
-                  : 'text-slate-400 hover:text-slate-200'
-              )}
-            >
-              <Upload className="w-4 h-4" /> {t('intake.tabFile')}
-            </button>
-          </div>
+                    <Textarea
+                      id="claim-text-input"
+                      rows={5}
+                      maxLength={MAX_TEXT_LENGTH}
+                      value={textValue}
+                      onChange={(e) => {
+                        setTextValue(e.target.value);
+                        if (textError && e.target.value.trim().length >= MIN_TEXT_LENGTH) {
+                          setTextError(null);
+                        }
+                      }}
+                      placeholder="Describe site execution progress in detail..."
+                      aria-invalid={!!textError}
+                      aria-describedby={textError ? 'claim-text-error' : undefined}
+                      className={cn('text-sm rounded-xl p-3.5 bg-white dark:bg-[#0B2742] border-slate-300 dark:border-[#214766] text-[#071A2D] dark:text-[#F5F7FA] placeholder:text-slate-500 dark:placeholder:text-[#8FA6BA] font-medium focus-visible:ring-[#FF7A18] min-h-[140px]', textError && 'border-destructive focus-visible:ring-destructive')}
+                    />
 
-          {/* TAB 1: TEXT UPDATE */}
-          {activeTab === 'text' && (
-            <Card className="bg-slate-900 border-slate-800 text-slate-100">
-              <CardHeader>
-                <CardTitle className="text-sm font-semibold">{t('intake.textCardTitle')}</CardTitle>
-                <CardDescription className="text-slate-400 text-xs">
-                  {t('intake.textCardDesc')}
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <Textarea
-                  rows={5}
-                  value={textValue}
-                  onChange={(e) => setTextValue(e.target.value)}
-                  placeholder={t('intake.textPlaceholder')}
-                  className="bg-slate-950 border-slate-800 text-slate-100 focus:border-indigo-500 text-sm"
-                />
-
-                <Button
-                  onClick={handleSubmitText}
-                  disabled={isProcessing || !textValue.trim()}
-                  className="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-semibold h-10 shadow-lg shadow-indigo-600/20"
-                >
-                  {isProcessing ? t('intake.processingClaim') : t('intake.submitText')}
-                </Button>
-              </CardContent>
-            </Card>
-          )}
-
-          {/* TAB 2: VOICE INPUT & AUDIO FILE UPLOAD */}
-          {activeTab === 'voice' && (
-            <Card className="bg-slate-900 border-slate-800 text-slate-100">
-              <CardHeader>
-                <CardTitle className="text-sm font-semibold flex items-center justify-between">
-                  <span>{t('intake.voiceCardTitle')}</span>
-                  <span className="text-[10px] bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 px-2 py-0.5 rounded-full font-mono">
-                    {t('intake.liveRecognition')}
-                  </span>
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-5">
-                {speechError && (
-                  <div className="p-3 bg-amber-500/10 border border-amber-500/30 text-amber-300 text-xs rounded-xl">
-                    {speechError}
+                    {textError && (
+                      <p id="claim-text-error" role="alert" className="text-xs text-destructive font-semibold">
+                        {textError}
+                      </p>
+                    )}
                   </div>
-                )}
 
-                {/* Speech Button */}
-                <div className="flex flex-col items-center justify-center p-6 bg-slate-950/60 rounded-2xl border border-slate-800 space-y-3">
-                  <button
-                    type="button"
-                    onClick={toggleRecording}
+                  <Button
+                    onClick={handleSubmitText}
+                    disabled={isProcessing || !textValue.trim()}
+                    isLoading={isProcessing}
                     className={cn(
-                      'w-16 h-16 rounded-full flex items-center justify-center transition-all shadow-xl',
-                      isRecording
-                        ? 'bg-rose-600 text-white animate-pulse shadow-rose-600/40'
-                        : 'bg-indigo-600 text-white hover:bg-indigo-500 shadow-indigo-600/30'
+                      'w-full font-bold h-12 text-sm shadow-md shadow-orange-500/30 text-white rounded-xl transition-all',
+                      !textValue.trim() && !isProcessing
+                        ? 'bg-gradient-to-r from-[#FF7A18]/70 to-[#FF941F]/70 hover:from-[#FF7A18]/70 hover:to-[#FF941F]/70 cursor-not-allowed text-white'
+                        : 'bg-gradient-to-r from-[#FF7A18] to-[#FF941F] hover:from-[#E06810] hover:to-[#FF7A18] cursor-pointer'
                     )}
                   >
-                    {isRecording ? <MicOff className="w-8 h-8" /> : <Mic className="w-8 h-8" />}
-                  </button>
+                    {isProcessing ? t('intake.processingClaim') : t('intake.submitText')}
+                  </Button>
+                </CardContent>
+              </Card>
+            </TabsContent>
 
-                  <span className="text-xs text-slate-300 font-semibold">
-                    {isRecording ? t('intake.listening') : t('intake.clickToRecord')}
-                  </span>
-                </div>
+            {/* TAB 2: VOICE INPUT & AUDIO FILE UPLOAD */}
+            <TabsContent value="voice" className="mt-0 focus-visible:outline-none">
+              <Card className="border-slate-200/80 dark:border-[#214766] bg-white/95 dark:bg-[#071A2D]/95 shadow-xl rounded-2xl">
+                <CardHeader className="p-6 pb-4">
+                  <CardTitle className="text-base font-extrabold text-[#071A2D] dark:text-[#F5F7FA] flex items-center justify-between">
+                    <span>{t('intake.voiceCardTitle')}</span>
+                    <span className="text-[10px] bg-primary/10 text-primary border border-primary/30 px-2 py-0.5 rounded-full font-mono font-bold">
+                      {t('intake.liveRecognition')}
+                    </span>
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="p-6 pt-0 space-y-5">
+                  {speechNotice && (
+                    <div
+                      role="status"
+                      className="flex items-start justify-between gap-3 rounded-xl border border-amber-500/30 bg-amber-500/10 p-3.5 text-xs text-amber-900 dark:text-amber-200"
+                    >
+                      <div className="flex items-start gap-2.5">
+                        <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5 text-amber-600 dark:text-amber-400" />
+                        <div className="space-y-0.5">
+                          <span className="font-semibold block">{t('intake.speechWarningTitle')}</span>
+                          <span className="text-foreground/90">{speechNotice}</span>
+                        </div>
+                      </div>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => setSpeechNotice(null)}
+                        className="h-7 text-xs text-muted-foreground hover:text-foreground shrink-0"
+                      >
+                        {t('common.dismiss')}
+                      </Button>
+                    </div>
+                  )}
 
-                {/* Live Transcript Editable Area */}
-                <div className="space-y-1.5">
-                  <label className="text-xs text-slate-300 font-semibold">{t('intake.liveTranscript')}</label>
-                  <Textarea
-                    rows={4}
-                    value={voiceTranscript}
-                    onChange={(e) => setVoiceTranscript(e.target.value)}
-                    placeholder={t('intake.transcriptPlaceholder')}
-                    className="bg-slate-950 border-slate-800 text-slate-100 text-xs"
-                  />
-                </div>
+                  {/* Speech Button */}
+                  <div className="flex flex-col items-center justify-center p-6 bg-slate-50 dark:bg-[#0A2238] rounded-xl border border-slate-200 dark:border-[#214766] space-y-3">
+                    <button
+                      type="button"
+                      onClick={toggleRecording}
+                      aria-label={isRecording ? 'Stop recording voice claim' : 'Start recording voice claim'}
+                      className={cn(
+                        'w-16 h-16 rounded-full flex items-center justify-center transition-all shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 cursor-pointer',
+                        isRecording
+                          ? 'bg-rose-600 text-white animate-pulse'
+                          : 'bg-gradient-to-r from-[#FF7A18] to-[#FF941F] hover:from-[#E06810] hover:to-[#FF7A18] text-white shadow-orange-500/25'
+                      )}
+                    >
+                      {isRecording ? <MicOff className="w-8 h-8" /> : <Mic className="w-8 h-8" />}
+                    </button>
 
-                {/* Upload Audio File Section */}
-                <div className="pt-3 border-t border-slate-800 space-y-3">
-                  <span className="text-xs font-semibold text-slate-300 block">{t('intake.uploadAudioSection')}</span>
+                    <span className="text-xs text-[#071A2D] dark:text-[#C5D2DE] font-bold">
+                      {isRecording ? t('intake.listening') : t('intake.clickToRecord')}
+                    </span>
+                  </div>
+
+                  {/* Live Transcript Editable Area */}
+                  <div className="space-y-1.5">
+                    <Label htmlFor="voice-transcript-input" className="text-xs text-[#071A2D] dark:text-[#C5D2DE] font-bold">
+                      {t('intake.liveTranscript')}
+                    </Label>
+                    <Textarea
+                      id="voice-transcript-input"
+                      rows={4}
+                      value={voiceTranscript}
+                      onChange={(e) => setVoiceTranscript(e.target.value)}
+                      placeholder={t('intake.transcriptPlaceholder')}
+                      className="text-xs rounded-xl bg-white dark:bg-[#0B2742] border-slate-300 dark:border-[#214766] text-[#071A2D] dark:text-[#F5F7FA] placeholder:text-slate-500 dark:placeholder:text-[#8FA6BA] font-medium"
+                    />
+                  </div>
+
+                  {/* Upload Audio File Section */}
+                  <div className="pt-3 border-t border-slate-200 dark:border-[#214766] space-y-3">
+                    <span className="text-xs font-bold text-[#071A2D] dark:text-[#C5D2DE] block">{t('intake.uploadAudioSection')}</span>
+                    <input
+                      type="file"
+                      ref={audioInputRef}
+                      id="audio-file-input"
+                      accept="audio/*,.mp3,.wav,.m4a,.ogg,.webm"
+                      onChange={handleAudioFileChange}
+                      className="hidden"
+                    />
+
+                    {!audioFile ? (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        onClick={() => audioInputRef.current?.click()}
+                        className="w-full text-xs h-10 rounded-xl border-slate-300 dark:border-[#214766] text-[#071A2D] dark:text-[#F5F7FA] dark:bg-[#0A2238] hover:dark:bg-[#0D2942] font-bold"
+                      >
+                        <FileAudio className="w-4 h-4 mr-2 text-[#FF7A18]" />
+                        {t('intake.selectAudioFile')}
+                      </Button>
+                    ) : (
+                      <div className="p-3 bg-slate-50 dark:bg-[#0A2238] rounded-xl border border-slate-200 dark:border-[#214766] space-y-2 text-xs">
+                        <div className="flex items-center justify-between">
+                          <span className="font-mono font-bold text-[#071A2D] dark:text-[#F5F7FA] truncate">{audioFile.name}</span>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            onClick={removeAudioFile}
+                            className="h-6 text-xs text-destructive hover:bg-destructive/10 cursor-pointer font-bold"
+                          >
+                            {t('intake.removeAudio')}
+                          </Button>
+                        </div>
+                        {audioUrl && <audio src={audioUrl} controls className="w-full h-8" />}
+                      </div>
+                    )}
+                  </div>
+
+                  <Button
+                    onClick={handleSubmitVoice}
+                    disabled={isProcessing || (!voiceTranscript.trim() && !audioFile)}
+                    isLoading={isProcessing}
+                    className={cn(
+                      'w-full font-bold h-12 text-sm shadow-md shadow-orange-500/30 text-white rounded-xl transition-all',
+                      (!voiceTranscript.trim() && !audioFile) && !isProcessing
+                        ? 'bg-gradient-to-r from-[#FF7A18]/70 to-[#FF941F]/70 hover:from-[#FF7A18]/70 hover:to-[#FF941F]/70 cursor-not-allowed text-white'
+                        : 'bg-gradient-to-r from-[#FF7A18] to-[#FF941F] hover:from-[#E06810] hover:to-[#FF7A18] cursor-pointer'
+                    )}
+                  >
+                    {isProcessing ? t('intake.processingVoice') : t('intake.submitVoice')}
+                  </Button>
+                </CardContent>
+              </Card>
+            </TabsContent>
+
+            {/* TAB 3: FILE UPLOAD */}
+            <TabsContent value="file" className="mt-0 focus-visible:outline-none">
+              <Card className="border-slate-200/80 dark:border-[#214766] bg-white/95 dark:bg-[#071A2D]/95 shadow-xl rounded-2xl">
+                <CardHeader className="p-6 pb-4">
+                  <CardTitle className="text-base font-extrabold text-[#071A2D] dark:text-[#F5F7FA]">{t('intake.fileCardTitle')}</CardTitle>
+                  <CardDescription className="text-[#334155] dark:text-[#C5D2DE] text-xs font-semibold mt-1">
+                    {t('intake.fileCardDesc')}
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="p-6 pt-0 space-y-4">
                   <input
                     type="file"
-                    ref={audioInputRef}
-                    accept="audio/*,.mp3,.wav,.m4a,.ogg,.webm"
-                    onChange={handleAudioFileChange}
+                    ref={fileInputRef}
+                    id="doc-file-input"
+                    accept=".pdf,.xlsx,.xls,.csv,.txt,.xer,.jpg,.jpeg,.png"
+                    onChange={(e) => handleFileSelect(e.target.files?.[0] || null)}
                     className="hidden"
                   />
 
-                  {!audioFile ? (
-                    <Button
-                      type="button"
-                      variant="outline"
-                      onClick={() => audioInputRef.current?.click()}
-                      className="w-full bg-slate-950 border-slate-800 text-slate-300 hover:bg-slate-800 text-xs h-9"
-                    >
-                      <FileAudio className="w-4 h-4 mr-2 text-indigo-400" />
-                      {t('intake.selectAudioFile')}
-                    </Button>
-                  ) : (
-                    <div className="p-3 bg-slate-950 rounded-xl border border-slate-800 space-y-2 text-xs">
-                      <div className="flex items-center justify-between">
-                        <span className="font-mono font-bold text-indigo-300 truncate">{audioFile.name}</span>
-                        <Button variant="ghost" size="sm" onClick={removeAudioFile} className="h-6 text-xs text-rose-400">{t('intake.removeAudio')}</Button>
-                      </div>
-                      {audioUrl && <audio src={audioUrl} controls className="w-full h-8" />}
+                  <div
+                    role="button"
+                    tabIndex={0}
+                    aria-label={selectedFile ? `Selected file: ${selectedFile.name}. Click to change.` : 'Select document file to upload'}
+                    onClick={() => fileInputRef.current?.click()}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
+                        fileInputRef.current?.click();
+                      }
+                    }}
+                    className={cn(
+                      'border-2 border-dashed rounded-xl p-8 text-center cursor-pointer transition-all space-y-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2',
+                      fileError
+                        ? 'border-destructive bg-destructive/5'
+                        : selectedFile
+                        ? 'border-[#FF7A18] bg-orange-500/5'
+                        : 'border-slate-300 dark:border-[#214766] hover:border-[#FF7A18] bg-slate-50/50 dark:bg-[#0A2238]/60'
+                    )}
+                  >
+                    <Upload className={cn('w-8 h-8 mx-auto', selectedFile ? 'text-[#FF7A18]' : 'text-slate-400')} />
+                    <div className="text-xs text-[#071A2D] dark:text-[#F5F7FA] font-bold">
+                      {selectedFile ? selectedFile.name : t('intake.clickToBrowse')}
                     </div>
-                  )}
-                </div>
-
-                <Button
-                  onClick={handleSubmitVoice}
-                  disabled={isProcessing || (!voiceTranscript.trim() && !audioFile)}
-                  className="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-semibold h-10 shadow-lg shadow-indigo-600/20"
-                >
-                  {isProcessing ? t('intake.processingVoice') : t('intake.submitVoice')}
-                </Button>
-              </CardContent>
-            </Card>
-          )}
-
-          {/* TAB 3: FILE UPLOAD */}
-          {activeTab === 'file' && (
-            <Card className="bg-slate-900 border-slate-800 text-slate-100">
-              <CardHeader>
-                <CardTitle className="text-sm font-semibold">{t('intake.fileCardTitle')}</CardTitle>
-                <CardDescription className="text-slate-400 text-xs">
-                  {t('intake.fileCardDesc')}
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <input
-                  type="file"
-                  ref={fileInputRef}
-                  accept=".pdf,.xlsx,.xls,.csv,.txt,.xer,.jpg,.jpeg,.png"
-                  onChange={(e) => setSelectedFile(e.target.files?.[0] || null)}
-                  className="hidden"
-                />
-
-                <div
-                  onClick={() => fileInputRef.current?.click()}
-                  className="border-2 border-dashed border-slate-800 hover:border-indigo-500/60 bg-slate-950/60 rounded-2xl p-8 text-center cursor-pointer transition-all space-y-2"
-                >
-                  <Upload className="w-8 h-8 text-slate-500 mx-auto" />
-                  <div className="text-xs text-slate-300 font-semibold">
-                    {selectedFile ? selectedFile.name : t('intake.clickToBrowse')}
+                    <div className="text-[10px] text-[#475569] dark:text-[#9FB2C3] font-medium">{t('intake.supportedFormats')}</div>
                   </div>
-                  <div className="text-[10px] text-slate-500">{t('intake.supportedFormats')}</div>
-                </div>
 
-                <Button
-                  onClick={handleSubmitFile}
-                  disabled={isProcessing || !selectedFile}
-                  className="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-semibold h-10 shadow-lg shadow-indigo-600/20"
-                >
-                  {isProcessing ? t('intake.extractingDocument') : t('intake.ingestDocument')}
-                </Button>
-              </CardContent>
-            </Card>
-          )}
+                  {fileError && (
+                    <p role="alert" className="text-xs text-destructive font-semibold">
+                      {fileError}
+                    </p>
+                  )}
+
+                  <Button
+                    onClick={handleSubmitFile}
+                    disabled={isProcessing || !selectedFile}
+                    isLoading={isProcessing}
+                    className={cn(
+                      'w-full font-bold h-12 text-sm shadow-md shadow-orange-500/30 text-white rounded-xl transition-all',
+                      !selectedFile && !isProcessing
+                        ? 'bg-gradient-to-r from-[#FF7A18]/70 to-[#FF941F]/70 hover:from-[#FF7A18]/70 hover:to-[#FF941F]/70 cursor-not-allowed text-white'
+                        : 'bg-gradient-to-r from-[#FF7A18] to-[#FF941F] hover:from-[#E06810] hover:to-[#FF7A18] cursor-pointer'
+                    )}
+                  >
+                    {isProcessing ? t('intake.extractingDocument') : t('intake.ingestDocument')}
+                  </Button>
+                </CardContent>
+              </Card>
+            </TabsContent>
+          </Tabs>
         </div>
 
         {/* RIGHT COLUMN: Pipeline Stepper & Result (5 Cols) */}
         <div className="lg:col-span-5 space-y-6">
-          <Card className="bg-slate-900 border-slate-800 text-slate-100">
-            <CardHeader className="pb-3 border-b border-slate-800">
-              <CardTitle className="text-sm font-semibold flex items-center gap-2">
-                <Sparkles className="w-4 h-4 text-indigo-400" />
-                {t('intake.pipelineTitle')}
+          <Card className="border-slate-200/80 dark:border-[#214766] bg-white/95 dark:bg-[#071A2D]/95 shadow-xl rounded-2xl">
+            <CardHeader className="p-6 pb-4 border-b border-slate-300 dark:border-[#214766]/60">
+              <CardTitle className="text-base font-extrabold text-[#071A2D] dark:text-[#F5F7FA] flex items-center justify-between">
+                <span>{t('intake.pipelineTitle')}</span>
+                {pipelineStep > 0 && (
+                  <span className="text-xs font-mono text-[#334155] dark:text-[#9FB2C3] font-bold">
+                    {pipelineStep === 4 ? t('intake.stepCompleteTitle') : `${pipelineStep} / 4`}
+                  </span>
+                )}
               </CardTitle>
             </CardHeader>
 
-            <CardContent className="pt-6 space-y-6">
+            <CardContent className="p-6 space-y-6">
               {pipelineError && (
-                <div className="p-3 bg-rose-500/10 border border-rose-500/30 text-rose-300 text-xs rounded-xl">
-                  {pipelineError}
-                </div>
+                <ErrorState
+                  title="Submission Pipeline Error"
+                  message={pipelineError}
+                  onRetry={() => {
+                    setPipelineError(null);
+                    setPipelineStep(0);
+                  }}
+                  retryText={t('common.retry')}
+                />
               )}
 
-              {/* Stepper Display */}
-              <div className="space-y-4">
+              {/* Stepper Display with vertical connecting line */}
+              <div aria-live="polite" className="relative space-y-6">
+                {/* Vertical Connector line behind circular badges */}
+                <div className="absolute left-4 top-4 bottom-4 w-0.5 bg-slate-200 dark:bg-[#214766] -translate-x-1/2 z-0" />
+
                 {pipelineSteps.map((st, idx) => {
                   const stepNum = idx + 1;
                   const isCurrent = pipelineStep === stepNum;
-                  const isCompleted = pipelineStep > stepNum;
+                  const isCompleted = pipelineStep > stepNum || (pipelineStep === 4 && stepNum === 4);
 
                   return (
-                    <div key={idx} className="flex items-center gap-3">
+                    <div key={idx} className="relative z-10 flex items-start gap-3.5">
                       <div
                         className={cn(
-                          'w-8 h-8 rounded-full flex items-center justify-center font-mono text-xs font-bold shrink-0 transition-all',
+                          'w-8 h-8 rounded-full flex items-center justify-center font-mono text-xs font-bold shrink-0 transition-all shadow-xs',
                           isCompleted
-                            ? 'bg-emerald-600 text-white'
+                            ? 'bg-[#10B981] text-white'
                             : isCurrent
-                            ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-600/30 animate-pulse'
-                            : 'bg-slate-950 text-slate-500 border border-slate-800'
+                            ? 'bg-[#0284C7] text-white shadow-md shadow-blue-500/30 animate-pulse'
+                            : 'bg-[#0284C7] text-white'
                         )}
                       >
                         {isCompleted ? <CheckCircle2 className="w-4 h-4" /> : stepNum}
                       </div>
 
-                      <div className="flex-1">
-                        <div className={cn('text-xs font-semibold', isCurrent ? 'text-indigo-600 dark:text-indigo-300' : isCompleted ? 'text-slate-800 dark:text-slate-200' : 'text-slate-500')}>
+                      <div className="flex-1 pt-0.5">
+                        <div
+                          className={cn(
+                            'text-xs font-extrabold leading-tight',
+                            isCurrent
+                              ? 'text-[#0284C7] dark:text-[#38BDF8]'
+                              : isCompleted
+                              ? 'text-[#071A2D] dark:text-[#F5F7FA]'
+                              : 'text-[#071A2D] dark:text-[#F5F7FA]'
+                          )}
+                        >
                           {st.title}
                         </div>
-                        <div className="text-[10px] text-slate-500">{st.desc}</div>
+                        <div className="text-[11px] text-[#334155] dark:text-[#C5D2DE] font-semibold mt-0.5">{st.desc}</div>
                       </div>
                     </div>
                   );
                 })}
               </div>
 
-              {/* Created Events Result Card(s) -- a file upload can yield
-                  several claims at once (a multi-row report, a multi-sheet
-                  spreadsheet, a P6 export), so this lists every claim
-                  created, not just one. */}
+              {/* Created Events Result Card with Trust Framing */}
               {createdEvents.length > 0 && (
-                <div className="p-4 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-900 dark:text-emerald-200 space-y-3 animate-in fade-in duration-300">
-                  <div className="flex items-center gap-2 text-xs font-bold text-emerald-800 dark:text-emerald-300">
-                    <CheckCircle2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
-                    {t('intake.ingestionComplete')} — {createdEvents.length === 1 ? t('intake.oneClaim') : t('intake.nClaims', { count: createdEvents.length })} {t('intake.queuedForSupervisor')}
+                <div
+                  className={cn(
+                    'p-4 rounded-xl border text-foreground space-y-3 animate-in fade-in duration-300',
+                    hasPendingClarification
+                      ? 'bg-amber-500/10 border-amber-500/30'
+                      : 'bg-status-approved/10 dark:bg-emerald-950/30 border-status-approved/30 dark:border-emerald-800/40'
+                  )}
+                >
+                  <div
+                    className={cn(
+                      'flex items-start gap-2 text-xs font-bold',
+                      hasPendingClarification ? 'text-amber-600 dark:text-amber-400' : 'text-status-approved'
+                    )}
+                  >
+                    {hasPendingClarification ? (
+                      <Sparkles className="w-4 h-4 shrink-0 mt-0.5 text-amber-500" />
+                    ) : (
+                      <CheckCircle2 className="w-4 h-4 shrink-0 mt-0.5" />
+                    )}
+                    <div>
+                      <div>
+                        {hasPendingClarification ? 'Clarification Required Before Matching' : t('intake.claimSubmitted')}
+                      </div>
+                      <div className="text-[11px] font-normal text-muted-foreground mt-0.5">
+                        {hasPendingClarification
+                          ? 'Copilot needs specific missing information before proceeding to activity matching.'
+                          : createdEvents.length === 1
+                          ? t('intake.oneClaim')
+                          : t('intake.nClaims', { count: createdEvents.length })}
+                      </div>
+                    </div>
                   </div>
-                  <div className="space-y-2 max-h-48 overflow-y-auto">
+
+                  <p className="text-[11px] text-muted-foreground italic border-t border-border/40 pt-2">
+                    {t('intake.trustNote')}
+                  </p>
+
+                  <div className="space-y-3 max-h-72 overflow-y-auto divide-y divide-border/40">
                     {createdEvents.map((ev) => (
-                      <p key={ev.event_id} className="text-xs text-slate-700 dark:text-slate-300 leading-relaxed">
-                        {ev.reported_activity_id && (
-                          <span className="font-mono text-indigo-600 dark:text-indigo-300 mr-1">{ev.reported_activity_id}</span>
-                        )}
-                        {t('intake.claimIdLabel')} <span className="font-mono font-bold text-slate-900 dark:text-white">{ev.event_id}</span> {t('intake.statusSetTo')} <span className="font-mono text-amber-600 dark:text-amber-400 font-bold">{ev.status}</span>.
-                      </p>
+                      <div key={ev.event_id} className="pt-2 space-y-2 text-xs">
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="truncate">
+                            {ev.reported_activity_id && (
+                              <span className="font-mono text-accent font-semibold mr-1.5">
+                                {ev.reported_activity_id}
+                              </span>
+                            )}
+                            <span className="font-mono font-bold text-[#071A2D] dark:text-[#F5F7FA]">{ev.event_id}</span>
+                          </div>
+                          <StatusBadge status={ev.status} size="sm" />
+                        </div>
+
+                        {/* Feature 29: Adaptive Field Copilot — Clarification Prompt */}
+                        {ev.clarification_status === 'PENDING' || ev.clarification_question ? (
+                          <div className="p-3 rounded-lg bg-amber-500/10 border border-amber-500/30 space-y-2.5">
+                            <div className="flex items-center gap-1.5 text-amber-700 dark:text-amber-300 font-semibold text-[11px]">
+                              <Sparkles className="w-3.5 h-3.5 text-amber-500" />
+                              <span>
+                                {ev.clarification_status === 'PENDING'
+                                  ? 'Clarification Requested by Copilot'
+                                  : 'Adaptive Copilot Clarification'}
+                              </span>
+                            </div>
+
+                            <p className="text-xs text-foreground/90 font-medium">
+                              {ev.clarification_question || 'Additional context needed to validate claim specifics.'}
+                            </p>
+
+                            {ev.clarification_status === 'ANSWERED' || ev.clarification_status === 'RESOLVED' ? (
+                              <div className="flex items-center gap-1.5 text-[11px] text-emerald-600 dark:text-emerald-400 font-medium bg-emerald-50 dark:bg-emerald-950/40 p-2 rounded-md border border-emerald-200 dark:border-emerald-900/50">
+                                <CheckCircle2 className="w-3.5 h-3.5" />
+                                <span>Clarification answered: &ldquo;{ev.clarification_answer}&rdquo;</span>
+                              </div>
+                            ) : (
+                              <div className="space-y-2">
+                                <Textarea
+                                  rows={2}
+                                  placeholder="Type clarification response (e.g. verified scope, drawing ref)..."
+                                  value={clarificationAnswers[ev.event_id] || ''}
+                                  onChange={(e) =>
+                                    setClarificationAnswers((prev) => ({
+                                      ...prev,
+                                      [ev.event_id]: e.target.value,
+                                    }))
+                                  }
+                                  className="text-xs rounded-xl bg-white dark:bg-[#0B2742] border-slate-300 dark:border-[#214766] text-[#071A2D] dark:text-[#F5F7FA] placeholder:text-slate-500 dark:placeholder:text-[#8FA6BA]"
+                                />
+
+                                {clarifyError[ev.event_id] && (
+                                  <p className="text-[10px] text-destructive font-medium">
+                                    {clarifyError[ev.event_id]}
+                                  </p>
+                                )}
+
+                                <Button
+                                  type="button"
+                                  size="sm"
+                                  onClick={() => handleClarifySubmit(ev.event_id)}
+                                  disabled={clarifyingEventId === ev.event_id || !clarificationAnswers[ev.event_id]?.trim()}
+                                  isLoading={clarifyingEventId === ev.event_id}
+                                  className="w-full text-xs font-semibold h-8 gap-1.5"
+                                >
+                                  <Send className="w-3 h-3" />
+                                  Submit Clarification
+                                </Button>
+                              </div>
+                            )}
+                          </div>
+                        ) : null}
+                      </div>
                     ))}
                   </div>
+
                   <Button
-                    onClick={() => navigate(`/review?event_id=${createdEvents[0].event_id}`)}
-                    className="w-full bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold h-8"
+                    type="button"
+                    variant="outline"
+                    onClick={handleResetForm}
+                    className="w-full text-xs font-bold h-9 mt-2 gap-1.5 border-slate-300 dark:border-[#214766] text-[#071A2D] dark:text-[#F5F7FA] dark:bg-[#0A2238] hover:dark:bg-[#0D2942]"
                   >
-                    {t('intake.openReviewWorkspace')}
+                    <RotateCcw className="w-3.5 h-3.5" />
+                    {t('intake.submitAnother')}
                   </Button>
                 </div>
               )}

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -6,17 +6,13 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import {
   Activity,
-  ArrowRight,
   GitBranch,
   Info,
   AlertTriangle,
-  Calendar,
   TrendingUp,
-  Loader2,
-  ChevronRight,
 } from 'lucide-react';
-import { schedulesApi, ImpactPreviewResult } from '@/api';
-import { cn } from '@/lib/utils';
+import { schedulesApi, ImpactPreviewResult, ScheduleActivity } from '@/api';
+import { PrecedenceRippleGraph } from '@/components/PrecedenceRippleGraph';
 
 export default function ImpactPreview() {
   const { t } = useTranslation();
@@ -24,7 +20,15 @@ export default function ImpactPreview() {
   const [delayDays, setDelayDays] = useState(5);
   const [isSimulating, setIsSimulating] = useState(false);
   const [simulationResult, setSimulationResult] = useState<ImpactPreviewResult | null>(null);
+  const [activities, setActivities] = useState<ScheduleActivity[]>([]);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    schedulesApi
+      .getActivities()
+      .then((data) => setActivities(data))
+      .catch(() => {});
+  }, []);
 
   const handleSimulate = async () => {
     setIsSimulating(true);
@@ -39,70 +43,68 @@ export default function ImpactPreview() {
     }
   };
 
-  const slippageColor = (days: number) => {
-    if (days <= 2) return 'text-amber-600 dark:text-amber-400';
-    if (days <= 7) return 'text-orange-600 dark:text-orange-400';
-    return 'text-rose-600 dark:text-rose-400';
-  };
+  const originActivity = activities.find(
+    (a) => a.activity_id === (simulationResult?.activity_id || activityId)
+  );
 
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4 border-b border-slate-200 dark:border-blue-900/50 pb-4">
+      <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4 border-b border-slate-300 dark:border-[#214766]/60 pb-4">
         <div>
-          <h1 className="text-2xl font-bold text-slate-900 dark:text-slate-100 tracking-tight flex items-center gap-2">
-            <div className="p-1.5 rounded-lg bg-violet-100 dark:bg-violet-500/10 border border-violet-200 dark:border-violet-500/20">
-              <GitBranch className="w-5 h-5 text-violet-600 dark:text-violet-400" />
+          <h1 className="text-2xl font-extrabold text-[#071A2D] dark:text-[#F5F7FA] tracking-tight flex items-center gap-2.5">
+            <div className="p-1.5 rounded-xl bg-teal-50 dark:bg-[#0A2340] border border-teal-300 dark:border-[#1E3A5F] shadow-xs">
+              <GitBranch className="w-5 h-5 text-[#14B8A6] dark:text-[#22D3EE]" />
             </div>
             {t('impact.title')}
           </h1>
-          <p className="text-slate-500 dark:text-slate-400 text-xs mt-1">
+          <p className="text-[#334155] dark:text-[#CBD5E1] text-xs font-semibold mt-1">
             {t('impact.subtitle')}
           </p>
         </div>
       </div>
 
       {/* Scope Disclaimer */}
-      <div className="p-3.5 rounded-xl bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-700/50 text-blue-700 dark:text-blue-300 text-xs flex items-center gap-2.5">
-        <Info className="w-4 h-4 text-blue-500 dark:text-blue-400 shrink-0" />
+      <div className="p-3.5 rounded-xl bg-sky-50 dark:bg-sky-950/40 border border-sky-200 dark:border-sky-800/60 text-sky-900 dark:text-sky-300 text-xs flex items-center gap-2.5 shadow-xs">
+        <Info className="w-4 h-4 text-sky-600 dark:text-sky-400 shrink-0" />
         <span>
-          <strong>{t('impact.scopeDisclaimerLabel')}</strong> {t('impact.scopeDisclaimer')}
+          <strong className="font-bold">{t('impact.scopeDisclaimerLabel')}</strong> {t('impact.scopeDisclaimer')}
         </span>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Left Column: Form Inputs */}
-        <Card className="bg-white dark:bg-[#001E60]/80 border-slate-200 dark:border-blue-900/50 shadow-sm lg:col-span-1">
-          <CardHeader>
-            <CardTitle className="text-sm font-semibold flex items-center gap-2 text-slate-900 dark:text-slate-200">
-              <Activity className="w-4 h-4 text-violet-600 dark:text-violet-400" />
+        <Card className="shadow-xl lg:col-span-1 border-slate-200/80 dark:border-[#214766] bg-white/95 dark:bg-[#071A2D]/95 rounded-2xl">
+          <CardHeader className="border-b border-slate-300 dark:border-[#214766]/60 pb-4">
+            <CardTitle className="text-sm font-extrabold flex items-center gap-2 text-[#071A2D] dark:text-[#F5F7FA]">
+              <Activity className="w-4 h-4 text-[#14B8A6] dark:text-[#22D3EE]" />
               {t('impact.simulationInputs')}
             </CardTitle>
-            <CardDescription className="text-slate-500 dark:text-slate-400 text-xs">
+            <CardDescription className="text-[#475569] dark:text-[#9FB2C3] text-xs font-medium mt-0.5">
               {t('impact.simulationInputsDesc')}
             </CardDescription>
           </CardHeader>
-          <CardContent className="space-y-5 text-xs">
+          <CardContent className="space-y-5 text-xs p-6">
             {error && (
-              <div className="p-3 bg-rose-50 dark:bg-rose-500/10 border border-rose-200 dark:border-rose-500/30 text-rose-700 dark:text-rose-300 rounded-xl flex items-start gap-2">
+              <div className="p-3 bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900/60 text-rose-700 dark:text-rose-300 rounded-xl flex items-start gap-2">
                 <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
                 {error}
               </div>
             )}
 
             <div className="space-y-1.5">
-              <Label className="text-xs text-slate-700 dark:text-slate-300 font-semibold">{t('impact.activityIdLabel')}</Label>
+              <Label className="text-xs text-[#071A2D] dark:text-[#C5D2DE] font-bold">{t('impact.activityIdLabel')}</Label>
               <Input
                 value={activityId}
                 onChange={(e) => setActivityId(e.target.value)}
                 placeholder={t('impact.activityIdPlaceholder')}
-                className="bg-slate-50 dark:bg-[#001438] border-slate-300 dark:border-blue-800 font-mono text-slate-900 dark:text-slate-200 focus:border-violet-500 dark:focus:border-violet-500"
+                className="font-mono text-xs rounded-xl bg-white dark:bg-[#0B2742] border-slate-300 dark:border-[#214766] text-[#071A2D] dark:text-[#F5F7FA] placeholder:text-slate-500 dark:placeholder:text-[#8FA6BA]"
               />
-              <p className="text-[11px] text-slate-400 dark:text-slate-500">{t('impact.activityIdHint')}</p>
+              <p className="text-[11px] text-[#64748B] dark:text-[#9FB2C3] font-medium">{t('impact.activityIdHint')}</p>
             </div>
 
             <div className="space-y-1.5">
-              <Label className="text-xs text-slate-700 dark:text-slate-300 font-semibold">{t('impact.delayLabel')}</Label>
+              <Label className="text-xs text-[#071A2D] dark:text-[#C5D2DE] font-bold">{t('impact.delayLabel')}</Label>
               <div className="relative">
                 <Input
                   type="number"
@@ -110,22 +112,22 @@ export default function ImpactPreview() {
                   max={90}
                   value={delayDays}
                   onChange={(e) => setDelayDays(Number(e.target.value))}
-                  className="bg-slate-50 dark:bg-[#001438] border-slate-300 dark:border-blue-800 text-slate-900 dark:text-slate-200 font-mono focus:border-violet-500 dark:focus:border-violet-500 pr-16"
+                  className="font-mono text-xs rounded-xl bg-white dark:bg-[#0B2742] border-slate-300 dark:border-[#214766] text-[#071A2D] dark:text-[#F5F7FA] pr-16"
                 />
-                <span className="absolute right-3 top-2.5 text-slate-400 dark:text-slate-500 text-xs font-mono">{t('impact.days')}</span>
+                <span className="absolute right-3 top-2.5 text-[#64748B] dark:text-[#9FB2C3] text-xs font-mono">{t('impact.days')}</span>
               </div>
-              <p className="text-[11px] text-slate-400 dark:text-slate-500">{t('impact.delayRangeHint')}</p>
+              <p className="text-[11px] text-[#64748B] dark:text-[#9FB2C3] font-medium">{t('impact.delayRangeHint')}</p>
             </div>
 
             {/* Visual delay severity indicator */}
             <div className="space-y-2">
-              <div className="flex justify-between text-[10px] text-slate-400 dark:text-slate-500">
+              <div className="flex justify-between text-[10px] text-[#64748B] dark:text-[#9FB2C3] font-mono font-bold">
                 <span>{t('impact.lowImpact')}</span>
                 <span>{t('impact.highImpact')}</span>
               </div>
-              <div className="h-2 rounded-full bg-gradient-to-r from-amber-400 via-orange-500 to-rose-600 relative">
+              <div className="h-2 rounded-full bg-gradient-to-r from-amber-400 via-[#FF7A18] to-rose-600 relative shadow-xs">
                 <div
-                  className="absolute top-1/2 -translate-y-1/2 w-3 h-3 rounded-full bg-white border-2 border-slate-700 shadow transition-all"
+                  className="absolute top-1/2 -translate-y-1/2 w-3.5 h-3.5 rounded-full bg-white border-2 border-slate-800 shadow-md transition-all"
                   style={{ left: `${Math.min(((delayDays - 1) / 89) * 100, 100)}%` }}
                 />
               </div>
@@ -133,46 +135,38 @@ export default function ImpactPreview() {
 
             <Button
               onClick={handleSimulate}
-              disabled={isSimulating || !activityId}
-              className="w-full bg-violet-600 hover:bg-violet-500 dark:bg-violet-600 dark:hover:bg-violet-500 text-white font-medium shadow-md shadow-violet-600/20 h-10 gap-2"
+              disabled={isSimulating || !activityId.trim()}
+              isLoading={isSimulating}
+              className="w-full text-white font-bold h-11 text-xs shadow-md shadow-orange-500/25 rounded-xl gap-2 bg-gradient-to-r from-[#FF7A18] to-[#FF941F] hover:from-[#E06810] hover:to-[#FF7A18]"
             >
-              {isSimulating ? (
-                <>
-                  <Loader2 className="w-4 h-4 animate-spin" />
-                  {t('impact.computing')}
-                </>
-              ) : (
-                <>
-                  <TrendingUp className="w-4 h-4" />
-                  {t('impact.runAnalysis')}
-                </>
-              )}
+              <TrendingUp className="w-4 h-4" />
+              {t('impact.runAnalysis')}
             </Button>
           </CardContent>
         </Card>
 
-        {/* Right Column: Results */}
+        {/* Right Column: Results & Precedence Ripple Graph */}
         <div className="lg:col-span-2 space-y-6">
           {!simulationResult ? (
-            <Card className="bg-white dark:bg-[#001E60]/80 border-slate-200 dark:border-blue-900/50 shadow-sm h-full min-h-[280px] flex items-center justify-center text-center p-8">
-              <div className="space-y-3 max-w-sm">
-                <div className="w-14 h-14 rounded-2xl bg-violet-100 dark:bg-violet-500/10 border border-violet-200 dark:border-violet-500/20 flex items-center justify-center mx-auto">
-                  <GitBranch className="w-7 h-7 text-violet-500 dark:text-violet-400" />
+            <Card className="shadow-xl h-full min-h-[320px] flex items-center justify-center text-center p-8 border-slate-200/80 dark:border-[#214766] bg-white/95 dark:bg-[#071A2D]/95 rounded-2xl">
+              <div className="space-y-3.5 max-w-sm">
+                <div className="w-14 h-14 rounded-2xl bg-teal-50 dark:bg-[#0A2340] border border-teal-200 dark:border-[#1E3A5F] flex items-center justify-center mx-auto shadow-xs">
+                  <GitBranch className="w-7 h-7 text-[#14B8A6] dark:text-[#22D3EE]" />
                 </div>
-                <h3 className="text-slate-700 dark:text-slate-300 font-semibold text-sm">{t('impact.noSimulationTitle')}</h3>
-                <p className="text-xs text-slate-400 dark:text-slate-500">
+                <h3 className="text-[#071A2D] dark:text-[#F5F7FA] font-extrabold text-sm">{t('impact.noSimulationTitle')}</h3>
+                <p className="text-xs text-[#475569] dark:text-[#9FB2C3] font-medium leading-relaxed">
                   {t('impact.noSimulationDesc')}{' '}
-                  <strong className="text-violet-600 dark:text-violet-400">{t('impact.runAnalysis')}</strong> {t('impact.noSimulationDescEnd')}
+                  <strong className="text-[#FF7A18] dark:text-[#FF941F]">{t('impact.runAnalysis')}</strong> {t('impact.noSimulationDescEnd')}
                 </p>
               </div>
             </Card>
           ) : (
             <div className="space-y-5 animate-in fade-in duration-300">
               {/* Summary Banner */}
-              <div className="p-4 rounded-xl bg-amber-50 dark:bg-amber-500/10 border border-amber-300 dark:border-amber-500/40 flex items-start gap-3">
-                <AlertTriangle className="w-5 h-5 text-amber-500 shrink-0 mt-0.5" />
+              <div className="p-4 rounded-xl bg-amber-50 dark:bg-amber-950/40 border border-amber-300 dark:border-amber-800/60 flex items-start gap-3 shadow-xs">
+                <AlertTriangle className="w-5 h-5 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
                 <div>
-                  <p className="text-sm font-bold text-amber-800 dark:text-amber-300">
+                  <p className="text-sm font-bold text-amber-900 dark:text-amber-200">
                     {t('impact.delayRippleSummary', {
                       days: simulationResult.delay_days,
                       activityId: simulationResult.activity_id,
@@ -180,85 +174,17 @@ export default function ImpactPreview() {
                       plural: simulationResult.successors.length !== 1 ? 's' : '',
                     })}
                   </p>
-                  <p className="text-xs text-amber-700 dark:text-amber-400/80 mt-0.5">
+                  <p className="text-xs text-amber-700 dark:text-amber-300/90 font-medium mt-0.5">
                     {t('impact.commitAfterReview')}
                   </p>
                 </div>
               </div>
 
-              {/* Ripple Graph Card */}
-              <Card className="bg-white dark:bg-[#001E60]/80 border-slate-200 dark:border-blue-900/50 shadow-sm">
-                <CardHeader className="pb-3 border-b border-slate-200 dark:border-blue-900/50">
-                  <CardTitle className="text-sm font-semibold flex items-center justify-between">
-                    <span className="flex items-center gap-2">
-                      <GitBranch className="w-4 h-4 text-violet-600 dark:text-violet-400" />
-                      {t('impact.rippleGraphTitle')}
-                    </span>
-                    <span className="text-[10px] bg-rose-100 dark:bg-rose-500/20 text-rose-700 dark:text-rose-400 border border-rose-200 dark:border-rose-500/30 px-2 py-0.5 rounded-full font-mono font-bold">
-                      {t('impact.shiftLabel', { days: simulationResult.delay_days })}
-                    </span>
-                  </CardTitle>
-                </CardHeader>
-                <CardContent className="pt-5">
-                  {/* Visual Flow Layout */}
-                  <div className="flex flex-col sm:flex-row items-start gap-4">
-                    {/* Origin Node */}
-                    <div className="relative p-4 rounded-xl bg-amber-50 dark:bg-amber-500/10 border-2 border-amber-400/60 dark:border-amber-500/50 text-center w-full sm:w-48 shrink-0">
-                      <div className="text-[10px] font-bold text-amber-600 dark:text-amber-400 uppercase tracking-wider mb-1.5 flex items-center justify-center gap-1">
-                        <Calendar className="w-3 h-3" /> {t('impact.impactOrigin')}
-                      </div>
-                      <div className="font-mono font-bold text-slate-900 dark:text-slate-100 text-base">{simulationResult.activity_id}</div>
-                      <span className="absolute -top-3 -right-3 bg-rose-600 text-white text-xs px-2 py-0.5 rounded-full font-bold shadow-lg">
-                        +{simulationResult.delay_days}d
-                      </span>
-                    </div>
-
-                    {/* Arrow */}
-                    <div className="hidden sm:flex flex-col items-center self-center w-12 shrink-0">
-                      <div className="flex items-center gap-1 text-slate-400 dark:text-slate-500">
-                        <div className="h-px w-4 bg-slate-300 dark:bg-slate-600" />
-                        <ArrowRight className="w-4 h-4" />
-                      </div>
-                      <span className="text-[9px] font-mono text-slate-400 dark:text-slate-500 mt-1">FS</span>
-                    </div>
-
-                    {/* Successor Nodes */}
-                    <div className="flex-1 space-y-3 w-full">
-                      {simulationResult.successors.map((succ, idx) => (
-                        <div
-                          key={idx}
-                          className="p-4 rounded-xl bg-slate-50 dark:bg-slate-950/80 border border-slate-200 dark:border-slate-700 hover:border-violet-300 dark:hover:border-violet-700/60 transition-colors space-y-2.5 text-xs"
-                        >
-                          <div className="flex items-center justify-between flex-wrap gap-2">
-                            <div className="flex items-center gap-2">
-                              <span className="font-mono font-bold text-violet-700 dark:text-violet-300 bg-violet-100 dark:bg-violet-500/10 px-2 py-0.5 rounded-md border border-violet-200 dark:border-violet-500/20">
-                                {succ.successor_activity_id}
-                              </span>
-                              <span className="text-[10px] bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 px-2 py-0.5 rounded-full font-mono">
-                                {succ.relationship_type}
-                              </span>
-                            </div>
-                            <ChevronRight className="w-4 h-4 text-slate-400 dark:text-slate-500 hidden sm:block" />
-                          </div>
-
-                          <div className="font-medium text-slate-800 dark:text-slate-200">{succ.activity_name}</div>
-
-                          <div className="grid grid-cols-2 gap-3 text-[11px] font-mono pt-2 border-t border-slate-200 dark:border-slate-700">
-                            <div className="space-y-0.5">
-                              <span className="text-slate-400 dark:text-slate-500 text-[10px] uppercase tracking-wide block">{t('impact.originalStart')}</span>
-                              <span className="text-slate-700 dark:text-slate-300 font-semibold">{succ.original_start}</span>
-                            </div>
-                            <div className="space-y-0.5">
-                              <span className="text-slate-400 dark:text-slate-500 text-[10px] uppercase tracking-wide block">{t('impact.shiftedStart')}</span>
-                              <span className={cn('font-bold', slippageColor(simulationResult.delay_days))}>{succ.shifted_start}</span>
-                            </div>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
+              {/* Connected Finish-to-Start Precedence Ripple Graph */}
+              <PrecedenceRippleGraph
+                result={simulationResult}
+                originActivityName={originActivity?.activity_name}
+              />
             </div>
           )}
         </div>

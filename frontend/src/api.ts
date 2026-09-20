@@ -11,10 +11,14 @@ const BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-async function apiFetch<T>(path: string, options?: RequestInit): Promise<T> {
+interface ApiFetchOptions extends RequestInit {
+  responseType?: 'json' | 'blob' | 'text';
+}
+
+async function apiFetch<T>(path: string, options?: ApiFetchOptions): Promise<T> {
   const token = localStorage.getItem('supabase_access_token') || localStorage.getItem('auth_token');
   const headers: Record<string, string> = {
-    'Content-Type': 'application/json',
+    ...(options?.responseType !== 'blob' ? { 'Content-Type': 'application/json' } : {}),
     ...(options?.headers as Record<string, string>),
   };
   if (token) {
@@ -29,6 +33,13 @@ async function apiFetch<T>(path: string, options?: RequestInit): Promise<T> {
   if (!res.ok) {
     const errorText = await res.text().catch(() => 'Unknown network error');
     throw new Error(`API ${res.status}: ${errorText}`);
+  }
+
+  if (options?.responseType === 'blob') {
+    return (await res.blob()) as unknown as T;
+  }
+  if (options?.responseType === 'text') {
+    return (await res.text()) as unknown as T;
   }
   return res.json();
 }
@@ -81,6 +92,8 @@ export interface UserProfile {
   role: UserRole;
 }
 
+export type ClarificationStatus = 'NONE' | 'PENDING' | 'ANSWERED' | 'RESOLVED';
+
 export interface ExecutionEvent {
   event_id: string;
   document_id: string | null;
@@ -105,6 +118,14 @@ export interface ExecutionEvent {
   photo_path: string | null;
   status: ClaimStatus;
   created_at: string;
+  clarification_status?: ClarificationStatus | null;
+  clarification_question?: string | null;
+  clarification_answer?: string | null;
+  priority_score?: number | null;
+  priority_reasons?: string[] | null;
+  is_escalated?: boolean | null;
+  priority_rank?: number | null;
+  field_provenance?: Record<string, FieldProvenance> | null;
 }
 
 export interface SourceReference {
@@ -205,6 +226,178 @@ export interface ImpactPreviewResult {
   }[];
 }
 
+// ─── Feature 30A: WBS Activity Explorer (read-only) ──────────────────────────
+
+export interface WBSGroupActivity {
+  activity_id: string;
+  planned_quantity: number | null;
+}
+
+export interface WBSGroup {
+  wbs_code: string;
+  activities: WBSGroupActivity[];
+}
+
+export interface WBSTreeResponse {
+  schedule_id: string;
+  wbs_groups: WBSGroup[];
+}
+
+// ─── Feature 30: WBS Granularity Bridge (Split Editor) ──────────────────────
+
+export type SplitBasis = 'EQUAL' | 'WBS_WEIGHTED' | 'MANUAL';
+
+export interface WBSSplitItem {
+  split_id?: string;
+  event_id: string;
+  activity_id: string;
+  split_basis: SplitBasis;
+  split_pct: number;
+  allocated_quantity?: number | null;
+  uom?: string | null;
+  rationale?: string | null;
+  created_at?: string;
+}
+
+export interface WBSSplitAllocation {
+  activity_id: string;
+  split_basis?: SplitBasis;
+  split_pct?: number;
+  allocated_pct?: number | null;
+  allocated_quantity?: number | null;
+  uom?: string | null;
+  rationale?: string | null;
+}
+
+export interface WBSSplitRequest {
+  event_id: string;
+  schedule_id: string;
+  allocations: WBSSplitAllocation[];
+  justification?: string;
+}
+
+export interface WBSSplitResponse {
+  event_id: string;
+  status: string;
+  created_decisions?: PlannerDecision[];
+  splits?: WBSSplitItem[];
+  message?: string;
+}
+
+// ─── Feature 31: Evidence Fusion & Knowledge Graph ──────────────────────────
+
+export type EvidenceRelation = 'CORROBORATES' | 'CONTRADICTS' | 'SUPPORTING' | 'NEUTRAL';
+
+export interface EvidenceDocument {
+  evidence_id: string;
+  event_id: string;
+  document_type: string; // 'DAILY_REPORT' | 'INSPECTION_PHOTO' | 'SURVEY_LOG' | 'CAD_DWG' | string
+  relation?: EvidenceRelation | string | null; // CORROBORATES vs CONTRADICTS
+  file_name: string;
+  page_or_cell_ref?: string | null;
+  snippet_text?: string | null;
+  ocr_confidence?: number | null;
+  gps_lat?: number | null;
+  gps_lon?: number | null;
+  timestamp?: string | null;
+  source_url?: string | null;
+}
+
+export interface KnowledgeGraphNode {
+  id: string;
+  label: string;
+  type: 'CLAIM' | 'ACTIVITY' | 'WBS' | 'DOCUMENT' | 'LOCATION' | 'DISCIPLINE' | string;
+  properties?: Record<string, any>;
+}
+
+export interface KnowledgeGraphEdge {
+  source: string;
+  target: string;
+  relationship: string; // 'MATCHED_TO' | 'PART_OF_WBS' | 'EVIDENCED_BY' | 'LOCATED_AT' | string
+  confidence?: number | null;
+}
+
+export interface KnowledgeGraphData {
+  event_id: string;
+  nodes: KnowledgeGraphNode[];
+  edges: KnowledgeGraphEdge[];
+}
+
+// ─── Feature 33: Fine-Grained Field Provenance ───────────────────────────────
+
+export type FieldProvenanceSource =
+  | 'AI_EXTRACTED'
+  | 'SCHEDULE_AUTO_FILLED'
+  | 'ENGINEER_ENTERED'
+  | 'SUPERVISOR_EDITED';
+
+export interface FieldProvenance {
+  field_name: string;
+  source: FieldProvenanceSource;
+  source_detail?: string | null;
+  confidence?: number | null;
+  timestamp?: string | null;
+  actor?: string | null;
+}
+
+// ─── Feature 34: Ask Why (Graph Traversal & Explanation) ─────────────────────
+
+export interface AskWhyEntity {
+  name: string;
+  type: string;
+  role: string;
+}
+
+export interface AskWhyRequest {
+  event_id?: string;
+  activity_id?: string;
+  depth?: number;
+  question?: string;
+}
+
+export interface AskWhyResponse {
+  activity_id?: string;
+  event_id?: string;
+  explanation: string;
+  traversal_depth?: number | null;
+  reasoning_steps?: string[] | null;
+  entities_involved?: AskWhyEntity[] | null;
+  evidence_references?: string[] | null;
+}
+
+// ─── Feature 35: AI Execution Summary ────────────────────────────────────────
+
+export interface ExecutionSummaryFilter {
+  start?: string;
+  end?: string;
+  start_date?: string; // backwards compatibility alias
+  end_date?: string;   // backwards compatibility alias
+  discipline?: Discipline | string;
+  schedule_id?: string;
+}
+
+export interface ExecutionSummaryMetrics {
+  total_claims_processed?: number;
+  approval_rate_pct?: number;
+  open_conflicts_count?: number;
+  high_priority_escalations?: number;
+  top_delay_drivers?: { reason: string; count: number }[];
+  disciplines_active?: string[];
+}
+
+export interface ExecutionSummaryResponse {
+  reporting_period: {
+    start_date: string;
+    end_date: string;
+  };
+  discipline?: Discipline | string | null;
+  schedule_id?: string | null;
+  summary_text: string;
+  metrics?: ExecutionSummaryMetrics | null;
+  key_highlights?: string[] | null;
+  generated_at: string;
+}
+
 export interface AuditLogEntry {
   log_id: number;
   entity_type: string;
@@ -273,6 +466,17 @@ const MOCK_EVENTS: ExecutionEvent[] = [
     photo_path: null,
     status: 'REVIEW_REQUIRED',
     created_at: new Date().toISOString(),
+    priority_score: 0.88,
+    priority_reasons: ['Critical Path activity', 'High variance risk with previous shift log'],
+    is_escalated: true,
+    priority_rank: 1,
+    field_provenance: {
+      discipline: { field_name: 'discipline', source: 'AI_EXTRACTED', source_detail: 'Extracted from voice keyword "Rebar placement"', confidence: 0.96 },
+      location: { field_name: 'location', source: 'ENGINEER_ENTERED', source_detail: 'Explicit site engineer voice report: "Block-2"' },
+      asset_tag: { field_name: 'asset_tag', source: 'SCHEDULE_AUTO_FILLED', source_detail: 'Resolved from activity master ACT-202 tag COL-C4' },
+      claimed_pct: { field_name: 'claimed_pct', source: 'ENGINEER_ENTERED', source_detail: 'Stated directly in voice log (75%)' },
+      matched_activity_id: { field_name: 'matched_activity_id', source: 'AI_EXTRACTED', source_detail: 'FAISS match on Column C4 with 88% confidence', confidence: 0.88 },
+    },
   },
   {
     event_id: 'evt-103',
@@ -585,15 +789,35 @@ const MOCK_AUDIT_LOGS: AuditLogEntry[] = [
 // ─── API Methods ─────────────────────────────────────────────────────────────
 
 export const authApi = {
-  getMe: async (): Promise<UserProfile> => {
+  getMe: async (hintEmail?: string): Promise<UserProfile> => {
     if (USE_MOCKS) {
       await sleep(200);
       const rawUser = localStorage.getItem('user');
-      if (rawUser) return JSON.parse(rawUser);
+      if (rawUser) {
+        try {
+          const parsed = JSON.parse(rawUser);
+          if (parsed && parsed.role && parsed.id) return parsed;
+        } catch {
+          // ignore corrupted JSON
+        }
+      }
+      const devEmail = hintEmail || localStorage.getItem('setu_dev_email_v1') || '';
+      const isEngineer =
+        devEmail.toLowerCase().includes('engineer') ||
+        devEmail.toLowerCase().includes('site');
+
+      if (isEngineer) {
+        return {
+          id: '811a1e0f-976d-42ea-a37f-1096186daf36',
+          email: devEmail || 'site.engineer@sih26122.internal',
+          full_name: 'Site Engineer',
+          role: 'SITE_ENGINEER',
+        };
+      }
       return {
-        id: 'usr-supervisor-01',
-        email: 'planner@setu.ai',
-        full_name: 'Rajesh Kumar (Lead Planner)',
+        id: '4b8e6901-de81-490c-8bec-9761f62bee70',
+        email: devEmail || 'supervisor@sih26122.internal',
+        full_name: 'Supervisor',
         role: 'SUPERVISOR',
       };
     }
@@ -602,35 +826,127 @@ export const authApi = {
   },
 };
 
+const MOCK_DYNAMIC_EVENTS = new Map<string, ExecutionEvent>();
+
+function extractMockClaimFields(text: string): {
+  discipline: Discipline | null;
+  event_type: EventType;
+  claimed_pct: number | null;
+  claimed_quantity: number | null;
+  claimed_uom: string | null;
+  clarification_status: ClarificationStatus;
+  clarification_question: string | null;
+} {
+  const lower = text.toLowerCase();
+
+  // Discipline detection
+  let discipline: Discipline | null = null;
+  if (lower.includes('civil') || lower.includes('foundation') || lower.includes('rebar') || lower.includes('concrete') || lower.includes('column') || lower.includes('pour')) {
+    discipline = 'CIVIL';
+  } else if (lower.includes('piping') || lower.includes('pipe') || lower.includes('weld') || lower.includes('valve') || lower.includes('hydrotest')) {
+    discipline = 'PIPING';
+  } else if (lower.includes('electrical') || lower.includes('cable') || lower.includes('transformer') || lower.includes('panel') || lower.includes('switchgear')) {
+    discipline = 'ELECTRICAL';
+  } else if (lower.includes('instrument') || lower.includes('scada') || lower.includes('plc') || lower.includes('transmitter') || lower.includes('sensor')) {
+    discipline = 'INSTRUMENTATION';
+  } else if (lower.includes('equipment') || lower.includes('pump') || lower.includes('compressor') || lower.includes('turbine') || lower.includes('vessel')) {
+    discipline = 'STATIC_ROTATING_EQUIPMENT';
+  } else if (lower.includes('hse') || lower.includes('safety') || lower.includes('audit') || lower.includes('permit') || lower.includes('incident')) {
+    discipline = 'HSE';
+  }
+
+  // Event Type detection
+  let event_type: EventType = 'PROGRESS_UPDATE';
+  if (lower.includes('finish') || lower.includes('complete') || lower.includes('done') || lower.includes('handed over')) {
+    event_type = 'ACTUAL_FINISH';
+  } else if (lower.includes('start') || lower.includes('commenced') || lower.includes('initiated')) {
+    event_type = 'ACTUAL_START';
+  } else if (lower.includes('delay') || lower.includes('behind') || lower.includes('waiting')) {
+    event_type = 'DELAY';
+  } else if (lower.includes('block') || lower.includes('stopped') || lower.includes('hold')) {
+    event_type = 'BLOCKER';
+  }
+
+  // Progress/Quantity detection
+  let claimed_pct: number | null = null;
+  let claimed_quantity: number | null = null;
+  let claimed_uom: string | null = null;
+
+  const pctMatch = text.match(/(\d+(?:\.\d+)?)\s*%/);
+  if (pctMatch) {
+    claimed_pct = Math.min(100, Math.max(0, parseFloat(pctMatch[1])));
+  } else if (event_type === 'ACTUAL_FINISH' && !lower.includes('gfdn')) {
+    claimed_pct = 100;
+  }
+
+  const qtyMatch = text.match(/(\d+(?:\.\d+)?)\s*(cu\.m|m3|m|meters|joints|nos|tons|kg|units)/i);
+  if (qtyMatch) {
+    claimed_quantity = parseFloat(qtyMatch[1]);
+    claimed_uom = qtyMatch[2];
+  }
+
+  // Feature 29: Required fields are event_type, discipline, and at least one of (claimed_pct, claimed_quantity)
+  const hasDiscipline = discipline !== null;
+  const hasProgress = claimed_pct !== null || claimed_quantity !== null;
+
+  let clarification_status: ClarificationStatus = 'NONE';
+  let clarification_question: string | null = null;
+
+  if (!hasDiscipline && !hasProgress) {
+    clarification_status = 'PENDING';
+    clarification_question = 'Please clarify the engineering discipline (e.g. Civil, Piping, Electrical) and progress percentage or quantity for this activity.';
+  } else if (!hasDiscipline) {
+    clarification_status = 'PENDING';
+    clarification_question = 'Please specify the engineering discipline (e.g. Civil, Piping, Electrical, Instrumentation, HSE) for this claim.';
+  } else if (!hasProgress) {
+    clarification_status = 'PENDING';
+    clarification_question = 'Please provide the claimed progress percentage (0-100%) or installed quantity for this update.';
+  }
+
+  return {
+    discipline,
+    event_type,
+    claimed_pct,
+    claimed_quantity,
+    claimed_uom,
+    clarification_status,
+    clarification_question,
+  };
+}
+
 export const claimsApi = {
   submitText: async (text: string): Promise<{ event: ExecutionEvent }> => {
     if (USE_MOCKS) {
       await sleep(1000);
+      const extracted = extractMockClaimFields(text);
       const ev: ExecutionEvent = {
         event_id: `evt-${Date.now()}`,
         document_id: null,
-        schedule_id: 'sched-MOCK',
+        schedule_id: 'sched-OIL-2026',
         event_date: TODAY,
         raw_claim_text: text,
         input_channel: 'TYPED_TEXT',
         language_detected: 'en',
-        reported_activity_id: null,
+        reported_activity_id: extracted.discipline === 'CIVIL' ? 'ACT-201' : null,
         matched_activity_id: null,
-        discipline: null,
-        action: 'PROGRESS_UPDATE',
-        event_type: 'PROGRESS_UPDATE',
-        claim_mode: 'CUMULATIVE_PCT',
+        discipline: extracted.discipline,
+        action: extracted.event_type,
+        event_type: extracted.event_type,
+        claim_mode: extracted.claimed_quantity ? 'INCREMENTAL_QUANTITY' : 'CUMULATIVE_PCT',
         asset_tag: null,
         location: null,
-        claimed_quantity: null,
-        claimed_uom: null,
-        claimed_pct: 50,
+        claimed_quantity: extracted.claimed_quantity,
+        claimed_uom: extracted.claimed_uom,
+        claimed_pct: extracted.claimed_pct,
         delay_reason: null,
         supervisor_id: null,
         photo_path: null,
         status: 'EXTRACTED',
         created_at: new Date().toISOString(),
+        clarification_status: extracted.clarification_status,
+        clarification_question: extracted.clarification_question,
       };
+      MOCK_DYNAMIC_EVENTS.set(ev.event_id, ev);
       return { event: ev };
     }
     // Do NOT send schedule_id — let the backend resolve the latest active schedule.
@@ -660,12 +976,12 @@ export const claimsApi = {
         document_id: `doc-${Date.now()}`,
         schedule_id: scheduleId,
         event_date: TODAY,
-        raw_claim_text: `Ingested update from file: ${file.name}`,
+        raw_claim_text: options?.rawClaimText || `Ingested update from file: ${file.name}`,
         input_channel: 'FILE_UPLOAD',
         language_detected: 'en',
-        reported_activity_id: null,
+        reported_activity_id: 'ACT-201',
         matched_activity_id: null,
-        discipline: null,
+        discipline: 'CIVIL',
         action: 'PROGRESS_UPDATE',
         event_type: 'PROGRESS_UPDATE',
         claim_mode: 'CUMULATIVE_PCT',
@@ -673,13 +989,16 @@ export const claimsApi = {
         location: null,
         claimed_quantity: null,
         claimed_uom: null,
-        claimed_pct: null,
+        claimed_pct: 60,
         delay_reason: null,
         supervisor_id: null,
         photo_path: null,
         status: 'EXTRACTED',
         created_at: new Date().toISOString(),
+        clarification_status: 'NONE',
+        clarification_question: null,
       };
+      MOCK_DYNAMIC_EVENTS.set(ev.event_id, ev);
       return { events: [ev] };
     }
     const form = new FormData();
@@ -716,6 +1035,49 @@ export const claimsApi = {
     }
     const data: any = await apiFetch(`/api/v1/claims/${eventId}/check`, { method: 'POST' });
     return { status: data.status, issues: data.validation_issues || [] };
+  },
+
+  clarify: async (eventId: string, answer: string): Promise<{ event: ExecutionEvent }> => {
+    if (USE_MOCKS) {
+      await sleep(500);
+      const ev = MOCK_DYNAMIC_EVENTS.get(eventId) || MOCK_EVENTS.find((e) => e.event_id === eventId) || {
+        event_id: eventId,
+        document_id: null,
+        schedule_id: 'sched-OIL-2026',
+        event_date: TODAY,
+        raw_claim_text: 'Clarified claim',
+        input_channel: 'TYPED_TEXT' as const,
+        language_detected: 'en',
+        reported_activity_id: 'ACT-201',
+        matched_activity_id: null,
+        discipline: 'CIVIL' as const,
+        action: 'PROGRESS_UPDATE',
+        event_type: 'PROGRESS_UPDATE' as const,
+        claim_mode: 'CUMULATIVE_PCT' as const,
+        asset_tag: null,
+        location: null,
+        claimed_quantity: null,
+        claimed_uom: null,
+        claimed_pct: 100,
+        delay_reason: null,
+        supervisor_id: null,
+        photo_path: null,
+        status: 'EXTRACTED' as const,
+        created_at: new Date().toISOString(),
+      };
+      ev.clarification_status = 'ANSWERED';
+      ev.clarification_answer = answer;
+      ev.discipline = ev.discipline || 'CIVIL';
+      ev.claimed_pct = ev.claimed_pct || 100;
+      ev.status = 'EXTRACTED';
+      MOCK_DYNAMIC_EVENTS.set(eventId, ev);
+      return { event: { ...ev } };
+    }
+    const data = await apiFetch(`/api/v1/claims/${eventId}/clarify`, {
+      method: 'POST',
+      body: JSON.stringify({ clarification_answer: answer }),
+    });
+    return { event: data as any };
   },
 
   getCandidates: async (eventId: string): Promise<CandidateMatch[]> => {
@@ -756,6 +1118,111 @@ export const claimsApi = {
     }
     const data: any = await apiFetch(`/api/v1/claims/${eventId}/validation`);
     return data.validation_issues || [];
+  },
+
+  getEvidence: async (eventId: string): Promise<EvidenceDocument[]> => {
+    if (USE_MOCKS) {
+      await sleep(300);
+      return [
+        {
+          evidence_id: 'ev-01',
+          event_id: eventId,
+          document_type: 'DAILY_REPORT',
+          relation: 'CORROBORATES',
+          file_name: 'Civil_Shift_Report_20260919.pdf',
+          page_or_cell_ref: 'Page 3, Line 14',
+          snippet_text: 'Level B2 rebar placement completed for column C4. 75% bar ties certified by QC.',
+          ocr_confidence: 0.94,
+          gps_lat: 28.6139,
+          gps_lon: 77.209,
+          timestamp: new Date(Date.now() - 3600000).toISOString(),
+        },
+        {
+          evidence_id: 'ev-02',
+          event_id: eventId,
+          document_type: 'INSPECTION_PHOTO',
+          relation: 'CORROBORATES',
+          file_name: 'IMG_C4_Rebar_QC.jpg',
+          page_or_cell_ref: 'Attachment 1',
+          snippet_text: 'Site photo verifying rebar cage alignment and cover spacer blocks.',
+          ocr_confidence: 0.98,
+          gps_lat: 28.6141,
+          gps_lon: 77.2093,
+          timestamp: new Date(Date.now() - 1800000).toISOString(),
+        },
+      ];
+    }
+    const data: any = await apiFetch(`/api/v1/claims/${eventId}/evidence`);
+    return data.evidence || data || [];
+  },
+
+  getKnowledgeGraph: async (eventId: string): Promise<KnowledgeGraphData> => {
+    if (USE_MOCKS) {
+      await sleep(400);
+      return {
+        event_id: eventId,
+        nodes: [
+          { id: 'node-claim', label: `Claim ${eventId}`, type: 'CLAIM' },
+          { id: 'node-act', label: 'ACT-202 Rebar Placement', type: 'ACTIVITY' },
+          { id: 'node-wbs', label: 'WBS 1.2 Substructure', type: 'WBS' },
+          { id: 'node-doc', label: 'Civil_Shift_Report.pdf', type: 'DOCUMENT' },
+          { id: 'node-loc', label: 'Block-2 Level B2', type: 'LOCATION' },
+        ],
+        edges: [
+          { source: 'node-claim', target: 'node-act', relationship: 'MATCHED_TO', confidence: 0.88 },
+          { source: 'node-act', target: 'node-wbs', relationship: 'PART_OF_WBS' },
+          { source: 'node-claim', target: 'node-doc', relationship: 'EVIDENCED_BY', confidence: 0.94 },
+          { source: 'node-claim', target: 'node-loc', relationship: 'LOCATED_AT' },
+        ],
+      };
+    }
+    const data: any = await apiFetch(`/api/v1/claims/${eventId}/knowledge-graph`);
+    return data;
+  },
+
+  askWhy: async (request: AskWhyRequest): Promise<AskWhyResponse> => {
+    const activityId = request.activity_id || 'ACT-202';
+    const depth = request.depth ?? 2;
+
+    if (USE_MOCKS) {
+      await sleep(600);
+      return {
+        activity_id: activityId,
+        event_id: request.event_id,
+        explanation:
+          `Matched to activity ${activityId} (Rebar Placement — Column C4) with 88% confidence based on spatial alignment in Block-2 and prerequisite foundation pour F-4 having completed.`,
+        traversal_depth: depth,
+        reasoning_steps: [
+          'Extracted entity "Column C4" and location "Block-2" from voice transcript.',
+          'Traversed WBS hierarchy: Schedule -> Substructure -> Foundations -> Column C4.',
+          'Verified prerequisite foundation pour (FND-B4) cleared QC on prior reporting cycle.',
+        ],
+        entities_involved: [
+          { name: activityId, type: 'ACTIVITY', role: 'Matched Schedule Package' },
+          { name: 'Block-2', type: 'LOCATION', role: 'Spatial Constraint' },
+          { name: 'FND-B4', type: 'PREDECESSOR', role: 'Verified Dependency' },
+        ],
+        evidence_references: [
+          'Civil_Shift_Report_20260919.pdf (Page 3)',
+          'IMG_C4_Rebar_QC.jpg (Attachment 1)',
+        ],
+      };
+    }
+    // PRD endpoint: GET /api/v1/graph/activity/{activity_id}?depth=N
+    const data = await apiFetch(`/api/v1/graph/activity/${activityId}?depth=${depth}`);
+    return data as AskWhyResponse;
+  },
+
+  getReviewQueue: async (sort: string = 'priority'): Promise<ExecutionEvent[]> => {
+    if (USE_MOCKS) {
+      await sleep(400);
+      return MOCK_EVENTS.filter(
+        (c) => c.status === 'REVIEW_REQUIRED' || c.status === 'VALIDATED' || c.status === 'HOLD'
+      );
+    }
+    // PRD endpoint: GET /api/v1/review-queue?sort=priority
+    const data: any = await apiFetch(`/api/v1/review-queue?sort=${sort}`);
+    return Array.isArray(data) ? data : data.queue || data.claims || [];
   },
 
   getEvent: async (eventId: string): Promise<ExecutionEvent> => {
@@ -921,6 +1388,20 @@ export const dashboardApi = {
   getExportCsvUrl: (): string => {
     return `${BASE_URL}/api/v1/export/csv`;
   },
+
+  exportCsv: async (): Promise<Blob> => {
+    if (USE_MOCKS) {
+      await sleep(400);
+      const csvContent = [
+        'activity_id,actual_start,actual_finish,actual_pct_complete,actual_quantity',
+        'ACT-101,2026-09-01,2026-09-10,100,500',
+        'ACT-102,2026-09-03,2026-09-12,85,120',
+        'ACT-103,2026-09-05,,45,30',
+      ].join('\n');
+      return new Blob([csvContent], { type: 'text/csv; charset=utf-8' });
+    }
+    return apiFetch<Blob>('/api/v1/export/csv', { responseType: 'blob' });
+  },
 };
 
 export const activitiesApi = {
@@ -1059,6 +1540,91 @@ export const schedulesApi = {
       })),
     };
   },
+
+  getWbsTree: async (scheduleId: string = 'sched-OIL-2026'): Promise<WBSTreeResponse> => {
+    if (USE_MOCKS) {
+      await sleep(400);
+      // Group existing mock activities by wbs_code to mirror backend shape
+      const groupMap = new Map<string, WBSGroupActivity[]>();
+      for (const a of MOCK_ACTIVITIES) {
+        if (!a.wbs_code) continue;
+        const list = groupMap.get(a.wbs_code) || [];
+        list.push({ activity_id: a.activity_id, planned_quantity: a.planned_quantity });
+        groupMap.set(a.wbs_code, list);
+      }
+      const wbs_groups: WBSGroup[] = Array.from(groupMap.entries()).map(
+        ([wbs_code, activities]) => ({ wbs_code, activities })
+      );
+      return { schedule_id: scheduleId, wbs_groups };
+    }
+    return apiFetch(`/api/v1/schedules/${scheduleId}/wbs-tree`);
+  },
+};
+
+export const wbsApi = {
+  getSplits: async (eventId: string): Promise<WBSSplitItem[]> => {
+    if (USE_MOCKS) {
+      await sleep(300);
+      return [
+        {
+          split_id: `spl-${eventId}-1`,
+          event_id: eventId,
+          activity_id: 'ACT-202',
+          split_basis: 'WBS_WEIGHTED',
+          split_pct: 60,
+          allocated_quantity: 45,
+          uom: 'cu.m',
+          rationale: 'Primary work package',
+          created_at: new Date().toISOString(),
+        },
+        {
+          split_id: `spl-${eventId}-2`,
+          event_id: eventId,
+          activity_id: 'ACT-203',
+          split_basis: 'MANUAL',
+          split_pct: 40,
+          allocated_quantity: 30,
+          uom: 'cu.m',
+          rationale: 'Secondary tie-in / handover scope',
+          created_at: new Date().toISOString(),
+        },
+      ];
+    }
+    // PRD endpoint: GET /api/v1/claims/{event_id}/splits
+    return apiFetch(`/api/v1/claims/${eventId}/splits`);
+  },
+
+  updateSplits: async (eventId: string, splits: Partial<WBSSplitItem>[]): Promise<WBSSplitResponse> => {
+    if (USE_MOCKS) {
+      await sleep(600);
+      return {
+        event_id: eventId,
+        status: 'SPLIT_APPROVED',
+        message: `Successfully updated ${splits.length} WBS split allocations.`,
+      };
+    }
+    // PRD endpoint: PATCH /api/v1/claims/{event_id}/splits
+    return apiFetch(`/api/v1/claims/${eventId}/splits`, {
+      method: 'PATCH',
+      body: JSON.stringify({ splits }),
+    });
+  },
+
+  splitClaim: async (request: WBSSplitRequest): Promise<WBSSplitResponse> => {
+    if (USE_MOCKS) {
+      await sleep(600);
+      return {
+        event_id: request.event_id,
+        status: 'SPLIT_APPROVED',
+        message: `Successfully allocated claim across ${request.allocations.length} WBS activities.`,
+      };
+    }
+    return wbsApi.updateSplits(request.event_id, request.allocations as any);
+  },
+
+  getTree: async (scheduleId: string = 'sched-OIL-2026'): Promise<WBSTreeResponse> => {
+    return schedulesApi.getWbsTree(scheduleId);
+  },
 };
 
 export const auditApi = {
@@ -1068,6 +1634,55 @@ export const auditApi = {
       return MOCK_AUDIT_LOGS;
     }
     return apiFetch('/api/v1/audit');
+  },
+};
+
+export const reportsApi = {
+  getExecutionSummary: async (filter?: ExecutionSummaryFilter): Promise<ExecutionSummaryResponse> => {
+    const startDate = filter?.start || filter?.start_date;
+    const endDate = filter?.end || filter?.end_date;
+
+    if (USE_MOCKS) {
+      await sleep(700);
+      const todayStr = new Date().toISOString().split('T')[0];
+      const pastWeekStr = new Date(Date.now() - 7 * 86400000).toISOString().split('T')[0];
+      return {
+        reporting_period: {
+          start_date: startDate || pastWeekStr,
+          end_date: endDate || todayStr,
+        },
+        discipline: filter?.discipline || null,
+        schedule_id: filter?.schedule_id || 'sched-OIL-2026',
+        summary_text:
+          'During the current reporting cycle, 148 claims were processed across Civil, Piping, and Electrical disciplines. Foundation pours and structural column rebars met 94% of planned targets with minor delays in Pump Skid 02 tie-ins due to calibration certificate clearances. Critical path progression remains steady at 85% overall baseline alignment.',
+        metrics: {
+          total_claims_processed: 148,
+          approval_rate_pct: 92.4,
+          open_conflicts_count: 2,
+          high_priority_escalations: 1,
+          top_delay_drivers: [
+            { reason: 'Calibration Certificate Delay', count: 4 },
+            { reason: 'Adverse Rain Weather', count: 3 },
+          ],
+          disciplines_active: ['CIVIL', 'PIPING', 'ELECTRICAL', 'HSE'],
+        },
+        key_highlights: [
+          'Foundation Pour F-4 in Block-4 North completed (50 cu.m).',
+          'SCADA Panel E3 energization verified by lead electrical supervisor.',
+          'Zero HSE safety non-conformances across Zone A audit.',
+        ],
+        generated_at: new Date().toISOString(),
+      };
+    }
+    // PRD contract: GET /api/v1/reports/execution-summary?start=YYYY-MM-DD&end=YYYY-MM-DD&discipline=...
+    const params = new URLSearchParams();
+    if (startDate) params.append('start', startDate);
+    if (endDate) params.append('end', endDate);
+    if (filter?.discipline) params.append('discipline', filter.discipline);
+    if (filter?.schedule_id) params.append('schedule_id', filter.schedule_id);
+
+    const qs = params.toString();
+    return apiFetch(`/api/v1/reports/execution-summary${qs ? `?${qs}` : ''}`);
   },
 };
 
