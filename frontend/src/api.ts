@@ -222,10 +222,55 @@ export interface ScheduleDependency {
   relationship_type: 'FS' | 'SS' | 'FF' | 'SF';
 }
 
+export interface ImpactConstraintItem {
+  predecessor_activity_id: string;
+  successor_activity_id: string;
+  relationship_type: string;
+  lag_days: number;
+  constraint_dimension: string;
+  required_successor_start: string | null;
+  required_successor_finish: string | null;
+  baseline_successor_start: string | null;
+  gross_delay_days: number;
+  is_controlling: boolean;
+  uncertainty: boolean;
+  uncertainty_reason: string | null;
+}
+
+export interface ImpactEvaluationItem {
+  successor_activity_id: string;
+  activity_name: string;
+  dependency_type: string;
+  original_earliest_start: string;
+  shifted_earliest_start: string;
+  original_planned_finish: string;
+  shifted_earliest_finish: string;
+  propagation_depth: number;
+  target_path: string[];
+  execution_state: string;
+  gross_delay_days: number;
+  total_float: number | null;
+  float_status: 'KNOWN' | 'UNKNOWN';
+  absorbed_delay_days: number | null;
+  net_delay_days: number | null;
+  controlling_predecessor: string | null;
+  controlling_relationship: string | null;
+  uncertainty: boolean;
+  classification: string;
+  constraints_evaluated?: ImpactConstraintItem[];
+}
+
 export interface ImpactPreviewResult {
   activity_id: string;
+  activity_name?: string;
+  planned_start?: string;
+  planned_finish?: string;
+  shifted_finish?: string;
+  schedule_id?: string;
   delay_days: number;
+  propagation_depth_limit?: number;
   disclaimer: string;
+  impacts: ImpactEvaluationItem[];
   successors: {
     successor_activity_id: string;
     activity_name: string;
@@ -235,6 +280,9 @@ export interface ImpactPreviewResult {
     shifted_start: string;
     shifted_finish: string;
     lag_days: number;
+    depth?: number;
+    net_delay_days?: number | null;
+    execution_state?: string;
   }[];
 }
 
@@ -471,6 +519,22 @@ export interface AuditLogEntry {
   previous_hash: string;
   current_hash: string;
   timestamp: string;
+}
+
+export interface DisciplineForecastItem {
+  activity_id: string;
+  discipline: string;
+  planned_duration: number | null;
+  historical_ratio: number | null;
+  forecast_duration: number | null;
+  slippage_days: number;
+}
+
+export interface DisciplineForecastData {
+  discipline: string;
+  historical_ratio: number | null;
+  activities: DisciplineForecastItem[];
+  total_activities: number;
 }
 
 // ─── Realistic Demo Dataset ──────────────────────────────────────────────────
@@ -1436,17 +1500,35 @@ export const dashboardApi = {
     return (data.activities || []).map((a: any) => ({ topic: a.activity_id + ' (' + a.discipline + ')', resolution: a.variance_days !== null ? (a.variance_days > 0 ? a.variance_days + ' days delayed' : Math.abs(a.variance_days) + ' days ahead') : 'No actuals yet', count: a.planned_duration || 0 }));
   },
 
-  getForecast: async (): Promise<{ milestone: string; target_date: string; forecast_date: string; slippage_days: number }[]> => {
+  getForecast: async (discipline: string = 'CIVIL'): Promise<DisciplineForecastData> => {
     if (USE_MOCKS) {
       await sleep(400);
-      return [
-        { milestone: 'MS-02 Foundation Completion', target_date: '2026-09-15', forecast_date: '2026-09-18', slippage_days: 3 },
-        { milestone: 'MS-03 Piping Hydrotest Clearance', target_date: '2026-10-01', forecast_date: '2026-10-05', slippage_days: 4 },
-        { milestone: 'MS-04 Overall Substation Energization', target_date: '2026-11-15', forecast_date: '2026-11-20', slippage_days: 5 },
-      ];
+      return {
+        discipline,
+        historical_ratio: 1.15,
+        total_activities: 3,
+        activities: [
+          { activity_id: 'ACT-101 (Foundation Completion)', discipline, planned_duration: 20, historical_ratio: 1.15, forecast_duration: 23, slippage_days: 3 },
+          { activity_id: 'ACT-102 (Piping Hydrotest)', discipline, planned_duration: 25, historical_ratio: 1.15, forecast_duration: 29, slippage_days: 4 },
+          { activity_id: 'ACT-103 (Substation Energization)', discipline, planned_duration: 30, historical_ratio: 1.15, forecast_duration: 35, slippage_days: 5 },
+        ],
+      };
     }
-    const data: any = await apiFetch('/api/v1/dashboard/forecast?discipline=CIVIL');
-    return (data.activities || [data]).map((a: any) => ({ milestone: a.activity_id || a.discipline || 'Unknown', target_date: a.planned_duration ? a.planned_duration + ' days planned' : 'N/A', forecast_date: a.forecast_duration ? a.forecast_duration + ' days forecast' : 'N/A', slippage_days: a.forecast_duration && a.planned_duration ? a.forecast_duration - a.planned_duration : 0 }));
+    const data: any = await apiFetch(`/api/v1/dashboard/forecast?discipline=${encodeURIComponent(discipline)}`);
+    const activities = (data.activities || (data.activity_id ? [data] : [])).map((a: any) => ({
+      activity_id: a.activity_id || 'Unknown',
+      discipline: a.discipline || discipline,
+      planned_duration: a.planned_duration,
+      historical_ratio: a.historical_ratio,
+      forecast_duration: a.forecast_duration,
+      slippage_days: (a.forecast_duration != null && a.planned_duration != null) ? a.forecast_duration - a.planned_duration : 0,
+    }));
+    return {
+      discipline: data.discipline || discipline,
+      historical_ratio: data.historical_ratio ?? null,
+      total_activities: data.total_activities || activities.length,
+      activities,
+    };
   },
 
   getSilentActivities: async (): Promise<ScheduleActivity[]> => {
@@ -1492,9 +1574,45 @@ export const dashboardApi = {
   },
 };
 
+export interface ActivityTimelineItem {
+  type: 'execution_event' | 'planner_decision' | 'approved_actual';
+  timestamp: string | null;
+  event_id?: string;
+  schedule_id?: string | null;
+  event_date?: string | null;
+  raw_claim_text?: string;
+  claim_mode?: string;
+  claimed_pct?: number | null;
+  claimed_quantity?: number | null;
+  delay_reason?: string | null;
+  status?: string | null;
+  source_references?: {
+    reference_id: string;
+    file_name: string | null;
+    sheet_name: string | null;
+    row_cell_ref: string | null;
+    message_id: string | null;
+    raw_snippet: string;
+  }[];
+  decision_id?: string;
+  selected_activity_id?: string;
+  action?: string;
+  approved_pct?: number | null;
+  approved_qty?: number | null;
+  planner_id?: string | null;
+  justification?: string;
+  actual_id?: string;
+  activity_id?: string;
+  actual_start?: string | null;
+  actual_finish?: string | null;
+  actual_pct_complete?: number | null;
+  actual_quantity?: number | null;
+}
+
 export const activitiesApi = {
   getHistory: async (activityId: string): Promise<{
     activity: ScheduleActivity | null;
+    timeline: ActivityTimelineItem[];
     history: {
       timestamp: string;
       raw_claim_text: string;
@@ -1509,8 +1627,59 @@ export const activitiesApi = {
     if (USE_MOCKS) {
       await sleep(500);
       const activity = MOCK_ACTIVITIES.find((a) => a.activity_id === activityId) || MOCK_ACTIVITIES[1];
+      const mockTimeline: ActivityTimelineItem[] = [
+        {
+          type: 'execution_event',
+          event_id: 'evt-102',
+          schedule_id: 'sched-OIL-2026',
+          event_date: '2026-09-02',
+          raw_claim_text: 'Rebar placement for column C4, level B2 finished. 75% total progress claimed.',
+          claim_mode: 'CUMULATIVE_PCT',
+          claimed_pct: 75,
+          claimed_quantity: null,
+          delay_reason: null,
+          status: 'REVIEW_REQUIRED',
+          timestamp: '2026-09-02T10:15:00Z',
+          source_references: [
+            {
+              reference_id: 'REF-001',
+              file_name: 'DPR_2026-09-02.xlsx',
+              sheet_name: 'Civil Works',
+              row_cell_ref: 'Row 14',
+              message_id: null,
+              raw_snippet: 'Col C4 rebar cage tying complete to B2 level, inspection requested.',
+            },
+          ],
+        },
+        {
+          type: 'planner_decision',
+          decision_id: 'dec-102',
+          event_id: 'evt-102',
+          selected_activity_id: activityId,
+          action: 'APPROVE',
+          approved_pct: 75,
+          approved_qty: null,
+          planner_id: 'sup-01',
+          justification: 'Verified against QA/QC bar-bending inspection sign-off.',
+          timestamp: '2026-09-02T14:30:00Z',
+        },
+        {
+          type: 'approved_actual',
+          actual_id: 'actl-102',
+          decision_id: 'dec-102',
+          event_id: 'evt-102',
+          schedule_id: 'sched-OIL-2026',
+          activity_id: activityId,
+          actual_start: '2026-08-28',
+          actual_finish: '2026-09-02',
+          actual_pct_complete: 75,
+          actual_quantity: null,
+          timestamp: '2026-09-02T14:30:05Z',
+        },
+      ];
       return {
         activity,
+        timeline: mockTimeline,
         history: [
           {
             timestamp: new Date(Date.now() - 7200000).toISOString(),
@@ -1536,14 +1705,10 @@ export const activitiesApi = {
       };
     }
     const data: any = await apiFetch(`/api/v1/activities/${activityId}/history`);
-    const timeline = data.timeline || [];
+    const timeline: ActivityTimelineItem[] = data.timeline || [];
     const eventItems = timeline.filter((t: any) => t.type === 'execution_event');
     const decisionItem = timeline.find((t: any) => t.type === 'planner_decision');
 
-    // Reuse the existing schedule-activity lookup (schedulesApi.getActivities
-    // hits the same endpoint) for real metadata instead of fabricating it.
-    // The schedule_id needed to address that endpoint comes from the
-    // activity's own linked execution events.
     const scheduleId = eventItems.find((ev: any) => ev.schedule_id)?.schedule_id;
     let activity: ScheduleActivity | null = null;
     if (scheduleId) {
@@ -1556,6 +1721,7 @@ export const activitiesApi = {
 
     return {
       activity,
+      timeline,
       history: eventItems.map((ev: any) => ({
         timestamp: ev.timestamp || ev.event_date || '',
         raw_claim_text: ev.raw_claim_text || '',
@@ -1564,9 +1730,20 @@ export const activitiesApi = {
         claimed_qty: ev.claimed_quantity,
         status: ev.status || 'EXTRACTED',
         supervisor_action: decisionItem?.action || null,
-        actor: 'System',
+        actor: decisionItem?.planner_id || 'System',
       })),
     };
+  },
+};
+
+export const graphApi = {
+  getActivityGraph: async (activityId: string, depth = 1, scheduleId?: string): Promise<{ nodes: any[]; edges: any[] }> => {
+    if (USE_MOCKS) {
+      await sleep(300);
+      return { nodes: [], edges: [] };
+    }
+    const query = scheduleId ? `?depth=${depth}&schedule_id=${scheduleId}` : `?depth=${depth}`;
+    return apiFetch<{ nodes: any[]; edges: any[] }>(`/api/v1/graph/activity/${activityId}${query}`);
   },
 };
 
@@ -1579,52 +1756,129 @@ export const schedulesApi = {
     return apiFetch(`/api/v1/schedules/${scheduleId}/activities`);
   },
 
-  getImpactPreview: async (activityId: string, delayDays: number): Promise<ImpactPreviewResult> => {
+  getImpactPreview: async (activityId: string, delayDays: number, scheduleId?: string): Promise<ImpactPreviewResult> => {
     if (USE_MOCKS) {
       await sleep(500);
       const activity = MOCK_ACTIVITIES.find((a) => a.activity_id === activityId) || MOCK_ACTIVITIES[0];
+      const mockImpacts: ImpactEvaluationItem[] = [
+        {
+          successor_activity_id: 'ACT-202',
+          activity_name: 'Rebar Placement — Column C4',
+          dependency_type: 'FS',
+          original_earliest_start: '2026-09-05',
+          shifted_earliest_start: '2026-09-10',
+          original_planned_finish: '2026-09-12',
+          shifted_earliest_finish: '2026-09-15',
+          propagation_depth: 1,
+          target_path: [activity.activity_id, 'ACT-202'],
+          execution_state: 'IN_PROGRESS',
+          gross_delay_days: delayDays,
+          total_float: 2,
+          float_status: 'KNOWN',
+          absorbed_delay_days: 2,
+          net_delay_days: Math.max(0, delayDays - 2),
+          controlling_predecessor: activity.activity_id,
+          controlling_relationship: 'FS',
+          uncertainty: false,
+          classification: delayDays > 2 ? 'CRITICAL_PATH_SLIP' : 'ABSORBED_BY_FLOAT',
+        },
+        {
+          successor_activity_id: 'ACT-301',
+          activity_name: 'Field Welding — 6" Crude Line L-1',
+          dependency_type: 'FS',
+          original_earliest_start: '2026-09-12',
+          shifted_earliest_start: '2026-09-15',
+          original_planned_finish: '2026-09-25',
+          shifted_earliest_finish: '2026-09-28',
+          propagation_depth: 2,
+          target_path: [activity.activity_id, 'ACT-202', 'ACT-301'],
+          execution_state: 'NOT_STARTED',
+          gross_delay_days: Math.max(0, delayDays - 2),
+          total_float: 0,
+          float_status: 'KNOWN',
+          absorbed_delay_days: 0,
+          net_delay_days: Math.max(0, delayDays - 2),
+          controlling_predecessor: 'ACT-202',
+          controlling_relationship: 'FS',
+          uncertainty: false,
+          classification: delayDays > 2 ? 'CRITICAL_PATH_SLIP' : 'NO_IMPACT',
+        },
+      ];
+
       return {
         activity_id: activity.activity_id,
+        activity_name: activity.activity_name,
+        planned_start: activity.planned_start,
+        planned_finish: activity.planned_finish,
+        shifted_finish: '2026-09-15',
         delay_days: delayDays,
-        disclaimer: 'Preview only · Immediate FS successors · Not full CPM recalculation',
-        successors: [
-          {
-            successor_activity_id: 'ACT-202',
-            activity_name: 'Rebar Placement — Column C4',
-            relationship_type: 'FS',
-            original_start: '2026-09-05',
-            original_finish: '2026-09-12',
-            shifted_start: '2026-09-10',
-            shifted_finish: '2026-09-17',
-            lag_days: 0,
-          },
-          {
-            successor_activity_id: 'ACT-301',
-            activity_name: 'Field Welding — 6" Crude Line L-1',
-            relationship_type: 'FS',
-            original_start: '2026-09-12',
-            original_finish: '2026-09-25',
-            shifted_start: '2026-09-17',
-            shifted_finish: '2026-09-30',
-            lag_days: 0,
-          },
-        ],
+        propagation_depth_limit: 5,
+        disclaimer: 'Preview only · Deterministic A1 CPM Evaluation · Full Multi-Hop Propagation',
+        impacts: mockImpacts,
+        successors: mockImpacts.map((imp) => ({
+          successor_activity_id: imp.successor_activity_id,
+          activity_name: imp.activity_name,
+          relationship_type: imp.dependency_type,
+          original_start: imp.original_earliest_start,
+          original_finish: imp.original_planned_finish,
+          shifted_start: imp.shifted_earliest_start,
+          shifted_finish: imp.shifted_earliest_finish,
+          lag_days: 0,
+          depth: imp.propagation_depth,
+          net_delay_days: imp.net_delay_days,
+          execution_state: imp.execution_state,
+        })),
       };
     }
-    const data: any = await apiFetch(`/api/v1/schedule/${activityId}/impact-preview?delay_days=${delayDays}`);
+    const queryParams = new URLSearchParams({ delay_days: String(delayDays) });
+    if (scheduleId) queryParams.set('schedule_id', scheduleId);
+    const data: any = await apiFetch(`/api/v1/schedule/${encodeURIComponent(activityId)}/impact-preview?${queryParams.toString()}`);
+    const impacts: ImpactEvaluationItem[] = (data.impacts || []).map((imp: any) => ({
+      successor_activity_id: imp.successor_activity_id,
+      activity_name: imp.activity_name || imp.successor_activity_id,
+      dependency_type: imp.dependency_type || 'FS',
+      original_earliest_start: imp.original_earliest_start || '',
+      shifted_earliest_start: imp.shifted_earliest_start || '',
+      original_planned_finish: imp.original_planned_finish || '',
+      shifted_earliest_finish: imp.shifted_earliest_finish || '',
+      propagation_depth: imp.propagation_depth || 1,
+      target_path: imp.target_path || [data.activity_id, imp.successor_activity_id],
+      execution_state: imp.execution_state || 'NOT_STARTED',
+      gross_delay_days: imp.gross_delay_days || 0,
+      total_float: imp.total_float ?? null,
+      float_status: imp.float_status || 'UNKNOWN',
+      absorbed_delay_days: imp.absorbed_delay_days ?? null,
+      net_delay_days: imp.net_delay_days ?? null,
+      controlling_predecessor: imp.controlling_predecessor ?? null,
+      controlling_relationship: imp.controlling_relationship ?? null,
+      uncertainty: Boolean(imp.uncertainty),
+      classification: imp.classification || 'NO_IMPACT',
+      constraints_evaluated: imp.constraints_evaluated || [],
+    }));
+
     return {
       activity_id: data.activity_id,
+      activity_name: data.activity_name || data.activity_id,
+      planned_start: data.planned_start || '',
+      planned_finish: data.planned_finish || '',
+      shifted_finish: data.shifted_finish || '',
+      schedule_id: data.schedule_id,
       delay_days: data.delay_days,
-      disclaimer: 'Preview only · Immediate FS successors · Not full CPM recalculation',
-      successors: (data.impacts || []).map((imp: any) => ({
+      propagation_depth_limit: data.propagation_depth_limit || 5,
+      disclaimer: 'Preview only · Deterministic A1 CPM Evaluation · Multi-hop bounded propagation',
+      impacts,
+      successors: impacts.map((imp) => ({
         successor_activity_id: imp.successor_activity_id,
-        activity_name: imp.successor_activity_id,
-        relationship_type: imp.dependency_type || 'FS',
-        original_start: imp.original_earliest_start || '',
-        original_finish: '',
-        shifted_start: imp.shifted_earliest_start || '',
-        shifted_finish: '',
+        activity_name: imp.activity_name,
+        relationship_type: imp.dependency_type,
+        original_start: imp.original_earliest_start,
+        original_finish: imp.original_planned_finish,
+        shifted_start: imp.shifted_earliest_start,
+        shifted_finish: imp.shifted_earliest_finish,
         lag_days: 0,
+        depth: imp.propagation_depth,
+        net_delay_days: imp.net_delay_days,
+        execution_state: imp.execution_state,
       })),
     };
   },

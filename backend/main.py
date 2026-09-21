@@ -56,6 +56,18 @@ app.add_middleware(
 )
 
 
+@app.get("/")
+def root():
+    return {
+        "status": "online",
+        "app": "SIH26122 Infrastructure Progress Tracking API",
+        "version": "0.1.0",
+        "docs": "/docs",
+        "health": "/health",
+        "frontend": "http://127.0.0.1:5173",
+    }
+
+
 @app.get("/health")
 def health():
     return {"status": "ok"}
