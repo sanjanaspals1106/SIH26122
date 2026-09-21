@@ -449,6 +449,8 @@ def _row_to_claim_response(row) -> ClaimResponse:
         clarification_question=row.get("clarification_question"),
         clarification_answer=row.get("clarification_answer"),
         field_provenance=field_provenance,
+        priority_score=row.get("priority_score"),
+        priority_reasons=row.get("priority_reasons"),
         created_at=row["created_at"],
     )
 

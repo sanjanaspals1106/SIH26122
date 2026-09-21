@@ -41,28 +41,16 @@ import base64
 import json
 import logging
 import os
-import time
 from typing import Optional
 
-import httpx
-import openai
 from openai import OpenAI
 
+from backend.shared import llm_client
+from backend.shared.llm_client import strip_code_fences
+from backend.shared.rule_extraction import extract_with_rules, fallback_enabled
 from backend.shared.schemas import ExtractedClaimFields
 
 logger = logging.getLogger(__name__)
-
-_client = None
-
-_PROVIDER_BASE_URLS = {
-    "groq": "https://api.groq.com/openai/v1",
-    "gemini": "https://generativelanguage.googleapis.com/v1beta/openai/",
-}
-
-_PROVIDER_DEFAULT_MODELS = {
-    "groq": "openai/gpt-oss-20b",
-    "gemini": "gemini-3.6-flash",
-}
 
 # Vision-capable model per provider. Gemini Flash is natively
 # multimodal, so it reuses the same default as text extraction. Groq's
@@ -88,43 +76,24 @@ class LLMExtractionError(Exception):
 
 
 def _load_env_if_needed() -> None:
-    # If the key is not already in the environment (e.g. server was started
-    # before .env was populated), try loading .env from the project root now.
-    if "LLM_API_KEY" not in os.environ:
-        import pathlib
-        from dotenv import load_dotenv
-        env_path = pathlib.Path(__file__).resolve().parents[2] / ".env"
-        load_dotenv(dotenv_path=env_path, override=False)
+    llm_client._load_env_if_needed()
 
 
 def _get_client() -> OpenAI:
-    global _client
-    if _client is None:
-        _load_env_if_needed()
-        provider = os.environ.get("LLM_PROVIDER", "groq").lower()
-        base_url = _PROVIDER_BASE_URLS.get(provider)
-        if base_url is None:
-            raise LLMExtractionError(
-                f"Unknown LLM_PROVIDER '{provider}' — expected 'groq' or 'gemini'"
-            )
-        api_key = os.environ.get("LLM_API_KEY")
-        if not api_key:
-            raise LLMExtractionError(
-                "LLM_API_KEY is not set. Add it to .env or export it before starting the server."
-            )
-        http_client = httpx.Client(timeout=30.0)
-        _client = OpenAI(api_key=api_key, base_url=base_url, http_client=http_client)
-    return _client
+    """The shared llm_client's provider client (single Groq/Gemini implementation)."""
+    try:
+        return llm_client.get_client()
+    except llm_client.LLMClientError as e:
+        raise LLMExtractionError(str(e)) from e
 
 
 def _get_model() -> str:
-    provider = os.environ.get("LLM_PROVIDER", "groq").lower()
-    return os.environ.get("LLM_MODEL", _PROVIDER_DEFAULT_MODELS.get(provider, "groq/compound-mini"))
+    return llm_client.get_default_model()
 
 
 def _get_vision_model() -> str:
     _load_env_if_needed()
-    provider = os.environ.get("LLM_PROVIDER", "groq").lower()
+    provider = llm_client.get_llm_provider()
     model = os.environ.get("LLM_VISION_MODEL") or _PROVIDER_DEFAULT_VISION_MODELS.get(provider)
     if not model:
         raise LLMExtractionError(
@@ -136,39 +105,12 @@ def _get_vision_model() -> str:
     return model
 
 
-# Retried: a transient rate limit, connection blip, or provider-side 5xx
-# (InternalServerError covers 500/502/503/504 -- e.g. Gemini's "model is
-# currently experiencing high demand... please try again later" 503, seen
-# in practice, which explicitly asks the caller to retry) is not a real
-# extraction failure and shouldn't immediately surface as one (or, worse,
-# be swallowed into a null claim by an older, looser handler) -- a couple
-# of short backoff retries resolves the common case. Anything else (bad
-# request, auth, model-not-found) is NOT retried; retrying those would just
-# burn time before failing the same way.
-_RETRYABLE_ERRORS = (
-    openai.RateLimitError,
-    openai.APIConnectionError,
-    openai.APITimeoutError,
-    openai.InternalServerError,
-)
-_MAX_RETRIES = 3
-_RETRY_BACKOFF_SECONDS = 4.0
-
-
 def _create_completion(client: OpenAI, **kwargs):
-    last_error: Optional[Exception] = None
-    for attempt in range(_MAX_RETRIES + 1):
-        try:
-            return client.chat.completions.create(**kwargs)
-        except _RETRYABLE_ERRORS as e:
-            last_error = e
-            if attempt < _MAX_RETRIES:
-                logger.warning(
-                    "LLM request failed (%s), retrying (%d/%d)...",
-                    e, attempt + 1, _MAX_RETRIES,
-                )
-                time.sleep(_RETRY_BACKOFF_SECONDS * (attempt + 1))
-    raise LLMExtractionError(f"LLM request failed after {_MAX_RETRIES + 1} attempts: {last_error}") from last_error
+    """Send a completion through the shared client's retrying sender."""
+    try:
+        return llm_client.create_completion(client, **kwargs)
+    except llm_client.LLMClientError as e:
+        raise LLMExtractionError(str(e)) from e
 
 
 SYSTEM_PROMPT = """You are a field-report extraction engine for a construction \
@@ -284,7 +226,7 @@ def _parse_batch_response(raw: Optional[str]) -> list[ExtractedClaimFields]:
     if not raw or not raw.strip():
         raise LLMExtractionError("LLM returned an empty response")
     try:
-        data = json.loads(raw)
+        data = json.loads(strip_code_fences(raw))
     except json.JSONDecodeError as e:
         raise LLMExtractionError(f"LLM response was not valid JSON: {e}") from e
 
@@ -337,16 +279,20 @@ def extract_claim_fields(raw_text: str) -> ExtractedClaimFields:
             response_format={"type": "json_object"},
             temperature=0,
         )
-    except LLMExtractionError:
-        raise
     except Exception as e:
-        raise LLMExtractionError(f"LLM request failed: {e}") from e
+        err = e if isinstance(e, LLMExtractionError) else LLMExtractionError(f"LLM request failed: {e}")
+        if fallback_enabled():
+            logger.warning("LLM extraction unavailable (%s); using rule-based fallback", err)
+            return extract_with_rules(raw_text)
+        if err is e:
+            raise
+        raise err from e
 
     raw = response.choices[0].message.content
     if not raw or not raw.strip():
         raise LLMExtractionError("LLM returned an empty response")
     try:
-        data = json.loads(raw)
+        data = json.loads(strip_code_fences(raw))
     except json.JSONDecodeError as e:
         raise LLMExtractionError(f"LLM response was not valid JSON: {e}") from e
     try:
@@ -380,10 +326,14 @@ def extract_claim_fields_batch(raw_text: str) -> list[ExtractedClaimFields]:
             response_format={"type": "json_object"},
             temperature=0,
         )
-    except LLMExtractionError:
-        raise
     except Exception as e:
-        raise LLMExtractionError(f"LLM request failed: {e}") from e
+        err = e if isinstance(e, LLMExtractionError) else LLMExtractionError(f"LLM request failed: {e}")
+        if fallback_enabled():
+            logger.warning("LLM batch extraction unavailable (%s); using rule-based fallback", err)
+            return [extract_with_rules(raw_text)]
+        if err is e:
+            raise
+        raise err from e
 
     return _parse_batch_response(response.choices[0].message.content)
 

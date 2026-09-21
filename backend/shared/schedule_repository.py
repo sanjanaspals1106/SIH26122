@@ -161,6 +161,22 @@ def get_schedule(schedule_id: str) -> Optional[Schedule]:
     return Schedule(**row) if row is not None else None
 
 
+def get_active_schedule() -> Optional[Schedule]:
+    """The schedule new claims are matched against: the most recently created one
+    (the same rule routers/intake.py uses), or None when no schedule exists."""
+    with get_connection() as conn:
+        row = conn.execute(
+            """
+            SELECT schedule_id, project_name, data_date, source_format
+            FROM schedules
+            ORDER BY created_at DESC
+            LIMIT 1
+            """
+        ).fetchone()
+
+    return Schedule(**row) if row is not None else None
+
+
 def list_schedules() -> list[Schedule]:
     """List all schedules, ordered by schedule_id."""
     with get_connection() as conn:

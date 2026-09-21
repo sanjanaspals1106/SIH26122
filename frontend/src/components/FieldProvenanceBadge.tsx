@@ -5,16 +5,22 @@ import { FieldProvenance, FieldProvenanceSource } from '../api';
 import { cn } from '../lib/utils';
 
 interface FieldProvenanceBadgeProps {
-  provenance?: FieldProvenance | null;
+  // The backend stores each tag as a plain string ("AI_EXTRACTED", ...); a richer
+  // {source, ...} object is also accepted.
+  provenance?: FieldProvenance | FieldProvenanceSource | string | null;
   size?: 'sm' | 'md';
   className?: string;
 }
 
 export const FieldProvenanceBadge: React.FC<FieldProvenanceBadgeProps> = ({
-  provenance,
+  provenance: rawProvenance,
   size = 'sm',
   className,
 }) => {
+  const provenance: FieldProvenance | null =
+    typeof rawProvenance === 'string'
+      ? { field_name: '', source: rawProvenance as FieldProvenanceSource }
+      : rawProvenance ?? null;
   const { t } = useTranslation();
   const [isOpen, setIsOpen] = useState(false);
 

@@ -128,23 +128,27 @@ def test_extract_claim_fields_raises_on_malformed_json(monkeypatch):
 def test_missing_api_key_raises_clearly(monkeypatch):
     """Missing configuration must fail visibly and specifically -- not as
     a generic exception, and not as a silently-empty claim."""
+    from backend.shared import llm_client
+
     monkeypatch.delenv("LLM_API_KEY", raising=False)
-    monkeypatch.setattr(llm_extraction, "_client", None)
-    # Prevent the module from reloading a real key from .env for this test.
-    monkeypatch.setattr(llm_extraction, "_load_env_if_needed", lambda: None)
+    monkeypatch.setattr(llm_client, "_client", None)
+    # Prevent the shared client from reloading a real key from .env for this test.
+    monkeypatch.setattr(llm_client, "_load_env_if_needed", lambda: None)
     with pytest.raises(LLMExtractionError, match="LLM_API_KEY"):
         extract_claim_fields("some text")
 
 
 def test_unknown_provider_raises_clearly(monkeypatch):
-    monkeypatch.setattr(llm_extraction, "_client", None)
+    from backend.shared import llm_client
+
+    monkeypatch.setattr(llm_client, "_client", None)
     monkeypatch.setenv("LLM_PROVIDER", "not-a-real-provider")
     monkeypatch.setenv("LLM_API_KEY", "dummy-key-for-this-test")
     try:
         with pytest.raises(LLMExtractionError, match="Unknown LLM_PROVIDER"):
             extract_claim_fields("some text")
     finally:
-        monkeypatch.setattr(llm_extraction, "_client", None)
+        monkeypatch.setattr(llm_client, "_client", None)
 
 
 def test_vision_extraction_raises_clearly_when_no_vision_model_configured(monkeypatch):

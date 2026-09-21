@@ -87,10 +87,22 @@ def create_test_db() -> SQLitePsycopgAdapter:
             event_type TEXT,
             claimed_pct REAL,
             delay_reason TEXT,
+            matched_activity_id TEXT,
             status TEXT DEFAULT 'EXTRACTED'
         )
         """
     )
+    # The summary scopes activity counts to the active (latest) schedule.
+    conn.execute(
+        """
+        CREATE TABLE schedules (
+            schedule_id TEXT PRIMARY KEY,
+            project_name TEXT,
+            created_at TEXT DEFAULT (datetime('now'))
+        )
+        """
+    )
+    conn.execute("INSERT INTO schedules (schedule_id, project_name) VALUES ('SCH-01', 'Test')")
     conn.execute(
         """
         CREATE TABLE approved_actuals (

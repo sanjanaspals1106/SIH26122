@@ -163,6 +163,18 @@ def create_phase10_test_db() -> SQLitePsycopgAdapter:
         )
         """
     )
+    # PRD v6 WBS split rows (read by the approved-actuals quantity recalculation)
+    conn.execute(
+        """
+        CREATE TABLE claim_activity_splits (
+            split_id TEXT PRIMARY KEY,
+            event_id TEXT NOT NULL,
+            activity_id TEXT NOT NULL,
+            split_basis TEXT,
+            split_pct REAL NOT NULL
+        )
+        """
+    )
     # Conflict records table
     conn.execute(
         """

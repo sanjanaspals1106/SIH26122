@@ -126,6 +126,35 @@ def _dispatch_adapters(actual: dict) -> dict:
     }
 
 
+def approved_split_quantity(conn: Any, schedule_id: Optional[str], activity_id: str) -> float:
+    """
+    Approved incremental quantity contributed to `activity_id` by WBS-split
+    (decomposed) claims: for each split claim whose LATEST decision is
+    APPROVE/EDIT, COALESCE(approved_qty, claimed_quantity) x split_pct.
+    Source-decision based like every other quantity recalculation -- never a
+    running total.
+    """
+    row = conn.execute(
+        """
+        SELECT COALESCE(SUM(COALESCE(pd.approved_qty, ee.claimed_quantity) * s.split_pct), 0.0) AS qty
+        FROM execution_events ee
+        JOIN planner_decisions pd ON pd.event_id = ee.event_id
+        JOIN claim_activity_splits s ON s.event_id = ee.event_id AND s.activity_id = %s
+        WHERE (CAST(%s AS TEXT) IS NULL OR ee.schedule_id = %s)
+          AND ee.claim_mode = 'INCREMENTAL_QUANTITY'
+          AND pd.action IN ('APPROVE', 'EDIT')
+          AND pd.decision_id = (
+            SELECT pd2.decision_id FROM planner_decisions pd2
+            WHERE pd2.event_id = ee.event_id
+            ORDER BY pd2.decided_at DESC, pd2.decision_id DESC
+            LIMIT 1
+          )
+        """,
+        (activity_id, schedule_id, schedule_id),
+    ).fetchone()
+    return float(row["qty"]) if row and row["qty"] is not None else 0.0
+
+
 def _execute_upsert(
     conn: Any,
     schedule_id: str,
@@ -152,8 +181,14 @@ def _execute_upsert(
     pd_approved_pct = dec_row["approved_pct"] if dec_row else None
     pd_approved_qty = dec_row["approved_qty"] if dec_row else None
 
+    # WBS split child (Feature 30): the claim is decomposed, so the caller names the child
+    # activity and its share. The decision's own selected_activity_id is just the primary child.
+    split_pct = fields.get("split_pct")
+    if split_pct is not None:
+        split_pct = float(split_pct)
+
     # Authority: After planner review, planner_decisions.selected_activity_id is authoritative
-    if pd_selected_activity:
+    if pd_selected_activity and split_pct is None:
         activity_id = pd_selected_activity
 
     action = fields.get("action") or pd_action
@@ -244,6 +279,8 @@ def _execute_upsert(
 
         if pct_candidate is not None:
             final_pct = float(pct_candidate)
+            if split_pct is not None:
+                final_pct = final_pct * split_pct  # contribution = claim value x split_pct
             final_pct = max(0.0, min(100.0, final_pct))
         else:
             final_pct = (
@@ -275,6 +312,9 @@ def _execute_upsert(
                 ORDER BY pd2.decided_at DESC, pd2.decision_id DESC
                 LIMIT 1
               )
+              AND NOT EXISTS (
+                SELECT 1 FROM claim_activity_splits s WHERE s.event_id = ee.event_id
+              )
             """,
             (schedule_id, activity_id),
         ).fetchone()
@@ -284,6 +324,9 @@ def _execute_upsert(
             if recalc_row and recalc_row["total_qty"] is not None
             else 0.0
         )
+        # Split claims are excluded above (their decision names only the primary
+        # child); add every split child's share of every such approved claim.
+        recalculated_qty += approved_split_quantity(conn, schedule_id, activity_id)
 
         if recalculated_qty > 0.0:
             final_quantity = recalculated_qty

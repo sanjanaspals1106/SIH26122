@@ -1,14 +1,20 @@
-import copy
+import logging
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
-from backend.shared.auth import UserProfile, get_current_user
+from backend.shared.auth import UserProfile, get_current_user, require_role
 from backend.shared.schemas import CandidateMatch, ExecutionClaim, ScheduleActivity
+from backend.shared.wbs_split import (
+    SplitEditError,
+    allocate_split,
+    apply_manual_split_edit,
+    classify_claim_scope,
+    find_wbs_group,
+)
 
-# Module-level in-memory split fallback database for offline/test environments
-_in_memory_splits_db: Dict[str, List[dict]] = {}
+logger = logging.getLogger(__name__)
 
 try:
     from backend.shared.db import get_connection
@@ -802,657 +808,141 @@ def match_claim(
     if hybrid_cands:
         return rank_and_explain_candidates(hybrid_cands)
 
-def get_wbs_context(
-    schedule_id: str,
-    activity_id: Optional[str],
-    schedule_activities: Optional[List[Union[ScheduleActivity, dict]]] = None,
+# ---------------------------------------------------------------------------
+# Feature 30 -- WBS Granularity Bridge (M3 half). Decision logic lives in
+# backend/shared/wbs_split.py; this section loads inputs and persists rows to
+# claim_activity_splits. A claim has EITHER matched_activity_id OR split rows.
+# ---------------------------------------------------------------------------
+
+def _activity_dicts(schedule_activities: List[ScheduleActivity]) -> List[dict]:
+    return [a.model_dump() if hasattr(a, "model_dump") else dict(a) for a in schedule_activities]
+
+
+def _load_split_inputs(cur, schedule_id: str, member_ids: List[str]) -> Tuple[Dict[str, dict], List[dict]]:
+    """Approved actuals and intra-group dependencies for the sibling activities."""
+    cur.execute(
+        """
+        SELECT activity_id, actual_start, actual_finish, actual_pct_complete, actual_quantity
+        FROM approved_actuals
+        WHERE schedule_id = %s AND activity_id = ANY(%s)
+        """,
+        (schedule_id, member_ids),
+    )
+    actuals = {r["activity_id"]: dict(r) for r in cur.fetchall()}
+    cur.execute(
+        """
+        SELECT predecessor_activity_id, successor_activity_id, relationship_type, lag_days
+        FROM schedule_dependencies
+        WHERE schedule_id = %s
+          AND predecessor_activity_id = ANY(%s) AND successor_activity_id = ANY(%s)
+        """,
+        (schedule_id, member_ids, member_ids),
+    )
+    return actuals, [dict(r) for r in cur.fetchall()]
+
+
+def decide_wbs_split(
+    cur,
+    claim: ExecutionClaim,
+    candidates: List[CandidateMatch],
+    schedule_activities: List[ScheduleActivity],
+    is_ambiguous: bool,
 ) -> Optional[dict]:
     """
-    Retrieves WBS context for a matched activity within a schedule.
-    Supports hierarchical WBS grouping:
-    1. Try exact wbs_code matching first.
-    2. If exact WBS group has only 1 activity, fall back to parent_id / Parent_ID.
-    3. If parent ID is unavailable/single, fall back to parent WBS prefix (e.g., '1.01' from '1.01.03').
-    4. Build wbs_group_activities and sibling_activity_ids from the resulting group.
+    Inspect the top candidate's WBS group and, for a broad claim, allocate it
+    across the eligible siblings. Returns None when the normal single-activity
+    match applies, otherwise {"group", "scope", "alloc"} (alloc may have
+    status FAILED, in which case the caller keeps the normal match).
     """
-    if not activity_id:
+    if not candidates or candidates[0].match_tier == HARD_MISMATCH:
         return None
-
-    if schedule_activities is None:
-        if get_connection is None:
-            return None
-        try:
-            with get_connection() as conn:
-                with conn.cursor() as cur:
-                    cur.execute(
-                        "SELECT * FROM schedule_activities WHERE schedule_id = %s",
-                        (schedule_id,),
-                    )
-                    rows = cur.fetchall()
-                    schedule_activities = [
-                        ScheduleActivity(**r) if isinstance(r, dict) else r
-                        for r in rows
-                    ]
-        except Exception:
-            return None
-
-    target_act = None
-    for act in schedule_activities:
-        act_id = None
-        if isinstance(act, ScheduleActivity):
-            act_id = act.activity_id
-        elif isinstance(act, dict):
-            act_id = act.get("activity_id") or act.get("Activity_ID")
-        if act_id == activity_id:
-            target_act = act
-            break
-
-    if target_act is None:
+    activities = _activity_dicts(schedule_activities)
+    group = find_wbs_group(candidates[0].activity_id, activities)
+    if not group:
         return None
-
-    def _extract_wbs(act):
-        if isinstance(act, ScheduleActivity):
-            return getattr(act, "wbs_code", None) or getattr(act, "wbs", None) or getattr(act, "WBS", None)
-        elif isinstance(act, dict):
-            return act.get("wbs_code") or act.get("wbs") or act.get("WBS")
-        return None
-
-    def _extract_parent(act):
-        if isinstance(act, ScheduleActivity):
-            return getattr(act, "parent_id", None) or getattr(act, "Parent_ID", None) or getattr(act, "parent_wbs", None)
-        elif isinstance(act, dict):
-            return act.get("parent_id") or act.get("Parent_ID") or act.get("parent_wbs")
-        return None
-
-    def _extract_act_id(act):
-        if isinstance(act, ScheduleActivity):
-            return act.activity_id
-        elif isinstance(act, dict):
-            return act.get("activity_id") or act.get("Activity_ID")
-        return None
-
-    target_wbs_raw = _extract_wbs(target_act)
-    target_parent_raw = _extract_parent(target_act)
-
-    target_wbs = str(target_wbs_raw).strip() if target_wbs_raw else None
-    target_parent = str(target_parent_raw).strip() if target_parent_raw else None
-
-    if not target_wbs and not target_parent:
-        return {
-            "wbs_code": None,
-            "wbs_group_activities": [activity_id],
-            "sibling_activity_ids": [],
-        }
-
-    def _collect_group(predicate):
-        group = []
-        for act in schedule_activities:
-            aid = _extract_act_id(act)
-            if aid and predicate(act, aid):
-                if aid not in group:
-                    group.append(aid)
-        return group
-
-    # Step 1: Exact wbs_code matching
-    exact_group = []
-    if target_wbs:
-        exact_group = _collect_group(lambda act, aid: (_extract_wbs(act) or "").strip() == target_wbs)
-
-    if len(exact_group) > 1:
-        siblings = [aid for aid in exact_group if aid != activity_id]
-        return {
-            "wbs_code": target_wbs,
-            "wbs_group_activities": exact_group,
-            "sibling_activity_ids": siblings,
-        }
-
-    # Step 2: Fall back to parent_id / Parent_ID
-    parent_group = []
-    if target_parent:
-        parent_group = _collect_group(
-            lambda act, aid: (_extract_parent(act) or "").strip() == target_parent
-            or (_extract_wbs(act) or "").strip() == target_parent
-        )
-
-    if len(parent_group) > 1:
-        siblings = [aid for aid in parent_group if aid != activity_id]
-        return {
-            "wbs_code": target_parent,
-            "wbs_group_activities": parent_group,
-            "sibling_activity_ids": siblings,
-        }
-
-    # Step 3: Fall back to parent WBS prefix (e.g. '1.01' from '1.01.03')
-    prefix_group = []
-    parent_prefix = None
-    if target_wbs and "." in target_wbs:
-        parts = target_wbs.split(".")
-        if len(parts) >= 2:
-            parent_prefix = ".".join(parts[:-1])
-            prefix_group = _collect_group(
-                lambda act, aid: (_extract_wbs(act) or "").strip().startswith(parent_prefix)
-            )
-
-    if len(prefix_group) > 1 and parent_prefix:
-        siblings = [aid for aid in prefix_group if aid != activity_id]
-        return {
-            "wbs_code": parent_prefix,
-            "wbs_group_activities": prefix_group,
-            "sibling_activity_ids": siblings,
-        }
-
-    # Fallback if no broader group contains > 1 activity
-    final_wbs = target_wbs or target_parent
-    final_group = exact_group or [activity_id]
-    siblings = [aid for aid in final_group if aid != activity_id]
-    return {
-        "wbs_code": final_wbs,
-        "wbs_group_activities": final_group,
-        "sibling_activity_ids": siblings,
-    }
-
-
-BROAD_SCOPE_KEYWORDS = [
-    "general",
-    "across",
-    "entire",
-    "overall",
-    "works in progress",
-    "in progress",
-    "site-wide",
-    "area-wide",
-    "wbs level",
-    "broad claim",
-    "all activities",
-]
-
-
-def detect_claim_scope(
-    claim: Union[ExecutionClaim, dict],
-    wbs_context: Optional[dict] = None,
-    candidates: Optional[List[CandidateMatch]] = None,
-) -> dict:
-    """
-    M3 Step 5: Broad/WBS-Level Claim Detection.
-    Determines whether an execution claim target is SPECIFIC to a single schedule activity
-    or BROAD_WBS spanning multiple sibling activities within a WBS group.
-
-    Returns dict:
-    {
-        "claim_scope": "SPECIFIC" | "BROAD_WBS",
-        "scope_reason": str
-    }
-    """
-    if isinstance(claim, ExecutionClaim):
-        claim_text = claim.raw_claim_text or ""
-        reported_id = claim.reported_activity_id
-    elif isinstance(claim, dict):
-        claim_text = claim.get("raw_claim_text", "") or ""
-        reported_id = claim.get("reported_activity_id")
-    else:
-        claim_text = ""
-        reported_id = None
-
-    # Safety check for WBS context & sibling activities
-    if not wbs_context or not wbs_context.get("wbs_code"):
-        return {
-            "claim_scope": "SPECIFIC",
-            "scope_reason": "No WBS context available for broad expansion",
-        }
-
-    siblings = wbs_context.get("sibling_activity_ids") or []
-    if not siblings:
-        return {
-            "claim_scope": "SPECIFIC",
-            "scope_reason": "Single activity in WBS group; cannot broaden across siblings",
-        }
-
-    # If claim explicitly references a reported_activity_id, treat as specific
-    if reported_id and str(reported_id).strip():
-        return {
-            "claim_scope": "SPECIFIC",
-            "scope_reason": f"Explicit reported activity ID provided ({reported_id})",
-        }
-
-    # Analyze raw_claim_text for broad/WBS-level signals
-    text_lower = claim_text.lower()
-    matched_broad_terms = [
-        kw for kw in BROAD_SCOPE_KEYWORDS if kw in text_lower
-    ]
-
-    if matched_broad_terms:
-        term_str = ", ".join(f"'{t}'" for t in matched_broad_terms[:2])
-        group_size = len(siblings) + 1
-        wbs_code = wbs_context.get("wbs_code")
-        return {
-            "claim_scope": "BROAD_WBS",
-            "scope_reason": (
-                f"Broad scope wording ({term_str}) detected across "
-                f"{group_size} activities in WBS group '{wbs_code}'"
-            ),
-        }
-
-    return {
-        "claim_scope": "SPECIFIC",
-        "scope_reason": "Claim describes a specific activity scope",
-    }
-
-
-def allocate_wbs_splits(
-    claim: Union[ExecutionClaim, dict],
-    claim_scope: str,
-    wbs_context: Optional[dict],
-    schedule_activities: Optional[List[Union[ScheduleActivity, dict]]] = None,
-) -> dict:
-    """
-    M3 Step 6: Deterministic WBS Split Allocation.
-    For BROAD_WBS claims, allocates claim quantity proportionally across eligible WBS activities
-    using planned quantities.
-
-    Returns dict:
-    {
-        "wbs_splits": List[dict] or None,
-        "allocation_status": "SUCCESS" | "FAILED" | "SKIPPED",
-        "allocation_reason": str
-    }
-    """
-    if claim_scope != "BROAD_WBS":
-        return {
-            "wbs_splits": None,
-            "allocation_status": "SKIPPED",
-            "allocation_reason": "Claim scope is not BROAD_WBS",
-        }
-
-    if not wbs_context or not wbs_context.get("wbs_group_activities"):
-        return {
-            "wbs_splits": None,
-            "allocation_status": "FAILED",
-            "allocation_reason": "Allocation failed: No WBS group activities available",
-        }
-
-    if isinstance(claim, ExecutionClaim):
-        claim_qty = claim.claimed_quantity
-    elif isinstance(claim, dict):
-        claim_qty = claim.get("claimed_quantity")
-    else:
-        claim_qty = None
-
-    if claim_qty is None:
-        return {
-            "wbs_splits": None,
-            "allocation_status": "FAILED",
-            "allocation_reason": "Allocation failed: Claim quantity is missing or None",
-        }
-
-    try:
-        claim_qty_val = float(claim_qty)
-    except (ValueError, TypeError):
-        return {
-            "wbs_splits": None,
-            "allocation_status": "FAILED",
-            "allocation_reason": f"Allocation failed: Invalid claim quantity '{claim_qty}'",
-        }
-
-    if claim_qty_val <= 0.0:
-        return {
-            "wbs_splits": None,
-            "allocation_status": "FAILED",
-            "allocation_reason": f"Allocation failed: Claim quantity ({claim_qty_val}) must be > 0",
-        }
-
-    group_act_ids = wbs_context.get("wbs_group_activities", [])
-    if not schedule_activities:
-        return {
-            "wbs_splits": None,
-            "allocation_status": "FAILED",
-            "allocation_reason": "Allocation failed: No schedule activities provided",
-        }
-
-    act_by_id = {}
-    for act in schedule_activities:
-        if isinstance(act, ScheduleActivity):
-            aid = act.activity_id
-        elif isinstance(act, dict):
-            aid = act.get("activity_id") or act.get("Activity_ID")
-        else:
-            continue
-        if aid:
-            act_by_id[aid] = act
-
-    eligible = []
-    for aid in group_act_ids:
-        act = act_by_id.get(aid)
-        if not act:
-            continue
-
-        if isinstance(act, ScheduleActivity):
-            p_qty = act.planned_quantity
-            w_code = act.wbs_code
-        elif isinstance(act, dict):
-            p_qty = act.get("planned_quantity") if "planned_quantity" in act else act.get("Planned_Quantity")
-            w_code = act.get("wbs_code") or act.get("wbs") or act.get("WBS")
-        else:
-            continue
-
-        if p_qty is not None:
-            try:
-                p_qty_val = float(p_qty)
-                if p_qty_val > 0.0:
-                    eligible.append(
-                        {
-                            "activity_id": aid,
-                            "wbs_code": w_code or wbs_context.get("wbs_code"),
-                            "planned_quantity": p_qty_val,
-                        }
-                    )
-            except (ValueError, TypeError):
-                pass
-
-    if not eligible:
-        return {
-            "wbs_splits": None,
-            "allocation_status": "FAILED",
-            "allocation_reason": "Allocation failed: No valid positive planned quantities in WBS group",
-        }
-
-    total_planned = sum(item["planned_quantity"] for item in eligible)
-    if total_planned <= 0.0:
-        return {
-            "wbs_splits": None,
-            "allocation_status": "FAILED",
-            "allocation_reason": "Allocation failed: Sum of planned quantities in WBS group is 0",
-        }
-
-    splits = []
-    running_allocated_sum = 0.0
-    num_eligible = len(eligible)
-
-    for idx, item in enumerate(eligible):
-        weight = item["planned_quantity"] / total_planned
-        alloc_pct = round(weight * 100.0, 4)
-
-        if idx == num_eligible - 1:
-            allocated_qty = round(claim_qty_val - running_allocated_sum, 4)
-        else:
-            allocated_qty = round(claim_qty_val * weight, 4)
-            running_allocated_sum += allocated_qty
-
-        splits.append(
-            {
-                "activity_id": item["activity_id"],
-                "wbs_code": item["wbs_code"],
-                "planned_quantity": item["planned_quantity"],
-                "allocation_pct": alloc_pct,
-                "allocated_quantity": allocated_qty,
-            }
-        )
-
-    return {
-        "wbs_splits": splits,
-        "allocation_status": "SUCCESS",
-        "allocation_reason": f"Proportionally allocated {claim_qty_val} across {num_eligible} eligible WBS activities",
-    }
-
-
-def validate_claim_wbs_splits(
-    event_id: str,
-    claimed_quantity: float,
-    splits: List[dict],
-    schedule_activities: Optional[List[Union[ScheduleActivity, dict]]] = None,
-    expected_wbs_code: Optional[str] = None,
-) -> Tuple[bool, str]:
-    """
-    M3 Step 10: Centralized Split Validation & XOR Invariant Service.
-    Enforces explicit data integrity rules across WBS split allocations:
-    1. sum(allocated_quantity) == claimed_quantity (XOR / exact-sum invariant)
-    2. Non-negative allocated quantities (>= 0.0)
-    3. Consistency of event_id across all split records
-    4. Reference validity against known schedule activities (if provided)
-    5. Consistency of WBS metadata (if provided)
-
-    Returns (is_valid: bool, reason: str)
-    """
-    if not splits or len(splits) == 0:
-        return False, "Splits list is empty or None"
-
-    try:
-        expected_qty = round(float(claimed_quantity), 4)
-    except (ValueError, TypeError):
-        return False, f"Invalid expected claim quantity: '{claimed_quantity}'"
-
-    valid_act_ids = set()
-    act_wbs_map = {}
-    if schedule_activities:
-        for act in schedule_activities:
-            if isinstance(act, ScheduleActivity):
-                aid = act.activity_id
-                wcode = act.wbs_code
-            elif isinstance(act, dict):
-                aid = act.get("activity_id") or act.get("Activity_ID")
-                wcode = act.get("wbs_code") or act.get("wbs") or act.get("WBS")
-            else:
-                continue
-            if aid:
-                valid_act_ids.add(aid)
-                if wcode:
-                    act_wbs_map[aid] = str(wcode).strip()
-
-    total_allocated = 0.0
-
-    for idx, s in enumerate(splits):
-        if not isinstance(s, dict):
-            return False, f"Split at index {idx} is not a valid dictionary"
-
-        s_event_id = s.get("event_id")
-        if s_event_id and str(s_event_id).strip() != str(event_id).strip():
-            return (
-                False,
-                f"Event ID mismatch: split event_id '{s_event_id}' does not match claim event_id '{event_id}'",
-            )
-
-        aid = s.get("activity_id")
-        if not aid or not str(aid).strip():
-            return False, f"Split at index {idx} is missing activity_id"
-        aid_clean = str(aid).strip()
-
-        if valid_act_ids and aid_clean not in valid_act_ids:
-            return (
-                False,
-                f"Invalid activity reference: activity '{aid_clean}' is not in schedule activities",
-            )
-
-        raw_qty = s.get("allocated_quantity")
-        if raw_qty is None:
-            return False, f"Missing allocated_quantity for activity '{aid_clean}'"
-        try:
-            qty_val = float(raw_qty)
-        except (ValueError, TypeError):
-            return False, f"Invalid non-numeric allocated_quantity '{raw_qty}' for activity '{aid_clean}'"
-
-        if qty_val < 0.0:
-            return (
-                False,
-                f"Invalid non-negative quantity check failed for activity '{aid_clean}': {qty_val} < 0.0",
-            )
-
-        total_allocated += qty_val
-
-        s_wbs = s.get("wbs_code")
-        if expected_wbs_code and s_wbs:
-            sw_clean = str(s_wbs).strip()
-            ew_clean = str(expected_wbs_code).strip()
-            if (
-                sw_clean != ew_clean
-                and not sw_clean.startswith(ew_clean)
-                and not ew_clean.startswith(sw_clean)
-            ):
-                return (
-                    False,
-                    f"Inconsistent WBS metadata: split WBS code '{sw_clean}' conflicts with WBS group code '{ew_clean}'",
-                )
-
-    total_allocated_rounded = round(total_allocated, 4)
-
-    if total_allocated_rounded != expected_qty:
-        if total_allocated_rounded > expected_qty:
-            return (
-                False,
-                f"Quantity invariant failed: sum of splits ({total_allocated_rounded}) exceeds original claim quantity ({expected_qty})",
-            )
-        else:
-            return (
-                False,
-                f"Quantity invariant failed: sum of splits ({total_allocated_rounded}) is less than original claim quantity ({expected_qty})",
-            )
-
-    return True, f"Centralized validation passed: sum({total_allocated_rounded}) == claimed_quantity({expected_qty})"
-
-
-def _do_persist_db(cur, event_id: str, schedule_id: str, splits: List[dict]):
-    """
-    Executes idempotent deletion and table insertion inside active DB transaction cursor.
-    """
-    cur.execute(
-        """
-        CREATE TABLE IF NOT EXISTS claim_wbs_splits (
-            split_id TEXT PRIMARY KEY,
-            event_id TEXT NOT NULL,
-            schedule_id TEXT NOT NULL,
-            activity_id TEXT NOT NULL,
-            wbs_code TEXT,
-            planned_quantity REAL,
-            allocation_pct REAL,
-            allocated_quantity REAL NOT NULL,
-            created_at TIMESTAMPTZ DEFAULT now(),
-            UNIQUE (event_id, activity_id)
-        );
-        """
+    member_ids = [m["activity_id"] for m in group["members"]]
+    ambiguous_in_group = bool(
+        is_ambiguous and len(candidates) >= 2 and candidates[1].activity_id in member_ids
     )
-    # Idempotent delete before insert
-    cur.execute(
-        "DELETE FROM claim_wbs_splits WHERE event_id = %s",
-        (event_id,),
+    claim_dict = claim.model_dump()
+    scope = classify_claim_scope(
+        claim_dict,
+        group,
+        {"activity_id": candidates[0].activity_id, "match_tier": candidates[0].match_tier},
+        ambiguous_in_group,
     )
-    for s in splits:
-        split_id = f"split_{event_id}_{s['activity_id']}"
+    if scope["claim_scope"] != "BROAD_WBS":
+        return {"group": group, "scope": scope, "alloc": None}
+    actuals, deps = _load_split_inputs(cur, claim.schedule_id, member_ids)
+    alloc = allocate_split(
+        claim_dict,
+        group["members"],
+        actuals,
+        deps,
+        claim_date=claim.event_date,
+        summary_activity_id=group["summary_activity_id"],
+    )
+    return {"group": group, "scope": scope, "alloc": alloc}
+
+
+def replace_claim_splits(cur, event_id: str, schedule_id: str, rows: List[dict]) -> None:
+    """Idempotently replace a claim's split rows (call inside the caller's transaction)."""
+    cur.execute("DELETE FROM claim_activity_splits WHERE event_id = %s", (event_id,))
+    for r in rows:
         cur.execute(
             """
-            INSERT INTO claim_wbs_splits (
-                split_id, event_id, schedule_id, activity_id,
-                wbs_code, planned_quantity, allocation_pct, allocated_quantity
-            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+            INSERT INTO claim_activity_splits (
+                split_id, event_id, activity_id, split_basis, split_pct, schedule_id,
+                wbs_code, planned_quantity, allocated_quantity, uom, rationale
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """,
             (
-                split_id,
+                f"split_{event_id}_{r['activity_id']}",
                 event_id,
+                r["activity_id"],
+                r["split_basis"],
+                r["split_pct"],
                 schedule_id,
-                s["activity_id"],
-                s.get("wbs_code"),
-                s.get("planned_quantity"),
-                s.get("allocation_pct"),
-                s["allocated_quantity"],
+                r.get("wbs_code"),
+                r.get("planned_quantity"),
+                r.get("allocated_quantity"),
+                r.get("uom"),
+                r.get("rationale"),
             ),
         )
 
 
-def persist_wbs_splits(
-    event_id: str,
-    schedule_id: str,
-    claim_scope: str,
-    alloc_info: dict,
-    cursor_or_conn: Optional[Any] = None,
-) -> dict:
-    """
-    M3 Step 7: Persist WBS Split Allocations.
-    Idempotently persists valid BROAD_WBS split allocations to claim_wbs_splits table
-    within an atomic transaction. Never modifies original execution_events claimed_quantity.
-
-    Returns dict:
-    {
-        "persisted": bool,
-        "split_count": int,
-        "total_allocated_quantity": float,
-        "splits": List[dict],
-        "message": str
-    }
-    """
-    splits = alloc_info.get("wbs_splits") if alloc_info else None
-    status = alloc_info.get("allocation_status") if alloc_info else "SKIPPED"
-
-    if claim_scope != "BROAD_WBS" or status != "SUCCESS" or not splits:
-        _in_memory_splits_db.pop(event_id, None)
-        if cursor_or_conn is not None:
-            try:
-                cur = (
-                    cursor_or_conn.cursor()
-                    if hasattr(cursor_or_conn, "cursor")
-                    else cursor_or_conn
-                )
-                cur.execute(
-                    "DELETE FROM claim_wbs_splits WHERE event_id = %s",
-                    (event_id,),
-                )
-            except Exception:
-                pass
-        return {
-            "persisted": False,
-            "split_count": 0,
-            "total_allocated_quantity": 0.0,
-            "splits": [],
-            "message": f"Skipped persistence: claim_scope={claim_scope}, status={status}",
-        }
-
-    total_allocated = sum(s["allocated_quantity"] for s in splits)
-    if total_allocated <= 0.0:
-        return {
-            "persisted": False,
-            "split_count": 0,
-            "total_allocated_quantity": 0.0,
-            "splits": [],
-            "message": "Rejected persistence: Total allocated quantity is <= 0",
-        }
-
-    if cursor_or_conn is None:
-        if get_connection is None:
-            _in_memory_splits_db[event_id] = copy.deepcopy(splits)
-            return {
-                "persisted": True,
-                "split_count": len(splits),
-                "total_allocated_quantity": round(total_allocated, 4),
-                "splits": splits,
-                "message": f"In-memory persistence validated (DB offline): {len(splits)} splits",
-            }
-        try:
-            with get_connection() as conn:
-                with conn.cursor() as cur:
-                    _do_persist_db(cur, event_id, schedule_id, splits)
-                conn.commit()
-            _in_memory_splits_db[event_id] = copy.deepcopy(splits)
-        except Exception as e:
-            _in_memory_splits_db[event_id] = copy.deepcopy(splits)
-            return {
-                "persisted": True,
-                "split_count": len(splits),
-                "total_allocated_quantity": round(total_allocated, 4),
-                "splits": splits,
-                "message": f"In-memory persistence validated (DB offline/error): {len(splits)} splits",
-            }
-    else:
-        cur = (
-            cursor_or_conn.cursor()
-            if hasattr(cursor_or_conn, "cursor")
-            else cursor_or_conn
-        )
-        _do_persist_db(cur, event_id, schedule_id, splits)
-        _in_memory_splits_db[event_id] = copy.deepcopy(splits)
-
-    return {
-        "persisted": True,
-        "split_count": len(splits),
-        "total_allocated_quantity": round(total_allocated, 4),
-        "splits": splits,
-        "message": f"Successfully persisted {len(splits)} WBS splits for event {event_id}",
-    }
+def read_claim_splits(cur, event_id: str) -> List[dict]:
+    """Split rows for a claim, with the per-child contribution for its claim mode."""
+    cur.execute(
+        "SELECT claim_mode, claimed_pct, claimed_quantity FROM execution_events WHERE event_id = %s",
+        (event_id,),
+    )
+    ev = cur.fetchone() or {}
+    cur.execute(
+        """
+        SELECT split_id, event_id, schedule_id, activity_id, wbs_code, split_basis, split_pct,
+               planned_quantity, allocated_quantity, uom, rationale, created_at
+        FROM claim_activity_splits
+        WHERE event_id = %s
+        ORDER BY activity_id ASC
+        """,
+        (event_id,),
+    )
+    rows = []
+    for r in cur.fetchall():
+        row = dict(r)
+        pct_mode = (ev.get("claim_mode") or "CUMULATIVE_PCT") == "CUMULATIVE_PCT"
+        if pct_mode:
+            row["allocated_pct"] = (
+                round(float(ev["claimed_pct"]) * float(row["split_pct"]), 4)
+                if ev.get("claimed_pct") is not None else None
+            )
+            row["allocated_quantity"] = None
+        elif ev.get("claimed_quantity") is not None:
+            row["allocated_quantity"] = round(float(ev["claimed_quantity"]) * float(row["split_pct"]), 4)
+        rows.append(row)
+    return rows
 
 
 @router.post("/{event_id}/match")
@@ -1592,7 +1082,20 @@ def match_claim_endpoint(
                 else:
                     unmatched_reason = "No matching schedule activities found"
 
-            # 5. Persist up to 3 ranked candidates and update execution_event safely
+            # 5. Feature 30: broad claims are decomposed across WBS siblings instead of
+            #    forcing one leaf. Normal match and split are mutually exclusive (XOR).
+            split_info = decide_wbs_split(cur, claim, candidates, schedule_activities, is_ambiguous)
+            alloc = split_info["alloc"] if split_info else None
+            is_split = bool(alloc and alloc["status"] == "SUCCESS")
+            split_rows: List[dict] = alloc["splits"] if is_split else []
+            if is_split:
+                status = "MATCHED"
+                matched_activity_id = None
+                unmatched_reason = None
+                top_tier = candidates[0].match_tier
+                top_confidence = candidates[0].composite_confidence
+
+            # 6. Persist up to 3 ranked candidates and update execution_event safely
             cur.execute(
                 "DELETE FROM candidate_matches WHERE event_id = %s",
                 (event_id,),
@@ -1626,6 +1129,8 @@ def match_claim_endpoint(
                     ),
                 )
 
+            replace_claim_splits(cur, event_id, claim.schedule_id, split_rows)
+
             cur.execute(
                 """
                 UPDATE execution_events
@@ -1635,9 +1140,31 @@ def match_claim_endpoint(
                 (status, matched_activity_id, event_id),
             )
 
+            # Feature 33: an activity_id resolved by schedule matching is SCHEDULE_AUTO_FILLED;
+            # a split/unmatched claim has no single resolved activity, so drop a stale tag.
+            if matched_activity_id and status == "MATCHED":
+                cur.execute(
+                    """
+                    UPDATE execution_events
+                    SET field_provenance = COALESCE(field_provenance, '{}'::jsonb)
+                                           || '{"activity_id": "SCHEDULE_AUTO_FILLED"}'::jsonb
+                    WHERE event_id = %s
+                    """,
+                    (event_id,),
+                )
+            else:
+                cur.execute(
+                    """
+                    UPDATE execution_events
+                    SET field_provenance = COALESCE(field_provenance, '{}'::jsonb) - 'activity_id'
+                    WHERE event_id = %s
+                    """,
+                    (event_id,),
+                )
+
             conn.commit()
 
-            # 6. Audit log integration
+            # 7. Audit log integration
             if write_audit_log is not None:
                 try:
                     write_audit_log(
@@ -1649,33 +1176,17 @@ def match_claim_endpoint(
                         after_state={
                             "status": status,
                             "matched_activity_id": matched_activity_id,
+                            "split_activity_ids": [r["activity_id"] for r in split_rows],
                         },
                         payload={
                             "match_tier": top_tier,
                             "composite_confidence": top_confidence,
                             "unmatched_reason": unmatched_reason,
+                            "claim_scope": split_info["scope"]["claim_scope"] if split_info else "SPECIFIC",
                         },
                     )
                 except Exception:
-                    pass
-
-            target_act_id = matched_activity_id or (
-                candidates[0].activity_id if candidates else None
-            )
-            wbs_context = get_wbs_context(
-                claim.schedule_id, target_act_id, schedule_activities
-            )
-            scope_info = detect_claim_scope(claim, wbs_context, candidates)
-            alloc_info = allocate_wbs_splits(
-                claim, scope_info["claim_scope"], wbs_context, schedule_activities
-            )
-            persist_info = persist_wbs_splits(
-                event_id=event_id,
-                schedule_id=claim.schedule_id,
-                claim_scope=scope_info["claim_scope"],
-                alloc_info=alloc_info,
-                cursor_or_conn=cur,
-            )
+                    logger.exception("match audit log failed for %s", event_id)
 
             res = {
                 "event_id": event_id,
@@ -1684,13 +1195,20 @@ def match_claim_endpoint(
                 "composite_confidence": top_confidence,
                 "candidates": [c.model_dump() for c in top_3],
                 "status": status,
-                "wbs_context": wbs_context,
-                "claim_scope": scope_info["claim_scope"],
-                "scope_reason": scope_info["scope_reason"],
-                "wbs_splits": alloc_info["wbs_splits"],
-                "allocation_status": alloc_info["allocation_status"],
-                "allocation_reason": alloc_info["allocation_reason"],
-                "splits_persisted": persist_info["persisted"],
+                "claim_scope": "BROAD_WBS" if is_split else "SPECIFIC",
+                "scope_reason": (
+                    split_info["scope"]["scope_reason"] if split_info
+                    else "Activity has no WBS group with 2+ members"
+                ),
+                "wbs_group": (
+                    {"wbs_code": split_info["group"]["wbs_code"],
+                     "members": [m["activity_id"] for m in split_info["group"]["members"]]}
+                    if split_info else None
+                ),
+                "splits": split_rows,
+                "allocation_status": alloc["status"] if alloc else "SKIPPED",
+                "allocation_reason": alloc["reason"] if alloc else "Claim scope is not BROAD_WBS",
+                "excluded_siblings": alloc["excluded"] if alloc else [],
             }
             if unmatched_reason:
                 res["unmatched_reason"] = unmatched_reason
@@ -1713,385 +1231,87 @@ def rematch_claim_endpoint(
     )
 
 
-def get_persisted_wbs_splits(
-    event_id: str,
-    cursor_or_conn: Optional[Any] = None,
-) -> List[dict]:
-    """
-    M3 Step 8: GET Persisted WBS Split Rows.
-    Reads existing persisted split rows for an execution claim without recalculating or mutating DB.
-    Returns deterministic list of split dicts ordered by activity_id ASC.
-    """
-    if not event_id:
-        return []
-
-    splits: List[dict] = []
-
-    def _fetch_from_cur(cur):
-        cur.execute(
-            """
-            SELECT split_id, event_id, schedule_id, activity_id,
-                   wbs_code, planned_quantity, allocation_pct, allocated_quantity, created_at
-            FROM claim_wbs_splits
-            WHERE event_id = %s
-            ORDER BY activity_id ASC
-            """,
-            (event_id,),
-        )
-        rows = cur.fetchall()
-        for r in rows:
-            if isinstance(r, dict):
-                splits.append(
-                    {
-                        "split_id": r.get("split_id"),
-                        "event_id": r.get("event_id"),
-                        "schedule_id": r.get("schedule_id"),
-                        "activity_id": r.get("activity_id"),
-                        "wbs_code": r.get("wbs_code"),
-                        "planned_quantity": r.get("planned_quantity"),
-                        "allocation_pct": r.get("allocation_pct"),
-                        "allocated_quantity": r.get("allocated_quantity"),
-                    }
-                )
-            else:
-                splits.append(
-                    {
-                        "split_id": r[0],
-                        "event_id": r[1],
-                        "schedule_id": r[2],
-                        "activity_id": r[3],
-                        "wbs_code": r[4],
-                        "planned_quantity": r[5],
-                        "allocation_pct": r[6],
-                        "allocated_quantity": r[7],
-                    }
-                )
-
-    if cursor_or_conn is not None:
-        try:
-            cur = (
-                cursor_or_conn.cursor()
-                if hasattr(cursor_or_conn, "cursor")
-                else cursor_or_conn
-            )
-            _fetch_from_cur(cur)
-        except Exception:
-            return copy.deepcopy(_in_memory_splits_db.get(event_id, []))
-    else:
-        if get_connection is None:
-            return copy.deepcopy(_in_memory_splits_db.get(event_id, []))
-        try:
-            with get_connection() as conn:
-                with conn.cursor() as cur:
-                    _fetch_from_cur(cur)
-        except Exception:
-            return copy.deepcopy(_in_memory_splits_db.get(event_id, []))
-
-    if not splits and event_id in _in_memory_splits_db:
-        return copy.deepcopy(_in_memory_splits_db[event_id])
-
-    return splits
-
-
 @router.get("/{event_id}/splits")
-def get_claim_splits_endpoint(event_id: str):
+def get_claim_splits_endpoint(
+    event_id: str,
+    current_user: UserProfile = Depends(get_current_user),
+):
     """
     GET /api/v1/claims/{event_id}/splits
-    Retrieves persisted WBS split allocation rows for an execution claim.
-    Returns deterministic list of splits ordered by activity_id ASC.
-    Read-only: does NOT modify DB or recalculate allocations.
+    The claim's WBS split rows (empty list for a normal single-activity match).
+    Read-only: does not recalculate allocations.
     """
-    if get_connection is None:
-        raise HTTPException(
-            status_code=500, detail="Database connection module unavailable."
-        )
-
     with get_connection() as conn:
         with conn.cursor() as cur:
-            cur.execute(
-                "SELECT event_id FROM execution_events WHERE event_id = %s",
-                (event_id,),
-            )
-            row = cur.fetchone()
-            if not row:
-                raise HTTPException(
-                    status_code=404,
-                    detail=f"Execution claim '{event_id}' not found.",
-                )
-
-            splits = get_persisted_wbs_splits(event_id, cursor_or_conn=cur)
-            total_qty = sum(s["allocated_quantity"] for s in splits)
-
-            return {
-                "event_id": event_id,
-                "splits": splits,
-                "total_allocated_quantity": round(total_qty, 4),
-                "split_count": len(splits),
-            }
+            cur.execute("SELECT 1 FROM execution_events WHERE event_id = %s", (event_id,))
+            if not cur.fetchone():
+                raise HTTPException(status_code=404, detail=f"Execution claim '{event_id}' not found.")
+            splits = read_claim_splits(cur, event_id)
+    return {
+        "event_id": event_id,
+        "splits": splits,
+        "split_count": len(splits),
+        "total_split_pct": round(sum(float(s["split_pct"]) for s in splits), 4),
+    }
 
 
 class SplitUpdateRequest(BaseModel):
-    activity_id: Optional[str] = None
-    split_id: Optional[str] = None
-    allocated_quantity: float
+    activity_id: str
+    split_pct: float  # FRACTION in [0, 1]; 0 drops the row
 
 
 class PatchSplitsRequest(BaseModel):
     splits: List[SplitUpdateRequest]
 
 
-def update_persisted_wbs_splits(
-    event_id: str,
-    updates: List[dict],
-    claimed_quantity: float,
-    cursor_or_conn: Optional[Any] = None,
-) -> dict:
-    """
-    M3 Step 9: PATCH Persisted WBS Split Rows.
-    Updates existing persisted split quantities for an execution claim without rerunning matching or creating new rows.
-    Enforces exact quantity invariant: sum(updated split quantities) == claimed_quantity.
-
-    Returns dict:
-    {
-        "success": bool,
-        "splits": List[dict],
-        "total_allocated_quantity": float,
-        "message": str
-    }
-    """
-    if not event_id or not updates:
-        return {
-            "success": False,
-            "splits": [],
-            "total_allocated_quantity": 0.0,
-            "message": "Invalid request: event_id and non-empty updates required",
-        }
-
-    existing_splits = get_persisted_wbs_splits(event_id, cursor_or_conn=cursor_or_conn)
-    if not existing_splits:
-        return {
-            "success": False,
-            "splits": [],
-            "total_allocated_quantity": 0.0,
-            "message": f"No persisted WBS splits exist for claim '{event_id}' to update",
-        }
-
-    existing_map = {s["activity_id"]: s for s in existing_splits}
-    existing_split_id_map = {s["split_id"]: s for s in existing_splits}
-
-    if len(updates) != len(existing_splits):
-        return {
-            "success": False,
-            "splits": [],
-            "total_allocated_quantity": 0.0,
-            "message": f"Split count mismatch: update payload has {len(updates)} splits, expected {len(existing_splits)}",
-        }
-
-    new_quantities = {}
-    for item in updates:
-        if isinstance(item, BaseModel):
-            item_dict = item.model_dump()
-        elif isinstance(item, dict):
-            item_dict = item
-        else:
-            continue
-
-        act_id = item_dict.get("activity_id")
-        split_id = item_dict.get("split_id")
-        if not act_id and split_id in existing_split_id_map:
-            act_id = existing_split_id_map[split_id]["activity_id"]
-
-        if not act_id or act_id not in existing_map:
-            return {
-                "success": False,
-                "splits": [],
-                "total_allocated_quantity": 0.0,
-                "message": f"Unknown or invalid activity/split ID '{act_id or split_id}' for claim '{event_id}'",
-            }
-
-        raw_qty = item_dict.get("allocated_quantity")
-        if raw_qty is None:
-            return {
-                "success": False,
-                "splits": [],
-                "total_allocated_quantity": 0.0,
-                "message": f"Missing allocated_quantity for activity '{act_id}'",
-            }
-
-        try:
-            qty_val = float(raw_qty)
-        except (ValueError, TypeError):
-            return {
-                "success": False,
-                "splits": [],
-                "total_allocated_quantity": 0.0,
-                "message": f"Invalid non-numeric allocated_quantity '{raw_qty}' for activity '{act_id}'",
-            }
-
-        if qty_val < 0.0:
-            return {
-                "success": False,
-                "splits": [],
-                "total_allocated_quantity": 0.0,
-                "message": f"Negative allocated_quantity ({qty_val}) rejected for activity '{act_id}'",
-            }
-
-        new_quantities[act_id] = qty_val
-
-    if len(new_quantities) != len(existing_splits):
-        return {
-            "success": False,
-            "splits": [],
-            "total_allocated_quantity": 0.0,
-            "message": "Duplicate or missing activity updates in payload",
-        }
-
-    total_updated_qty = round(sum(new_quantities.values()), 4)
-    expected_qty = round(float(claimed_quantity), 4)
-
-    if total_updated_qty != expected_qty:
-        return {
-            "success": False,
-            "splits": [],
-            "total_allocated_quantity": 0.0,
-            "message": f"Quantity invariant failed: sum of updated splits ({total_updated_qty}) does not equal claim quantity ({expected_qty})",
-        }
-
-    updated_splits = []
-    for s in existing_splits:
-        aid = s["activity_id"]
-        new_q = new_quantities[aid]
-        pct = round((new_q / expected_qty) * 100.0, 4) if expected_qty > 0 else 0.0
-        updated_s = dict(s)
-        updated_s["allocated_quantity"] = new_q
-        updated_s["allocation_pct"] = pct
-        updated_splits.append(updated_s)
-
-    sorted_splits = sorted(updated_splits, key=lambda x: x["activity_id"])
-    _in_memory_splits_db[event_id] = copy.deepcopy(sorted_splits)
-
-    if cursor_or_conn is not None:
-        try:
-            cur = (
-                cursor_or_conn.cursor()
-                if hasattr(cursor_or_conn, "cursor")
-                else cursor_or_conn
-            )
-            for s in sorted_splits:
-                cur.execute(
-                    """
-                    UPDATE claim_wbs_splits
-                    SET allocated_quantity = %s, allocation_pct = %s
-                    WHERE event_id = %s AND activity_id = %s
-                    """,
-                    (s["allocated_quantity"], s["allocation_pct"], event_id, s["activity_id"]),
-                )
-        except Exception as e:
-            return {
-                "success": False,
-                "splits": [],
-                "total_allocated_quantity": 0.0,
-                "message": f"Database update error: {str(e)}",
-            }
-    else:
-        if get_connection is not None:
-            try:
-                with get_connection() as conn:
-                    with conn.cursor() as cur:
-                        for s in sorted_splits:
-                            cur.execute(
-                                """
-                                UPDATE claim_wbs_splits
-                                SET allocated_quantity = %s, allocation_pct = %s
-                                WHERE event_id = %s AND activity_id = %s
-                                """,
-                                (s["allocated_quantity"], s["allocation_pct"], event_id, s["activity_id"]),
-                            )
-                    conn.commit()
-            except Exception:
-                pass
-
-    return {
-        "success": True,
-        "splits": sorted_splits,
-        "total_allocated_quantity": total_updated_qty,
-        "message": f"Successfully updated {len(sorted_splits)} split quantities for claim '{event_id}'",
-    }
-
-
 @router.patch("/{event_id}/splits")
 def patch_claim_splits_endpoint(
     event_id: str,
-    payload: Union[PatchSplitsRequest, dict, List[Any]],
+    payload: PatchSplitsRequest,
+    current_user: UserProfile = Depends(require_role("SUPERVISOR")),
 ):
     """
-    PATCH /api/v1/claims/{event_id}/splits
-    Updates existing persisted WBS split quantities for an execution claim.
-    Read-only for original claim text & quantity.
-    Enforces exact quantity invariant: sum(updated split quantities) == original claimed_quantity.
-    Transactional: on validation failure, nothing is persisted.
+    PATCH /api/v1/claims/{event_id}/splits  (Supervisor only)
+    Edit split_pct fractions. Rows whose value actually changed become MANUAL.
+    The result must sum to 1.0000 +/- 0.0001 (never auto-repaired); on any
+    validation failure nothing is persisted. Re-run /check afterwards so per-child
+    validation and priority reflect the edit.
     """
-    if get_connection is None:
-        raise HTTPException(
-            status_code=500, detail="Database connection module unavailable."
-        )
-
-    if isinstance(payload, PatchSplitsRequest):
-        updates = [s.model_dump() for s in payload.splits]
-    elif isinstance(payload, dict):
-        raw_splits = payload.get("splits", [])
-        updates = [s.model_dump() if isinstance(s, BaseModel) else s for s in raw_splits]
-    elif isinstance(payload, list):
-        updates = [s.model_dump() if isinstance(s, BaseModel) else s for s in payload]
-    else:
-        raise HTTPException(status_code=400, detail="Invalid request body payload.")
-
     with get_connection() as conn:
         with conn.cursor() as cur:
-            cur.execute(
-                "SELECT claimed_quantity FROM execution_events WHERE event_id = %s",
-                (event_id,),
-            )
-            row = cur.fetchone()
-            if not row:
-                raise HTTPException(
-                    status_code=404,
-                    detail=f"Execution claim '{event_id}' not found.",
+            cur.execute("SELECT schedule_id FROM execution_events WHERE event_id = %s", (event_id,))
+            ev = cur.fetchone()
+            if not ev:
+                raise HTTPException(status_code=404, detail=f"Execution claim '{event_id}' not found.")
+            before = read_claim_splits(cur, event_id)
+            try:
+                edited = apply_manual_split_edit(
+                    before, [{"activity_id": u.activity_id, "split_pct": u.split_pct} for u in payload.splits]
                 )
-
-            claimed_qty = row.get("claimed_quantity") if isinstance(row, dict) else row[0]
-            if claimed_qty is None:
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"Execution claim '{event_id}' has no valid claimed_quantity.",
-                )
-
-            update_res = update_persisted_wbs_splits(
-                event_id, updates, claimed_qty, cursor_or_conn=cur
-            )
-
-            if not update_res["success"]:
-                raise HTTPException(
-                    status_code=400,
-                    detail=update_res["message"],
-                )
-
+            except SplitEditError as e:
+                raise HTTPException(status_code=400, detail=str(e))
+            replace_claim_splits(cur, event_id, ev["schedule_id"], edited)
             conn.commit()
+            after = read_claim_splits(cur, event_id)
 
-            return {
-                "event_id": event_id,
-                "splits": update_res["splits"],
-                "total_allocated_quantity": update_res["total_allocated_quantity"],
-                "split_count": len(update_res["splits"]),
-                "message": update_res["message"],
-            }
+    if write_audit_log is not None:
+        try:
+            write_audit_log(
+                entity_type="claim_splits",
+                entity_id=event_id,
+                action="SPLIT_EDIT",
+                actor_id=str(current_user.id),
+                before_state={r["activity_id"]: r["split_pct"] for r in before},
+                after_state={r["activity_id"]: r["split_pct"] for r in after},
+                payload={"bases": {r["activity_id"]: r["split_basis"] for r in after}},
+            )
+        except Exception:
+            logger.exception("split edit audit log failed for %s", event_id)
 
-
-
-
-
-
-
-
-
-
+    return {
+        "event_id": event_id,
+        "splits": after,
+        "split_count": len(after),
+        "total_split_pct": round(sum(float(s["split_pct"]) for s in after), 4),
+        "message": f"Updated {len(after)} split rows",
+    }

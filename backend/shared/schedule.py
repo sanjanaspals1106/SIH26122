@@ -71,7 +71,12 @@ undiscoverable:
                                 supported — not a separate dependency
                                 section/file — matching this format's
                                 one-row-per-activity shape.
+                                Several predecessors may share one row,
+                                separated by ';' (e.g. "A-1;A-2").
     Relationship Type        -> one of FS, SS, FF, SF (case-insensitive);
+                                for multiple predecessors give one value
+                                per predecessor ("FS;SS") or a single value
+                                applied to all;
                                 defaults to 'FS' (matching
                                 schedule_dependencies.relationship_type's
                                 DB default) when the column is absent or
@@ -532,9 +537,40 @@ def parse_schedule_csv(csv_text: str, schedule_id: str) -> ScheduleParseResult:
         if predecessor_raw:
             relationship_type_raw = _clean(row.get(_RELATIONSHIP_TYPE_COLUMN))
             lag_days_raw = _find_column_value(row, _LAG_DAYS_COLUMNS)
-            pending_dependencies.append(
-                (row_number, activity_id, predecessor_raw, relationship_type_raw, lag_days_raw)
+            # A row may list several predecessors separated by ';' (with parallel
+            # ';'-separated relationship types / lags, or one value applied to all).
+            preds = [p.strip() for p in predecessor_raw.split(";") if p.strip()]
+            rels = [r.strip() for r in relationship_type_raw.split(";")] if relationship_type_raw else []
+            lags = (
+                [x.strip() for x in str(lag_days_raw).split(";")]
+                if lag_days_raw is not None and _clean(lag_days_raw) is not None
+                else []
             )
+            bad_shape = False
+            for field_name, values in (("relationship_type", rels), ("lag_days", lags)):
+                if len(values) not in (0, 1, len(preds)):
+                    errors.append(
+                        ScheduleValidationError(
+                            row_number,
+                            field_name,
+                            f"has {len(values)} values for {len(preds)} predecessors "
+                            "(expected 1 or one per predecessor)",
+                            activity_id,
+                        )
+                    )
+                    bad_shape = True
+            if bad_shape:
+                continue
+
+            def _pick(values: list[str], i: int) -> Optional[str]:
+                if not values:
+                    return None
+                return (values[i] if len(values) > 1 else values[0]) or None
+
+            for i, pred in enumerate(preds):
+                pending_dependencies.append(
+                    (row_number, activity_id, pred, _pick(rels, i), _pick(lags, i))
+                )
 
     dependencies = _resolve_dependencies(
         schedule_id, {a.activity_id for a in activities}, pending_dependencies, errors

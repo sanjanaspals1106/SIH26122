@@ -6,6 +6,7 @@ from typing import Any, Dict, List, Optional, Tuple, Set, Sequence
 
 from fastapi import APIRouter, Depends, HTTPException
 
+from backend.shared.actuals import approved_split_quantity
 from backend.shared.audit import get_audit_trail, list_recent_audit_logs, write_audit_log
 from backend.shared.db import get_connection
 
@@ -652,6 +653,7 @@ def evaluate_incremental_quantity_anomalies(
         ).fetchone()
 
         total_prior = float(prior_qty_row["total_qty"]) if (prior_qty_row and prior_qty_row.get("total_qty") is not None) else 0.0
+        total_prior += approved_split_quantity(conn, schedule_id, matched_activity_id)
         total_sum = total_prior + claimed_qty
         derived_pct = round((total_sum / planned_qty) * 100.0, 2)
 
@@ -3075,7 +3077,7 @@ def get_activity_rollup(activity_id: str, schedule_id: Optional[str] = None):
             SELECT COALESCE(SUM(COALESCE(pd.approved_qty, ee.claimed_quantity)), 0.0) AS total_approved_qty
             FROM execution_events ee
             JOIN planner_decisions pd ON pd.event_id = ee.event_id
-            WHERE (%s IS NULL OR ee.schedule_id = %s)
+            WHERE (CAST(%s AS TEXT) IS NULL OR ee.schedule_id = %s)
               AND ee.matched_activity_id = %s
               AND pd.action IN ('APPROVE', 'EDIT')
               AND pd.decision_id = (
@@ -3088,6 +3090,7 @@ def get_activity_rollup(activity_id: str, schedule_id: Optional[str] = None):
         ).fetchone()
 
         sum_qty = qty_row["total_approved_qty"] if qty_row else 0.0
+        sum_qty = float(sum_qty or 0.0) + approved_split_quantity(conn, schedule_id, activity_id)
         derived_pct = 0.0
         if planned_quantity > 0:
             derived_pct = min(
@@ -3105,7 +3108,7 @@ def get_activity_rollup(activity_id: str, schedule_id: Optional[str] = None):
                   WHERE pd2.event_id = ee.event_id
                   ORDER BY pd2.decided_at DESC LIMIT 1
               )
-            WHERE (%s IS NULL OR ee.schedule_id = %s)
+            WHERE (CAST(%s AS TEXT) IS NULL OR ee.schedule_id = %s)
               AND (ee.matched_activity_id = %s OR ee.reported_activity_id = %s)
             ORDER BY ee.event_date DESC, ee.created_at DESC
             """,

@@ -185,7 +185,8 @@ def build_deterministic_aggregate(
             event_type,
             discipline,
             event_date,
-            delay_reason
+            delay_reason,
+            matched_activity_id
         FROM execution_events
         WHERE event_date >= %s AND event_date <= %s
     """
@@ -293,6 +294,8 @@ def build_deterministic_aggregate(
         val_by_severity[sev] = val_by_severity.get(sev, 0) + 1
 
     # 5. Activities & Canonical Execution States (Phase 1C Rule E)
+    # Scope to the active (most recently created) schedule so re-uploaded baselines
+    # are not double counted.
     act_query = """
         SELECT
             sa.activity_id,
@@ -307,10 +310,11 @@ def build_deterministic_aggregate(
         FROM schedule_activities sa
         LEFT JOIN approved_actuals aa
           ON aa.schedule_id = sa.schedule_id AND aa.activity_id = sa.activity_id
+        WHERE sa.schedule_id = (SELECT schedule_id FROM schedules ORDER BY created_at DESC LIMIT 1)
     """
     act_params = []
     if disc_norm != "ALL":
-        act_query += " WHERE UPPER(TRIM(sa.discipline)) = %s"
+        act_query += " AND UPPER(TRIM(sa.discipline)) = %s"
         act_params.append(disc_norm)
 
     act_rows = [_row_to_dict(r) for r in _execute(act_query, tuple(act_params)).fetchall()]
@@ -360,6 +364,7 @@ def build_deterministic_aggregate(
         "discipline": disc_norm,
         "claims": {
             "total_claims": len(claims_rows),
+            "activities_with_events": len({r["matched_activity_id"] for r in claims_rows if r.get("matched_activity_id")}),
             "by_status": claims_by_status,
             "by_event_type": claims_by_event_type,
         },

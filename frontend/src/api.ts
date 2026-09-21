@@ -137,7 +137,7 @@ export interface ExecutionEvent {
   priority_reasons?: string[] | null;
   is_escalated?: boolean | null;
   priority_rank?: number | null;
-  field_provenance?: Record<string, FieldProvenance> | null;
+  field_provenance?: Record<string, FieldProvenance | FieldProvenanceSource> | null;
 }
 
 export interface SourceReference {
@@ -428,6 +428,7 @@ export interface AskWhyResponse {
 // ─── Feature 35: AI Execution Summary ────────────────────────────────────────
 
 export interface ExecutionSummaryFilter {
+  language?: string; // display language (en/hi/te); canonical stored summary stays English
   start?: string;
   end?: string;
   start_date?: string; // backwards compatibility alias
@@ -1039,6 +1040,31 @@ function extractMockClaimFields(text: string): {
   };
 }
 
+// ─── Backend → UI shape normalisation ────────────────────────────────────────
+// The backend stores priority_reasons as newline-separated "[Tag] explanation" lines
+// and scores are unbounded points (routine ≈ 5, critical-path sequence error ≥ 200).
+// The UI works with a list of reasons, a rank and an escalation flag.
+const ESCALATION_SCORE_THRESHOLD = 100; // >= one critical-severity issue (base 100) or worse
+
+function normalizeEvent(raw: any, rank?: number): ExecutionEvent {
+  if (!raw || typeof raw !== 'object') return raw;
+  const reasons =
+    typeof raw.priority_reasons === 'string'
+      ? raw.priority_reasons
+          .split('\n')
+          .map((l: string) => l.replace(/^\[[^\]]+\]\s*/, '').trim())
+          .filter(Boolean)
+      : raw.priority_reasons ?? null;
+  const score = raw.priority_score == null ? null : Number(raw.priority_score);
+  return {
+    ...raw,
+    priority_score: score,
+    priority_reasons: reasons,
+    is_escalated: raw.is_escalated ?? (score != null ? score >= ESCALATION_SCORE_THRESHOLD : null),
+    priority_rank: rank ?? raw.priority_rank ?? null,
+  } as ExecutionEvent;
+}
+
 export const claimsApi = {
   submitText: async (text: string): Promise<{ event: ExecutionEvent }> => {
     if (USE_MOCKS) {
@@ -1333,8 +1359,11 @@ export const claimsApi = {
         ],
       };
     }
-    // PRD endpoint: GET /api/v1/graph/activity/{activity_id}?depth=N
-    const data = await apiFetch(`/api/v1/graph/activity/${activityId}?depth=${depth}`);
+    // Deterministic Ask Why over the knowledge graph (GET /api/v1/graph/activity/{id}?depth=N
+    // returns the raw nodes/edges; /graph/explain adds the causal explanation from stored records).
+    const qs = new URLSearchParams({ depth: String(depth) });
+    if (request.event_id) qs.set('event_id', request.event_id);
+    const data = await apiFetch(`/api/v1/graph/explain/${encodeURIComponent(activityId)}?${qs.toString()}`);
     return data as AskWhyResponse;
   },
 
@@ -1347,7 +1376,10 @@ export const claimsApi = {
     }
     // PRD endpoint: GET /api/v1/review-queue?sort=priority
     const data: any = await apiFetch(`/api/v1/review-queue?sort=${sort}`);
-    return Array.isArray(data) ? data : data.queue || data.claims || [];
+    const items: any[] = Array.isArray(data)
+      ? data
+      : data.items || data.review_queue || data.queue || data.claims || [];
+    return items.map((it, i) => normalizeEvent(it, i + 1));
   },
 
   getEvent: async (eventId: string): Promise<ExecutionEvent> => {
@@ -1355,7 +1387,7 @@ export const claimsApi = {
       await sleep(300);
       return MOCK_EVENTS.find((e) => e.event_id === eventId) || MOCK_EVENTS[1];
     }
-    return apiFetch(`/api/v1/claims/${eventId}`);
+    return normalizeEvent(await apiFetch(`/api/v1/claims/${eventId}`));
   },
 };
 
@@ -1365,7 +1397,8 @@ export const digestApi = {
       await sleep(500);
       return MOCK_EVENTS;
     }
-    return apiFetch(`/api/v1/digest?date=${dateStr}`);
+    const rows: any[] = await apiFetch(`/api/v1/digest?date=${dateStr}`);
+    return rows.map((r) => normalizeEvent(r));
   },
 
   // No `date` param -> GET /api/v1/digest returns every claim regardless of
@@ -1379,7 +1412,8 @@ export const digestApi = {
       await sleep(500);
       return MOCK_EVENTS;
     }
-    return apiFetch('/api/v1/digest');
+    const rows: any[] = await apiFetch('/api/v1/digest');
+    return rows.map((r) => normalizeEvent(r));
   },
 
   bulkApprove: async (eventIds: string[]): Promise<{ approved: string[]; failed: string[] }> => {
@@ -1736,24 +1770,42 @@ export const activitiesApi = {
   },
 };
 
+// The schedule new claims are matched against (most recently created). Cached for the
+// session; real mode only -- mock mode keeps its fixed mock schedule id.
+let activeScheduleIdPromise: Promise<string> | null = null;
+export function getActiveScheduleId(): Promise<string> {
+  if (USE_MOCKS) return Promise.resolve('sched-OIL-2026');
+  if (!activeScheduleIdPromise) {
+    activeScheduleIdPromise = apiFetch<{ schedule_id: string }>('/api/v1/schedules/active')
+      .then((s) => s.schedule_id)
+      .catch((err) => {
+        activeScheduleIdPromise = null; // retry next call
+        throw err;
+      });
+  }
+  return activeScheduleIdPromise;
+}
+
 export const graphApi = {
   getActivityGraph: async (activityId: string, depth = 1, scheduleId?: string): Promise<{ nodes: any[]; edges: any[] }> => {
     if (USE_MOCKS) {
       await sleep(300);
       return { nodes: [], edges: [] };
     }
-    const query = scheduleId ? `?depth=${depth}&schedule_id=${scheduleId}` : `?depth=${depth}`;
+    const sid = scheduleId ?? (await getActiveScheduleId().catch(() => undefined));
+    const query = sid ? `?depth=${depth}&schedule_id=${sid}` : `?depth=${depth}`;
     return apiFetch<{ nodes: any[]; edges: any[] }>(`/api/v1/graph/activity/${activityId}${query}`);
   },
 };
 
 export const schedulesApi = {
-  getActivities: async (scheduleId: string = 'sched-OIL-2026'): Promise<ScheduleActivity[]> => {
+  getActivities: async (scheduleId?: string): Promise<ScheduleActivity[]> => {
     if (USE_MOCKS) {
       await sleep(300);
       return MOCK_ACTIVITIES;
     }
-    return apiFetch(`/api/v1/schedules/${scheduleId}/activities`);
+    const sid = scheduleId ?? (await getActiveScheduleId());
+    return apiFetch(`/api/v1/schedules/${sid}/activities`);
   },
 
   getImpactPreview: async (activityId: string, delayDays: number, scheduleId?: string): Promise<ImpactPreviewResult> => {
@@ -1831,7 +1883,8 @@ export const schedulesApi = {
       };
     }
     const queryParams = new URLSearchParams({ delay_days: String(delayDays) });
-    if (scheduleId) queryParams.set('schedule_id', scheduleId);
+    const impactScheduleId = scheduleId ?? (await getActiveScheduleId().catch(() => undefined));
+    if (impactScheduleId) queryParams.set('schedule_id', impactScheduleId);
     const data: any = await apiFetch(`/api/v1/schedule/${encodeURIComponent(activityId)}/impact-preview?${queryParams.toString()}`);
     const impacts: ImpactEvaluationItem[] = (data.impacts || []).map((imp: any) => ({
       successor_activity_id: imp.successor_activity_id,
@@ -1883,7 +1936,8 @@ export const schedulesApi = {
     };
   },
 
-  getWbsTree: async (scheduleId: string = 'sched-OIL-2026'): Promise<WBSTreeResponse> => {
+  getWbsTree: async (scheduleIdArg?: string): Promise<WBSTreeResponse> => {
+    const scheduleId = scheduleIdArg ?? (await getActiveScheduleId().catch(() => 'sched-OIL-2026'));
     if (USE_MOCKS) {
       await sleep(400);
       // Group existing mock activities by wbs_code to mirror backend shape
@@ -1913,7 +1967,7 @@ export const wbsApi = {
           event_id: eventId,
           activity_id: 'ACT-202',
           split_basis: 'WBS_WEIGHTED',
-          split_pct: 60,
+          split_pct: 0.6,
           allocated_quantity: 45,
           uom: 'cu.m',
           rationale: 'Primary work package',
@@ -1924,7 +1978,7 @@ export const wbsApi = {
           event_id: eventId,
           activity_id: 'ACT-203',
           split_basis: 'MANUAL',
-          split_pct: 40,
+          split_pct: 0.4,
           allocated_quantity: 30,
           uom: 'cu.m',
           rationale: 'Secondary tie-in / handover scope',
@@ -1932,8 +1986,9 @@ export const wbsApi = {
         },
       ];
     }
-    // PRD endpoint: GET /api/v1/claims/{event_id}/splits
-    return apiFetch(`/api/v1/claims/${eventId}/splits`);
+    // PRD endpoint: GET /api/v1/claims/{event_id}/splits -> { splits: [...] }; split_pct is a fraction (0-1)
+    const data: any = await apiFetch(`/api/v1/claims/${eventId}/splits`);
+    return Array.isArray(data) ? data : data.splits || [];
   },
 
   updateSplits: async (eventId: string, splits: Partial<WBSSplitItem>[]): Promise<WBSSplitResponse> => {
@@ -1945,10 +2000,13 @@ export const wbsApi = {
         message: `Successfully updated ${splits.length} WBS split allocations.`,
       };
     }
-    // PRD endpoint: PATCH /api/v1/claims/{event_id}/splits
+    // PRD endpoint: PATCH /api/v1/claims/{event_id}/splits (Supervisor only).
+    // Body: { splits: [{ activity_id, split_pct }] } with split_pct as a fraction that must sum to 1.
     return apiFetch(`/api/v1/claims/${eventId}/splits`, {
       method: 'PATCH',
-      body: JSON.stringify({ splits }),
+      body: JSON.stringify({
+        splits: splits.map((s) => ({ activity_id: s.activity_id, split_pct: s.split_pct })),
+      }),
     });
   },
 
@@ -2021,7 +2079,7 @@ export const reportsApi = {
     if (startDate) params.append('start', startDate);
     if (endDate) params.append('end', endDate);
     if (filter?.discipline) params.append('discipline', filter.discipline);
-    if (filter?.schedule_id) params.append('schedule_id', filter.schedule_id);
+    if (filter?.language) params.append('language', filter.language);
 
     const qs = params.toString();
     return apiFetch(`/api/v1/reports/execution-summary${qs ? `?${qs}` : ''}`);
@@ -2090,6 +2148,24 @@ export const investigationApi = {
       };
     }
     return apiFetch<InvestigationContext>(`/api/v1/investigation/activity/${activityId}?depth=${depth}`);
+  },
+};
+
+// Runtime translation of generated text for display (canonical text is never changed).
+// Falls back to the original strings on any failure or in mock mode.
+export const translateApi = {
+  translate: async (texts: string[], targetLanguage: string): Promise<string[]> => {
+    const lang = (targetLanguage || 'en').slice(0, 2);
+    if (USE_MOCKS || lang === 'en' || texts.length === 0) return texts;
+    try {
+      const res: any = await apiFetch('/api/v1/reports/translate', {
+        method: 'POST',
+        body: JSON.stringify({ texts, target_language: lang }),
+      });
+      return Array.isArray(res?.texts) && res.texts.length === texts.length ? res.texts : texts;
+    } catch {
+      return texts;
+    }
   },
 };
 

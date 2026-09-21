@@ -36,6 +36,7 @@ from backend.shared.schedule import parse_schedule_csv
 from backend.shared.schedule_repository import (
     ScheduleAlreadyExistsError,
     SchedulePersistenceError,
+    get_active_schedule,
     get_schedule,
     get_schedule_activity,
     list_schedule_activities,
@@ -169,6 +170,16 @@ def create_schedule(request: ScheduleCreateRequest) -> ScheduleCreateResponse:
 @router.get("", response_model=list[Schedule])
 def get_schedules() -> list[Schedule]:
     return list_schedules()
+
+
+@router.get("/active", response_model=Schedule)
+def get_active_schedule_endpoint() -> Schedule:
+    """The schedule claims are currently matched against (most recently created).
+    Declared before "/{schedule_id}" so "active" is not read as a schedule id."""
+    schedule = get_active_schedule()
+    if schedule is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="no schedule has been uploaded yet")
+    return schedule
 
 
 @router.get("/{schedule_id}", response_model=Schedule)
