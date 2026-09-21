@@ -5,49 +5,24 @@ import {
   Clock,
   Search,
   ShieldCheck,
-  Activity,
   User,
-  ArrowRight,
   CalendarDays,
-  AlertCircle,
   GitCommit,
   Hash,
-  FileText,
-  CheckCircle2,
-  XCircle,
-  RotateCcw,
+  ChevronLeft,
+  ChevronRight,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
+import { StatusBadge } from '@/components/StatusBadge';
+import { ProvenanceBadge } from '@/components/ProvenanceBadge';
+import { EmptyState } from '@/components/ui/empty-state';
+import { ErrorState } from '@/components/ui/error-state';
+import { Skeleton } from '@/components/ui/skeleton';
 import { cn } from '@/lib/utils';
 
-function StatusBadge({ status }: { status: string }) {
-  const s = status?.toUpperCase() || '';
-  if (s === 'APPROVED' || s === 'COMMITTED')
-    return (
-      <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 dark:bg-emerald-500/20 text-emerald-700 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-500/30 uppercase">
-        <CheckCircle2 className="w-3 h-3" /> {status}
-      </span>
-    );
-  if (s === 'REJECTED' || s === 'CONFLICT')
-    return (
-      <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-rose-100 dark:bg-rose-500/20 text-rose-700 dark:text-rose-400 border border-rose-200 dark:border-rose-500/30 uppercase">
-        <XCircle className="w-3 h-3" /> {status}
-      </span>
-    );
-  if (s === 'PENDING' || s === 'UNDER_REVIEW')
-    return (
-      <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-100 dark:bg-amber-500/20 text-amber-700 dark:text-amber-400 border border-amber-200 dark:border-amber-500/30 uppercase">
-        <RotateCcw className="w-3 h-3" /> {status}
-      </span>
-    );
-  return (
-    <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-blue-100 dark:bg-blue-500/20 text-blue-700 dark:text-blue-400 border border-blue-200 dark:border-blue-500/30 uppercase">
-      {status}
-    </span>
-  );
-}
+const PAGE_SIZE = 5;
 
 export default function ActivityHistory() {
   const { t } = useTranslation();
@@ -61,6 +36,10 @@ export default function ActivityHistory() {
   const [error, setError] = useState<string | null>(null);
   const [hasSearched, setHasSearched] = useState<boolean>(false);
 
+  // Pagination states
+  const [timelinePage, setTimelinePage] = useState<number>(1);
+  const [auditLogsPage, setAuditLogsPage] = useState<number>(1);
+
   const loadActivityData = async (actId: string) => {
     setIsLoading(true);
     setError(null);
@@ -72,6 +51,8 @@ export default function ActivityHistory() {
       setActivity(actHist.activity);
       setHistory(actHist.history);
       setAuditLogs(logs);
+      setTimelinePage(1);
+      setAuditLogsPage(1);
     } catch (e: any) {
       setError(t('history.failedToFetch', { message: e.message }));
     } finally {
@@ -92,87 +73,99 @@ export default function ActivityHistory() {
     }
   };
 
+  const totalTimelinePages = Math.max(1, Math.ceil(history.length / PAGE_SIZE));
+  const paginatedHistory = history.slice((timelinePage - 1) * PAGE_SIZE, timelinePage * PAGE_SIZE);
+
+  const totalAuditPages = Math.max(1, Math.ceil(auditLogs.length / PAGE_SIZE));
+  const paginatedAuditLogs = auditLogs.slice((auditLogsPage - 1) * PAGE_SIZE, auditLogsPage * PAGE_SIZE);
+
   return (
     <div className="space-y-6">
       {/* Header & Activity Search Bar */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-200 dark:border-blue-900/50 pb-4">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-300 dark:border-[#214766]/60 pb-4">
         <div>
-          <h1 className="text-2xl font-bold text-slate-900 dark:text-slate-100 tracking-tight flex items-center gap-2">
-            <div className="p-1.5 rounded-lg bg-[#FC4C02]/10 border border-[#FC4C02]/20">
-              <Clock className="w-5 h-5 text-[#FC4C02]" />
+          <h1 className="text-2xl font-extrabold text-[#071A2D] dark:text-[#F5F7FA] tracking-tight flex items-center gap-2">
+            <div className="p-1.5 rounded-lg bg-primary/10 border border-primary/20">
+              <Clock className="w-5 h-5 text-primary" />
             </div>
             {t('history.title')}
           </h1>
-          <p className="text-slate-500 dark:text-slate-400 text-xs mt-1">
+          <p className="text-[#334155] dark:text-[#CBD5E1] text-xs font-semibold mt-1">
             {t('history.subtitle')}
           </p>
         </div>
 
         <form onSubmit={handleSearchSubmit} className="flex gap-2">
           <div className="relative">
-            <Search className="w-4 h-4 absolute left-3 top-2.5 text-slate-400" />
+            <Search className="w-4 h-4 absolute left-3 top-2.5 text-muted-foreground" />
             <Input
               value={searchInput}
               onChange={(e) => setSearchInput(e.target.value)}
               placeholder={t('history.searchPlaceholder')}
-              className="pl-9 bg-white dark:bg-[#001438] border-slate-300 dark:border-blue-800 text-slate-900 dark:text-slate-100 text-xs h-9 w-64 font-mono focus:border-[#FC4C02] dark:focus:border-[#FC4C02]"
+              className="pl-9 font-mono text-xs h-9 w-64 focus-visible:ring-primary"
             />
           </div>
-          <Button type="submit" size="sm" className="bg-[#FC4C02] hover:bg-[#e04302] text-white text-xs h-9">
+          <Button type="submit" size="sm" className="h-9">
             {t('history.lookup')}
           </Button>
         </form>
       </div>
 
       {!hasSearched ? (
-        <div className="text-center py-16 text-slate-400 dark:text-slate-500 text-sm border border-dashed border-slate-200 dark:border-blue-900/50 rounded-2xl">
-          <Search className="w-8 h-8 mx-auto mb-3 opacity-30" />
-          {t('history.emptyPrompt')}
-        </div>
+        <EmptyState
+          icon={Search}
+          title={t('history.searchPlaceholder')}
+          description={t('history.emptyPrompt')}
+          className="py-16"
+        />
       ) : isLoading ? (
         <div className="space-y-4">
-          <div className="h-28 bg-slate-100 dark:bg-[#001E60]/50 rounded-2xl animate-pulse" />
-          <div className="h-64 bg-slate-100 dark:bg-[#001E60]/50 rounded-2xl animate-pulse" />
-          <div className="h-48 bg-slate-100 dark:bg-[#001E60]/50 rounded-2xl animate-pulse" />
+          <Skeleton className="h-28 rounded-xl" />
+          <Skeleton className="h-64 rounded-xl" />
+          <Skeleton className="h-48 rounded-xl" />
         </div>
       ) : error ? (
-        <div className="p-4 rounded-xl bg-rose-50 dark:bg-rose-500/10 border border-rose-200 dark:border-rose-500/30 text-rose-700 dark:text-rose-300 text-xs flex items-start gap-2">
-          <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
-          {error}
-        </div>
+        <ErrorState
+          message={error}
+          onRetry={() => {
+            if (selectedActivityId) {
+              loadActivityData(selectedActivityId);
+            }
+          }}
+        />
       ) : (
         <>
           {/* Activity Header Summary */}
           {activity && (
-            <Card className="bg-white dark:bg-[#001E60]/80 border-slate-200 dark:border-blue-900/50 shadow-sm">
+            <Card>
               <CardContent className="p-4 sm:p-6 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                 <div className="space-y-2">
                   <div className="flex items-center gap-2 flex-wrap">
-                    <span className="bg-[#001E60] dark:bg-[#FC4C02] text-white font-mono text-xs px-2.5 py-0.5 rounded-md font-bold">
+                    <span className="bg-primary text-primary-foreground font-mono text-xs px-2.5 py-0.5 rounded-md font-bold">
                       {activity.activity_id}
                     </span>
-                    <span className="text-xs bg-slate-100 dark:bg-blue-900/80 text-slate-700 dark:text-blue-200 border border-slate-200 dark:border-blue-700/50 px-2 py-0.5 rounded-full font-mono uppercase">
+                    <span className="text-xs bg-secondary text-secondary-foreground border border-border px-2 py-0.5 rounded-full font-mono uppercase font-semibold">
                       {activity.discipline}
                     </span>
-                    <span className="text-xs text-slate-500 dark:text-slate-400 font-mono">{t('history.wbs')}: {activity.wbs_code}</span>
+                    <span className="text-xs text-muted-foreground font-mono">{t('history.wbs')}: {activity.wbs_code}</span>
                   </div>
-                  <h2 className="text-lg font-bold text-slate-900 dark:text-slate-100">{activity.activity_name}</h2>
-                  <p className="text-xs text-slate-500 dark:text-slate-400">
-                    {t('history.location')}: <strong className="text-slate-700 dark:text-slate-200">{activity.location}</strong> · {t('history.plannedWindow')}:{' '}
-                    <span className="font-mono text-[#FC4C02]">{activity.planned_start}</span> {t('history.to')}{' '}
-                    <span className="font-mono text-[#FC4C02]">{activity.planned_finish}</span>
+                  <h2 className="text-lg font-bold text-foreground">{activity.activity_name}</h2>
+                  <p className="text-xs text-muted-foreground">
+                    {t('history.location')}: <strong className="text-foreground">{activity.location}</strong> · {t('history.plannedWindow')}:{' '}
+                    <span className="font-mono text-primary font-semibold">{activity.planned_start}</span> {t('history.to')}{' '}
+                    <span className="font-mono text-primary font-semibold">{activity.planned_finish}</span>
                   </p>
                 </div>
 
-                <div className="flex gap-6 border-t sm:border-t-0 sm:border-l border-slate-200 dark:border-blue-900/50 pt-3 sm:pt-0 sm:pl-6 text-xs font-mono">
+                <div className="flex gap-6 border-t sm:border-t-0 sm:border-l border-border pt-3 sm:pt-0 sm:pl-6 text-xs font-mono">
                   <div>
-                    <span className="text-[10px] uppercase text-slate-400 dark:text-slate-500 block mb-0.5">{t('history.baselinePct')}</span>
-                    <span className="text-slate-900 dark:text-slate-100 font-bold text-lg">{activity.baseline_pct_complete}<span className="text-sm text-slate-400">%</span></span>
+                    <span className="text-[10px] uppercase text-muted-foreground block mb-0.5">{t('history.baselinePct')}</span>
+                    <span className="text-foreground font-bold text-lg">{activity.baseline_pct_complete}<span className="text-sm text-muted-foreground">%</span></span>
                   </div>
                   <div>
-                    <span className="text-[10px] uppercase text-slate-400 dark:text-slate-500 block mb-0.5">{t('history.plannedQty')}</span>
-                    <span className="text-slate-900 dark:text-slate-100 font-bold text-lg">
-                      {activity.planned_quantity || t('review.notAvailable')} <span className="text-sm text-slate-400">{activity.uom || ''}</span>
+                    <span className="text-[10px] uppercase text-muted-foreground block mb-0.5">{t('history.plannedQty')}</span>
+                    <span className="text-foreground font-bold text-lg">
+                      {activity.planned_quantity || t('review.notAvailable')} <span className="text-sm text-muted-foreground">{activity.uom || ''}</span>
                     </span>
                   </div>
                 </div>
@@ -181,114 +174,197 @@ export default function ActivityHistory() {
           )}
 
           {/* Chronological Timeline */}
-          <Card className="bg-white dark:bg-[#001E60]/80 border-slate-200 dark:border-blue-900/50 shadow-sm">
-            <CardHeader className="pb-3 border-b border-slate-200 dark:border-blue-900/50">
-              <CardTitle className="text-sm font-semibold flex items-center gap-2">
-                <CalendarDays className="w-4 h-4 text-[#FC4C02]" />
+          <Card>
+            <CardHeader className="pb-3 border-b border-border">
+              <CardTitle className="text-sm font-semibold flex items-center gap-2 text-foreground">
+                <CalendarDays className="w-4 h-4 text-primary" />
                 {t('history.timelineTitle')}
               </CardTitle>
-              <CardDescription className="text-slate-500 dark:text-slate-400 text-xs">
+              <CardDescription className="text-muted-foreground text-xs">
                 {t('history.timelineDesc')}
               </CardDescription>
             </CardHeader>
             <CardContent className="pt-6">
               {history.length === 0 ? (
-                <div className="text-center py-10 text-slate-400 dark:text-slate-500 text-sm">
-                  <GitCommit className="w-8 h-8 mx-auto mb-3 opacity-30" />
-                  {t('history.noHistory')}
-                </div>
+                <EmptyState
+                  icon={GitCommit}
+                  title={t('history.noHistory')}
+                  className="py-10"
+                />
               ) : (
-                <div className="relative pl-6 border-l-2 border-slate-200 dark:border-blue-900/50 space-y-6">
-                  {history.map((item, idx) => (
-                    <div key={idx} className="relative group">
-                      {/* Node Dot */}
-                      <div className={cn(
-                        'absolute -left-[31px] top-1.5 w-3.5 h-3.5 rounded-full border-4 border-white dark:border-[#001E60] shadow transition-transform group-hover:scale-125',
-                        item.supervisor_action ? 'bg-emerald-500' : 'bg-[#FC4C02]'
-                      )} />
+                <>
+                  <div className="relative pl-6 border-l-2 border-border space-y-6">
+                    {paginatedHistory.map((item, idx) => (
+                      <div key={idx} className="relative group">
+                        {/* Node Dot */}
+                        <div className={cn(
+                          'absolute -left-[31px] top-1.5 w-3.5 h-3.5 rounded-full border-4 border-card shadow-xs transition-transform group-hover:scale-125',
+                          item.supervisor_action ? 'bg-status-approved' : 'bg-primary'
+                        )} />
 
-                      <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-950/60 border border-slate-200 dark:border-slate-700 hover:border-[#FC4C02]/40 transition-colors space-y-2.5 text-xs">
-                        <div className="flex items-center justify-between flex-wrap gap-2">
-                          <div className="flex items-center gap-2 flex-wrap">
-                            <span className="inline-flex items-center gap-1.5 font-mono font-bold text-slate-900 dark:text-slate-200">
-                              <User className="w-3 h-3 text-slate-400" />
-                              {item.actor}
+                        <div className="p-4 rounded-xl bg-card border border-border hover:border-primary/40 transition-colors space-y-2.5 text-xs shadow-xs">
+                          <div className="flex items-center justify-between flex-wrap gap-2">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <span className="inline-flex items-center gap-1.5 font-mono font-bold text-foreground">
+                                <User className="w-3 h-3 text-muted-foreground" />
+                                {item.actor}
+                              </span>
+                              <ProvenanceBadge channel={item.input_channel} size="sm" />
+                              <StatusBadge status={item.status} size="sm" />
+                            </div>
+                            <span className="text-[11px] font-mono text-muted-foreground flex items-center gap-1">
+                              <Clock className="w-3 h-3" />
+                              {new Date(item.timestamp).toLocaleString()}
                             </span>
-                            <span className="bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 text-[10px] font-mono px-2 py-0.5 rounded-md">
-                              {item.input_channel}
-                            </span>
-                            <StatusBadge status={item.status} />
                           </div>
-                          <span className="text-[11px] font-mono text-slate-400 dark:text-slate-500 flex items-center gap-1">
-                            <Clock className="w-3 h-3" />
-                            {new Date(item.timestamp).toLocaleString()}
-                          </span>
-                        </div>
 
-                        <p className="text-slate-700 dark:text-slate-200 font-medium leading-relaxed bg-slate-100 dark:bg-slate-900/60 rounded-lg p-3 border border-slate-200 dark:border-slate-700 italic">
-                          "{item.raw_claim_text}"
-                        </p>
+                          <p className="text-foreground font-medium leading-relaxed bg-card-subtle rounded-lg p-3 border border-border italic">
+                            "{item.raw_claim_text}"
+                          </p>
 
-                        <div className="flex items-center gap-4 text-slate-500 dark:text-slate-400 text-[11px] flex-wrap">
-                          {item.claimed_pct !== null && (
-                            <div className="flex items-center gap-1">
-                              {t('history.claimed')}:
-                              <span className="font-mono text-slate-900 dark:text-slate-100 font-bold ml-1">{item.claimed_pct}%</span>
-                            </div>
-                          )}
-                          {item.supervisor_action && (
-                            <div className="flex items-center gap-1">
-                              {t('history.supervisor')}:
-                              <span className="font-mono text-emerald-600 dark:text-emerald-400 font-bold ml-1">{item.supervisor_action}</span>
-                            </div>
-                          )}
+                          <div className="flex items-center gap-4 text-muted-foreground text-[11px] flex-wrap">
+                            {item.claimed_pct !== null && (
+                              <div className="flex items-center gap-1">
+                                {t('history.claimed')}:
+                                <span className="font-mono text-primary font-bold ml-1">{item.claimed_pct}%</span>
+                              </div>
+                            )}
+                            {item.supervisor_action && (
+                              <div className="flex items-center gap-1">
+                                {t('history.supervisor')}:
+                                <span className="font-mono text-status-approved font-bold ml-1">{item.supervisor_action}</span>
+                              </div>
+                            )}
+                          </div>
                         </div>
                       </div>
+                    ))}
+                  </div>
+
+                  {/* Timeline Pagination Controls */}
+                  {history.length > PAGE_SIZE && (
+                    <div className="flex items-center justify-between border-t border-border pt-4 mt-6 text-xs text-muted-foreground">
+                      <span>
+                        {t('history.timelineItemsCount', {
+                          shown: `${(timelinePage - 1) * PAGE_SIZE + 1}–${Math.min(timelinePage * PAGE_SIZE, history.length)}`,
+                          total: history.length,
+                        })}
+                      </span>
+                      <div className="flex items-center gap-2">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          disabled={timelinePage === 1}
+                          onClick={() => setTimelinePage((p) => Math.max(1, p - 1))}
+                          className="h-8 text-xs gap-1"
+                        >
+                          <ChevronLeft className="w-3.5 h-3.5" />
+                          {t('common.previous')}
+                        </Button>
+                        <span className="font-mono px-2 font-medium text-foreground">
+                          {t('common.pageOf', { current: timelinePage, total: totalTimelinePages })}
+                        </span>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          disabled={timelinePage === totalTimelinePages}
+                          onClick={() => setTimelinePage((p) => Math.min(totalTimelinePages, p + 1))}
+                          className="h-8 text-xs gap-1"
+                        >
+                          {t('common.next')}
+                          <ChevronRight className="w-3.5 h-3.5" />
+                        </Button>
+                      </div>
                     </div>
-                  ))}
-                </div>
+                  )}
+                </>
               )}
             </CardContent>
           </Card>
 
           {/* Cryptographic Audit Trail */}
-          <Card className="bg-white dark:bg-[#001E60]/80 border-slate-200 dark:border-blue-900/50 shadow-sm">
-            <CardHeader className="pb-3 border-b border-slate-200 dark:border-blue-900/50">
-              <CardTitle className="text-sm font-semibold flex items-center gap-2">
-                <ShieldCheck className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
-                <span className="text-slate-900 dark:text-slate-200">{t('history.auditTrailTitle')}</span>
-                <span className="text-[10px] bg-emerald-100 dark:bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-500/20 px-2 py-0.5 rounded-full font-mono">{t('history.hashChain')}</span>
+          <Card>
+            <CardHeader className="pb-3 border-b border-border">
+              <CardTitle className="text-sm font-semibold flex items-center gap-2 text-foreground">
+                <ShieldCheck className="w-4 h-4 text-status-approved" />
+                <span>{t('history.auditTrailTitle')}</span>
+                <span className="text-[10px] bg-status-approved/10 text-status-approved border border-status-approved/20 px-2 py-0.5 rounded-full font-mono font-semibold">{t('history.hashChain')}</span>
               </CardTitle>
-              <CardDescription className="text-slate-500 dark:text-slate-400 text-xs">
+              <CardDescription className="text-muted-foreground text-xs">
                 {t('history.auditTrailDesc')}
               </CardDescription>
             </CardHeader>
             <CardContent className="pt-4 space-y-3 font-mono text-[11px]">
               {auditLogs.length === 0 ? (
-                <div className="text-center py-8 text-slate-400 dark:text-slate-500">{t('history.noAuditLogs')}</div>
-              ) : auditLogs.map((log) => (
-                <div key={log.log_id} className="p-3 bg-slate-50 dark:bg-slate-950/80 border border-slate-200 dark:border-slate-700 rounded-xl space-y-2 hover:border-emerald-300 dark:hover:border-emerald-700/50 transition-colors">
-                  <div className="flex items-center justify-between text-slate-500 dark:text-slate-400 flex-wrap gap-1">
-                    <span className="font-bold text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
-                      <Hash className="w-3 h-3 text-emerald-500" />
-                      {t('history.log')} {log.log_id} · {log.action}
-                    </span>
-                    <span className="text-slate-400 dark:text-slate-500 text-[10px]">
-                      {new Date(log.timestamp).toLocaleString()}
-                    </span>
-                  </div>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-[10px]">
-                    <div className="truncate p-2 bg-slate-100 dark:bg-slate-900/60 rounded-lg">
-                      <span className="text-slate-400 dark:text-slate-500 block mb-0.5">{t('history.prevHash')}</span>
-                      <span className="text-slate-500 dark:text-slate-500">{log.previous_hash}</span>
+                <EmptyState
+                  icon={Hash}
+                  title={t('history.noAuditLogs')}
+                  className="py-8"
+                />
+              ) : (
+                <>
+                  {paginatedAuditLogs.map((log) => (
+                    <div key={log.log_id} className="p-3 bg-card border border-border rounded-xl space-y-2 hover:border-status-approved/50 transition-colors shadow-xs">
+                      <div className="flex items-center justify-between text-muted-foreground flex-wrap gap-1">
+                        <span className="font-bold text-foreground flex items-center gap-1.5">
+                          <Hash className="w-3 h-3 text-status-approved" />
+                          {t('history.log')} {log.log_id} · {log.action}
+                        </span>
+                        <span className="text-muted-foreground text-[10px]">
+                          {new Date(log.timestamp).toLocaleString()}
+                        </span>
+                      </div>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-[10px]">
+                        <div className="truncate p-2 bg-card-subtle rounded-lg border border-border">
+                          <span className="text-muted-foreground block mb-0.5">{t('history.prevHash')}</span>
+                          <span className="text-muted-foreground">{log.previous_hash}</span>
+                        </div>
+                        <div className="truncate p-2 bg-card-subtle rounded-lg border border-border">
+                          <span className="text-muted-foreground block mb-0.5">{t('history.currHash')}</span>
+                          <span className="text-primary font-bold">{log.current_hash}</span>
+                        </div>
+                      </div>
                     </div>
-                    <div className="truncate p-2 bg-slate-100 dark:bg-slate-900/60 rounded-lg">
-                      <span className="text-slate-400 dark:text-slate-500 block mb-0.5">{t('history.currHash')}</span>
-                      <span className="text-[#FC4C02] dark:text-indigo-400">{log.current_hash}</span>
+                  ))}
+
+                  {/* Audit Logs Pagination Controls */}
+                  {auditLogs.length > PAGE_SIZE && (
+                    <div className="flex items-center justify-between border-t border-border pt-4 mt-4 text-xs text-muted-foreground">
+                      <span>
+                        {t('history.auditLogsCount', {
+                          shown: `${(auditLogsPage - 1) * PAGE_SIZE + 1}–${Math.min(auditLogsPage * PAGE_SIZE, auditLogs.length)}`,
+                          total: auditLogs.length,
+                        })}
+                      </span>
+                      <div className="flex items-center gap-2">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          disabled={auditLogsPage === 1}
+                          onClick={() => setAuditLogsPage((p) => Math.max(1, p - 1))}
+                          className="h-8 text-xs gap-1"
+                        >
+                          <ChevronLeft className="w-3.5 h-3.5" />
+                          {t('common.previous')}
+                        </Button>
+                        <span className="font-mono px-2 font-medium text-foreground">
+                          {t('common.pageOf', { current: auditLogsPage, total: totalAuditPages })}
+                        </span>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          disabled={auditLogsPage === totalAuditPages}
+                          onClick={() => setAuditLogsPage((p) => Math.min(totalAuditPages, p + 1))}
+                          className="h-8 text-xs gap-1"
+                        >
+                          {t('common.next')}
+                          <ChevronRight className="w-3.5 h-3.5" />
+                        </Button>
+                      </div>
                     </div>
-                  </div>
-                </div>
-              ))}
+                  )}
+                </>
+              )}
             </CardContent>
           </Card>
         </>

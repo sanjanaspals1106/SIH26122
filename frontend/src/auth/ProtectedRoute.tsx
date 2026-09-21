@@ -27,7 +27,7 @@ export default function ProtectedRoute({ allowedRoles }: ProtectedRouteProps) {
   if (allowedRoles && !allowedRoles.includes(user.role)) {
     // Logged in, but wrong role for this route — send to their own landing page,
     // never a raw error page, per the PRD.
-    const ownLandingPage = user.role === 'SUPERVISOR' ? '/' : '/intake';
+    const ownLandingPage = user.role === 'SUPERVISOR' ? '/digest' : '/intake';
     return <Navigate to={ownLandingPage} replace />;
   }
 
