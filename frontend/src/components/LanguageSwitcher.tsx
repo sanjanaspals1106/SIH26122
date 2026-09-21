@@ -30,14 +30,16 @@ export default function LanguageSwitcher({ variant = 'onDark' }: LanguageSwitche
   return (
     <div
       className={cn(
-        'flex items-center gap-0.5 h-8 px-1 rounded-xl border',
-        onDark ? 'border-white/15 bg-white/5' : 'border-slate-300 dark:border-blue-800 bg-white dark:bg-white/5'
+        'flex items-center gap-0.5 h-8 px-1 rounded-xl border transition-colors',
+        onDark
+          ? 'border-white/20 bg-white/5'
+          : 'border-slate-300 dark:border-[#1E3A5F] bg-white/95 dark:bg-[#0A2340]/90 shadow-xs backdrop-blur-md'
       )}
       role="group"
       aria-label={t('common.language')}
       title={t('common.language')}
     >
-      <Languages className={cn('w-3.5 h-3.5 mx-1 shrink-0', onDark ? 'text-white/50' : 'text-slate-400 dark:text-white/50')} />
+      <Languages className={cn('w-3.5 h-3.5 mx-1 shrink-0', onDark ? 'text-white/70' : 'text-[#071A2D] dark:text-white/70')} />
       {SUPPORTED_LANGUAGES.map((lang) => (
         <button
           key={lang}
@@ -46,14 +48,12 @@ export default function LanguageSwitcher({ variant = 'onDark' }: LanguageSwitche
           title={LANGUAGE_LABELS[lang].english}
           aria-pressed={current === lang}
           className={cn(
-            'px-2 h-6 rounded-lg text-[11px] font-semibold transition-all',
+            'px-2.5 h-6 rounded-lg text-[11px] font-semibold transition-all',
             current === lang
-              ? onDark
-                ? 'bg-white text-[#003087] shadow-sm'
-                : 'bg-[#003087] text-white shadow-sm'
+              ? 'bg-gradient-to-r from-[#FF7A18] to-[#FF941F] text-white shadow-xs font-bold'
               : onDark
-              ? 'text-white/60 hover:text-white hover:bg-white/10'
-              : 'text-slate-500 dark:text-white/60 hover:text-slate-800 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-white/10'
+              ? 'text-white/75 hover:text-white hover:bg-white/10'
+              : 'text-[#071A2D] dark:text-white/70 hover:text-black dark:hover:text-white hover:bg-slate-100 dark:hover:bg-white/10 font-bold'
           )}
         >
           {LANGUAGE_LABELS[lang].native}
