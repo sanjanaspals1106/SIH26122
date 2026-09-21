@@ -30,6 +30,9 @@ EXPECTED_TABLES = [
     "approved_actuals",
     "audit_logs",
     "claim_wbs_splits",
+    "claim_activity_splits",
+    "evidence_links",
+    "execution_summaries",
 ]
 
 

@@ -11,7 +11,8 @@ import {
   X,
   Send,
 } from 'lucide-react';
-import { AskWhyResponse, AskWhyRequest, claimsApi } from '../api';
+import { useTranslation } from 'react-i18next';
+import { AskWhyResponse, AskWhyRequest, claimsApi, translateApi } from '../api';
 
 interface AskWhyPanelProps {
   eventId: string;
@@ -28,6 +29,15 @@ export const AskWhyPanel: React.FC<AskWhyPanelProps> = ({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [customQuestion, setCustomQuestion] = useState('');
+  const { i18n } = useTranslation();
+  // Feature 34: depth 1 = immediate context; selecting an upstream node re-roots the
+  // traversal at that node and asks one level deeper.
+  const [rootActivity, setRootActivity] = useState<string | undefined>(selectedActivityId);
+  const [depth, setDepth] = useState(1);
+  useEffect(() => {
+    setRootActivity(selectedActivityId);
+    setDepth(1);
+  }, [selectedActivityId, eventId]);
 
   const fetchWhy = async (questionOverride?: string) => {
     try {
@@ -35,11 +45,20 @@ export const AskWhyPanel: React.FC<AskWhyPanelProps> = ({
       setError(null);
       const req: AskWhyRequest = {
         event_id: eventId,
-        activity_id: selectedActivityId,
+        activity_id: rootActivity,
+        depth,
         question: questionOverride || (customQuestion.trim() ? customQuestion.trim() : undefined),
       };
       const res = await claimsApi.askWhy(req);
-      setData(res);
+      // Display-only runtime translation; falls back to the canonical English on failure.
+      const lang = (i18n.language || 'en').slice(0, 2);
+      if (lang !== 'en') {
+        const steps = res.reasoning_steps || [];
+        const translated = await translateApi.translate([res.explanation, ...steps], lang);
+        setData({ ...res, explanation: translated[0], reasoning_steps: translated.slice(1) });
+      } else {
+        setData(res);
+      }
     } catch (err: any) {
       setError(err?.message || 'Failed to generate explanation reasoning.');
       setData(null);
@@ -50,7 +69,7 @@ export const AskWhyPanel: React.FC<AskWhyPanelProps> = ({
 
   useEffect(() => {
     fetchWhy();
-  }, [eventId, selectedActivityId]);
+  }, [eventId, rootActivity, depth, i18n.language]);
 
   const handleQuestionSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -155,6 +174,14 @@ export const AskWhyPanel: React.FC<AskWhyPanelProps> = ({
                 <Sparkles className="w-4 h-4 text-[#FF7A18]" />
                 Synthesized Decision Rationale
               </span>
+              <button
+                type="button"
+                onClick={() => setDepth((d) => Math.min(d + 1, 6))}
+                disabled={depth >= 6}
+                className="text-[10px] font-semibold px-2 py-0.5 rounded-full border border-border bg-card hover:bg-muted disabled:opacity-40"
+              >
+                Go deeper
+              </button>
               {data.traversal_depth != null && (
                 <span className="text-[10px] font-mono font-semibold px-2 py-0.5 rounded-full bg-cyan-100 dark:bg-cyan-950/80 text-cyan-800 dark:text-cyan-300 flex items-center gap-1 border border-cyan-200 dark:border-cyan-900/60">
                   <GitBranch className="w-3 h-3" />
@@ -200,12 +227,30 @@ export const AskWhyPanel: React.FC<AskWhyPanelProps> = ({
                   Graph Entities Resolved
                 </span>
                 <div className="space-y-1">
-                  {data.entities_involved.map((ent, idx) => (
-                    <div key={idx} className="flex items-center justify-between text-xs py-1 border-b border-border/60 last:border-0">
-                      <span className="font-mono font-medium text-foreground">{ent.name}</span>
-                      <span className="text-[10px] font-medium text-muted-foreground">{ent.role}</span>
-                    </div>
-                  ))}
+                  {data.entities_involved.map((ent, idx) => {
+                    // Upstream predecessors can be drilled into: re-root here and go one level deeper.
+                    const drillable = ent.type === 'PREDECESSOR' && ent.name !== rootActivity;
+                    return (
+                      <div key={idx} className="flex items-center justify-between text-xs py-1 border-b border-border/60 last:border-0">
+                        {drillable ? (
+                          <button
+                            type="button"
+                            title="Investigate this activity (re-root, one level deeper)"
+                            onClick={() => {
+                              setRootActivity(ent.name);
+                              setDepth((d) => Math.min(d + 1, 6));
+                            }}
+                            className="font-mono font-medium text-primary underline-offset-2 hover:underline cursor-pointer"
+                          >
+                            {ent.name}
+                          </button>
+                        ) : (
+                          <span className="font-mono font-medium text-foreground">{ent.name}</span>
+                        )}
+                        <span className="text-[10px] font-medium text-muted-foreground">{ent.role}</span>
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
             )}

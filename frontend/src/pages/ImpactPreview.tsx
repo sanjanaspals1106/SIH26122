@@ -13,6 +13,7 @@ import {
 
 import {
   schedulesApi,
+  getActiveScheduleId,
   ImpactPreviewResult,
 } from '@/api';
 
@@ -52,13 +53,11 @@ const PRESET_ACTIVITIES = [
   },
 ];
 
-const DEFAULT_SCHEDULE_ID = 'dc2df47a-167c-41fb-b09f-f220a7b504e1';
-
 export default function ImpactPreview() {
   const { t } = useTranslation();
 
   const [activityId, setActivityId] = useState('CIV-PS3-FND-001');
-  const [scheduleId] = useState(DEFAULT_SCHEDULE_ID);
+  const [scheduleId, setScheduleId] = useState('');
   const [delayDays, setDelayDays] = useState(5);
 
   const [isSimulating, setIsSimulating] = useState(false);
@@ -108,11 +107,19 @@ export default function ImpactPreview() {
   };
 
   useEffect(() => {
-    runSimulation(
-      'CIV-PS3-FND-001',
-      5,
-      DEFAULT_SCHEDULE_ID
-    );
+    let cancelled = false;
+    getActiveScheduleId()
+      .then((sid) => {
+        if (cancelled) return;
+        setScheduleId(sid);
+        runSimulation('CIV-PS3-FND-001', 5, sid);
+      })
+      .catch(() => {
+        if (!cancelled) runSimulation('CIV-PS3-FND-001', 5, '');
+      });
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   const kpiStats = React.useMemo(() => {

@@ -14,6 +14,7 @@ execution_events.status always reflects the most recently submitted
 action.
 """
 
+import json
 import logging
 import uuid
 from typing import Any, Dict, List, Optional
@@ -61,6 +62,83 @@ def _fetch_claim(cur, event_id: str) -> Optional[dict]:
     return dict(row) if row else None
 
 
+def _with_derived_pct(actual: dict) -> dict:
+    """
+    P6 has no quantity field (it is dropped from the payload), so for an activity progressed by
+    incremental quantity the write-back would carry no progress at all. Derive PercentComplete
+    from approved quantity / planned quantity -- the same derivation GET /activities/{id}/rollup
+    uses -- for the P6 payload only; the stored approved actual is not modified.
+    """
+    if actual.get("actual_pct_complete") is not None or not actual.get("actual_quantity"):
+        return actual
+    try:
+        with get_connection() as conn:
+            row = conn.execute(
+                "SELECT planned_quantity FROM schedule_activities WHERE schedule_id = %s AND activity_id = %s",
+                (actual["schedule_id"], actual["activity_id"]),
+            ).fetchone()
+        planned = float(row["planned_quantity"]) if row and row["planned_quantity"] else 0.0
+        if planned > 0:
+            return {**actual, "actual_pct_complete": round(min(100.0, 100.0 * float(actual["actual_quantity"]) / planned), 2)}
+    except Exception as e:
+        logger.warning("could not derive P6 percent complete: %s", e)
+    return actual
+
+
+def _load_claim_splits(cur, event_id: str) -> List[dict]:
+    """WBS split rows of a decomposed claim, largest share first."""
+    cur.execute(
+        """
+        SELECT activity_id, split_pct FROM claim_activity_splits
+        WHERE event_id = %s ORDER BY split_pct DESC, activity_id ASC
+        """,
+        (event_id,),
+    )
+    return [dict(r) for r in cur.fetchall()]
+
+
+def _differs(a: Optional[float], b: Optional[float]) -> bool:
+    if a is None or b is None:
+        return a is not b and not (a is None and b is None)
+    return abs(float(a) - float(b)) > 1e-9
+
+
+def _apply_edit_provenance(
+    cur,
+    claim: dict,
+    resolved_activity_id: str,
+    approved_pct: Optional[float],
+    approved_qty: Optional[float],
+) -> Dict[str, str]:
+    """
+    Feature 33: on a Supervisor EDIT only the fields that actually changed become
+    SUPERVISOR_EDITED; untouched fields keep their stored provenance. Returns the
+    tags that were set.
+    """
+    changed: Dict[str, str] = {}
+    if approved_pct is not None and _differs(approved_pct, claim.get("claimed_pct")):
+        changed["claimed_pct"] = "SUPERVISOR_EDITED"
+    if approved_qty is not None and _differs(approved_qty, claim.get("claimed_quantity")):
+        changed["claimed_quantity"] = "SUPERVISOR_EDITED"
+    matched = claim.get("matched_activity_id")
+    if matched and resolved_activity_id != matched:
+        changed["activity_id"] = "SUPERVISOR_EDITED"
+    if not changed:
+        return {}
+    prov = claim.get("field_provenance") or {}
+    if isinstance(prov, str):
+        try:
+            prov = json.loads(prov)
+        except ValueError:
+            prov = {}
+    prov = {**prov, **changed}
+    cur.execute(
+        "UPDATE execution_events SET field_provenance = %s::jsonb WHERE event_id = %s",
+        (json.dumps(prov), claim["event_id"]),
+    )
+    return changed
+
+
 def _record_decision(
     event_id: str,
     action: str,
@@ -105,9 +183,20 @@ def _record_decision(
                         ),
                     )
 
+                # Feature 30: a decomposed claim has no matched_activity_id (XOR with its
+                # split rows); approval is applied to every split child, and the decision row
+                # records the largest-share child as its primary activity.
+                splits = [] if claim.get("matched_activity_id") else _load_claim_splits(cur, event_id)
+                split_ids = [sp["activity_id"] for sp in splits]
+
                 # M5 pre-fills with matched_activity_id; planner may override
                 # with any top-3 candidate or a typed ID.
-                resolved_activity_id = selected_activity_id or claim.get("matched_activity_id")
+                if splits:
+                    resolved_activity_id = (
+                        selected_activity_id if selected_activity_id in split_ids else split_ids[0]
+                    )
+                else:
+                    resolved_activity_id = selected_activity_id or claim.get("matched_activity_id")
                 if not resolved_activity_id:
                     raise HTTPException(
                         status_code=422,
@@ -146,17 +235,40 @@ def _record_decision(
                 )
 
                 approved_actual = None
+                approved_actuals: List[dict] = []
+                edited_fields: Dict[str, str] = {}
                 if action in ("APPROVE", "EDIT"):
-                    # Atomic upsert inside the SAME transaction
-                    approved_actual = _execute_upsert(
-                        conn=conn,
-                        schedule_id=claim["schedule_id"],
-                        activity_id=resolved_activity_id,
-                        event_id=event_id,
-                        decision_id=decision_id,
-                        approved_pct=approved_pct,
-                        approved_qty=approved_qty,
-                    )
+                    # Atomic upsert(s) inside the SAME transaction
+                    if splits:
+                        for sp in splits:
+                            child = _execute_upsert(
+                                conn=conn,
+                                schedule_id=claim["schedule_id"],
+                                activity_id=sp["activity_id"],
+                                event_id=event_id,
+                                decision_id=decision_id,
+                                approved_pct=approved_pct,
+                                approved_qty=approved_qty,
+                                split_pct=float(sp["split_pct"]),
+                            )
+                            if child:
+                                approved_actuals.append(child)
+                        approved_actual = approved_actuals[0] if approved_actuals else None
+                    else:
+                        approved_actual = _execute_upsert(
+                            conn=conn,
+                            schedule_id=claim["schedule_id"],
+                            activity_id=resolved_activity_id,
+                            event_id=event_id,
+                            decision_id=decision_id,
+                            approved_pct=approved_pct,
+                            approved_qty=approved_qty,
+                        )
+                        approved_actuals = [approved_actual] if approved_actual else []
+                    if action == "EDIT":
+                        edited_fields = _apply_edit_provenance(
+                            cur, claim, resolved_activity_id, approved_pct, approved_qty
+                        )
 
     try:
         write_audit_log(
@@ -169,25 +281,27 @@ def _record_decision(
                 "status": new_status,
                 "selected_activity_id": resolved_activity_id,
                 "decision_id": decision_id,
+                "split_activity_ids": split_ids,
             },
-            payload={"justification": justification},
+            payload={"justification": justification, "edited_fields": edited_fields},
         )
     except Exception as e:
         logger.error("write_audit_log failed for decision %s: %s", decision_id, e)
 
     # Post-commit downstream adapters (non-blocking)
-    if action in ("APPROVE", "EDIT") and approved_actual:
+    if action in ("APPROVE", "EDIT") and approved_actuals:
         try:
             from backend.routers.export import trigger_auto_export
             trigger_auto_export(schedule_id=claim["schedule_id"])
         except Exception as e:
             logger.warning("Auto-triggered CSV export error (non-blocking): %s", e)
 
-        try:
-            from backend.shared.p6 import trigger_p6_actual_push
-            trigger_p6_actual_push(actual=approved_actual)
-        except Exception as e:
-            logger.warning("Auto-triggered P6 push error (non-blocking): %s", e)
+        for pushed in approved_actuals:
+            try:
+                from backend.shared.p6 import trigger_p6_actual_push
+                trigger_p6_actual_push(actual=_with_derived_pct(pushed))
+            except Exception as e:
+                logger.warning("Auto-triggered P6 push error (non-blocking): %s", e)
 
     return {
         "decision_id": decision_id,
@@ -196,6 +310,8 @@ def _record_decision(
         "status": new_status,
         "selected_activity_id": resolved_activity_id,
         "approved_actual": approved_actual,
+        "approved_actuals": approved_actuals,
+        "edited_fields": edited_fields,
     }
 
 
@@ -269,7 +385,7 @@ def get_digest(
                     """
                     SELECT * FROM execution_events
                     WHERE event_date = %s
-                    ORDER BY discipline ASC, created_at ASC
+                    ORDER BY discipline ASC, priority_score DESC NULLS LAST, created_at ASC
                     """,
                     (date,),
                 )
@@ -277,7 +393,7 @@ def get_digest(
                 cur.execute(
                     """
                     SELECT * FROM execution_events
-                    ORDER BY discipline ASC, created_at ASC
+                    ORDER BY discipline ASC, priority_score DESC NULLS LAST, created_at ASC
                     """
                 )
             rows = [dict(r) for r in cur.fetchall()]

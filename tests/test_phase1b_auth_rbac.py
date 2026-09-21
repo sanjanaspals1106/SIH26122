@@ -93,7 +93,11 @@ def _setup_mock_checks_conn(mock_claim: dict, mock_act: dict) -> MagicMock:
     def mock_execute(query, params=None):
         cur = MagicMock()
         q = str(query).upper()
-        if "FROM EXECUTION_EVENTS" in q and "OTHER_EVENTS" not in q and "SUM(" not in q:
+        if "JOIN PLANNER_DECISIONS" in q:
+            # Prior approved-claims lookup (progress-regression check): none exist.
+            cur.fetchone.return_value = None
+            cur.fetchall.return_value = []
+        elif "FROM EXECUTION_EVENTS" in q and "OTHER_EVENTS" not in q and "SUM(" not in q:
             cur.fetchone.return_value = mock_claim
             cur.fetchall.return_value = [mock_claim]
         elif "FROM SCHEDULE_ACTIVITIES" in q:

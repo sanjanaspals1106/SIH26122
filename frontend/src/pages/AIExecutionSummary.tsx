@@ -31,7 +31,8 @@ const DISCIPLINES: { label: string; value: Discipline | '' }[] = [
 ];
 
 export default function AIExecutionSummary() {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
+  const displayLang = (i18n.language || 'en').slice(0, 2);
 
   const [startDate, setStartDate] = useState(() => {
     const d = new Date();
@@ -53,6 +54,7 @@ export default function AIExecutionSummary() {
         start: startDate,
         end: endDate,
         discipline: selectedDiscipline || undefined,
+        language: displayLang,
       });
       setSummaryData(res);
     } catch (err: any) {
@@ -61,7 +63,7 @@ export default function AIExecutionSummary() {
     } finally {
       setLoading(false);
     }
-  }, [startDate, endDate, selectedDiscipline]);
+  }, [startDate, endDate, selectedDiscipline, displayLang]);
 
   useEffect(() => {
     fetchSummary();

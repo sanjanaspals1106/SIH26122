@@ -192,3 +192,78 @@ ALTER TABLE execution_events ADD COLUMN IF NOT EXISTS clarification_question TEX
 ALTER TABLE execution_events ADD COLUMN IF NOT EXISTS clarification_answer TEXT;
 ALTER TABLE execution_events ADD COLUMN IF NOT EXISTS field_provenance JSONB DEFAULT '{}';
 
+
+-- ===== PRD v6 additive schema (Features 30, 31, 32, 35) =====
+-- Idempotent: safe to run on every startup (init_db) against an existing database.
+
+-- Feature 32: Smart Review Priority
+ALTER TABLE execution_events ADD COLUMN IF NOT EXISTS priority_score REAL DEFAULT 0.0;
+ALTER TABLE execution_events ADD COLUMN IF NOT EXISTS priority_reasons TEXT;
+
+-- Feature 30: WBS Granularity Bridge. split_pct is a FRACTION in (0, 1]; the rows of
+-- one claim sum to 1.0 +/- 0.0001. A claim has either matched_activity_id OR split rows
+-- (XOR). allocated_quantity is the claim value x split_pct (pct or quantity per
+-- claim_mode); rationale explains eligibility/headroom decisions.
+CREATE TABLE IF NOT EXISTS claim_activity_splits(
+  split_id TEXT PRIMARY KEY,
+  event_id TEXT NOT NULL,
+  activity_id TEXT NOT NULL,
+  split_basis TEXT CHECK (split_basis IN ('EQUAL', 'WBS_WEIGHTED', 'MANUAL')),
+  split_pct REAL NOT NULL,
+  schedule_id TEXT,
+  wbs_code TEXT,
+  planned_quantity REAL,
+  allocated_quantity REAL,
+  uom TEXT,
+  rationale TEXT,
+  created_at TIMESTAMPTZ DEFAULT now(),
+  UNIQUE (event_id, activity_id)
+);
+
+-- Feature 31: Evidence Fusion. Separate from conflict_records (same-channel conflicts).
+CREATE TABLE IF NOT EXISTS evidence_links(
+  link_id TEXT PRIMARY KEY,
+  event_id_a TEXT NOT NULL,
+  event_id_b TEXT NOT NULL,
+  relation_type TEXT CHECK (relation_type IN ('CORROBORATES', 'CONTRADICTS')),
+  confidence REAL,
+  rationale TEXT NOT NULL,
+  created_at TIMESTAMPTZ DEFAULT now()
+);
+
+-- Feature 35: AI Execution Summary cache, keyed by (period_start, period_end, discipline).
+-- aggregate_hash guards against serving a stale narrative after the underlying numbers change.
+CREATE TABLE IF NOT EXISTS execution_summaries(
+  summary_id TEXT PRIMARY KEY,
+  period_start DATE NOT NULL,
+  period_end DATE NOT NULL,
+  discipline TEXT,
+  summary_text TEXT NOT NULL,
+  generated_at TIMESTAMPTZ DEFAULT now(),
+  aggregate_hash TEXT
+);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_execution_summaries_period
+  ON execution_summaries (period_start, period_end, COALESCE(discipline, 'ALL'));
+
+CREATE INDEX IF NOT EXISTS idx_claim_activity_splits_event ON claim_activity_splits (event_id);
+CREATE INDEX IF NOT EXISTS idx_evidence_links_a ON evidence_links (event_id_a);
+CREATE INDEX IF NOT EXISTS idx_evidence_links_b ON evidence_links (event_id_b);
+
+-- Row Level Security: same model as migration 001 (backend connects as the owning role and
+-- bypasses RLS; PostgREST anon gets default-deny, authenticated gets read-only).
+ALTER TABLE claim_activity_splits ENABLE ROW LEVEL SECURITY;
+ALTER TABLE evidence_links ENABLE ROW LEVEL SECURITY;
+ALTER TABLE execution_summaries ENABLE ROW LEVEL SECURITY;
+
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE policyname = 'authenticated_activity_splits_select') THEN
+        CREATE POLICY "authenticated_activity_splits_select" ON claim_activity_splits FOR SELECT TO authenticated USING (true);
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE policyname = 'authenticated_evidence_links_select') THEN
+        CREATE POLICY "authenticated_evidence_links_select" ON evidence_links FOR SELECT TO authenticated USING (true);
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE policyname = 'authenticated_execution_summaries_select') THEN
+        CREATE POLICY "authenticated_execution_summaries_select" ON execution_summaries FOR SELECT TO authenticated USING (true);
+    END IF;
+END $$;

@@ -1,4 +1,5 @@
 import os
+import threading
 from contextlib import asynccontextmanager
 
 from dotenv import load_dotenv
@@ -27,8 +28,26 @@ from backend.routers import (
     graph,
     investigation,
     summary,
+    reports,
+    claim_graph,
 )
 from backend.shared.db import init_db
+
+
+def _warm_active_index() -> None:
+    """Rebuild the in-memory FAISS index for the active schedule and load the embedding
+    model off the request path (the index does not survive a restart), so the first
+    /match after startup is not slow."""
+    try:
+        from backend.shared import schedule_index
+        from backend.shared.schedule_repository import get_active_schedule
+
+        active = get_active_schedule()
+        if active is not None:
+            schedule_index.build_index(active.schedule_id)
+            print(f"FAISS index warmed for active schedule {active.schedule_id}")
+    except Exception as e:  # never block startup
+        print(f"Warning: FAISS warm-up skipped ({e})")
 
 
 @asynccontextmanager
@@ -37,6 +56,7 @@ async def lifespan(app: FastAPI):
         init_db()
     except Exception as e:
         print(f"Warning: Database initialization skipped on startup ({e})")
+    threading.Thread(target=_warm_active_index, daemon=True).start()
     yield
 
 
@@ -87,3 +107,5 @@ app.include_router(mock_p6.router)
 app.include_router(graph.router)
 app.include_router(investigation.router)
 app.include_router(summary.router)
+app.include_router(reports.router)
+app.include_router(claim_graph.router)

@@ -25,6 +25,12 @@ def health():
     return {"router": "mock-p6", "status": "ok"}
 
 
+@router.get("/received")
+def received():
+    """Payloads the mock P6 has received since startup (for the demo's write-back view)."""
+    return {"count": len(_received_payloads), "payloads": get_received_payloads()}
+
+
 class P6ActivityPayload(BaseModel):
     Id: str
     StartDate: Optional[str] = None

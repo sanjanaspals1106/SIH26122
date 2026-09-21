@@ -224,6 +224,8 @@ class ClaimResponse(BaseModel):
     clarification_question: Optional[str] = None
     clarification_answer: Optional[str] = None
     field_provenance: dict[str, str] = Field(default_factory=dict)
+    priority_score: Optional[float] = None    # Feature 32, set by /check and /review-queue
+    priority_reasons: Optional[str] = None    # newline-separated "[Tag] explanation" lines
     created_at: datetime
 
 
