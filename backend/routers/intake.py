@@ -45,6 +45,7 @@ File-intake architecture (this revision):
 """
 import hashlib
 import io
+import json
 import logging
 import os
 import uuid
@@ -59,14 +60,19 @@ from backend.shared.auth import UserProfile as CurrentUser, require_role
 from backend.shared.db import get_db
 from backend.shared.llm_extraction import (
     LLMExtractionError,
+    check_missing_required_fields,
     extract_claim_fields,
     extract_claim_fields_batch,
     extract_claim_fields_from_image_batch,
+    generate_clarification_question,
 )
 from backend.shared.schemas import (
     ClaimResponse,
+    ClarificationStatus,
+    ClarifyClaimRequest,
     ExtractedClaimFields,
     InputChannel,
+    ProvenanceTag,
     TextClaimRequest,
     UploadPurpose,
 )
@@ -344,7 +350,78 @@ def _get_active_schedule_id(conn) -> Optional[str]:
     return row["schedule_id"] if row else None
 
 
+def _build_ai_provenance(extracted: ExtractedClaimFields) -> dict[str, str]:
+    """Feature #33: Tag populated extracted fields with AI_EXTRACTED."""
+    prov: dict[str, str] = {}
+    if extracted.event_date is not None:
+        prov["event_date"] = ProvenanceTag.AI_EXTRACTED.value
+    if extracted.reported_activity_id is not None:
+        prov["reported_activity_id"] = ProvenanceTag.AI_EXTRACTED.value
+    if extracted.discipline is not None:
+        prov["discipline"] = ProvenanceTag.AI_EXTRACTED.value
+    if extracted.action is not None:
+        prov["action"] = ProvenanceTag.AI_EXTRACTED.value
+    if extracted.event_type is not None:
+        prov["event_type"] = ProvenanceTag.AI_EXTRACTED.value
+    if extracted.claim_mode is not None:
+        prov["claim_mode"] = ProvenanceTag.AI_EXTRACTED.value
+    if extracted.asset_tag is not None:
+        prov["asset_tag"] = ProvenanceTag.AI_EXTRACTED.value
+    if extracted.location is not None:
+        prov["location"] = ProvenanceTag.AI_EXTRACTED.value
+    if extracted.claimed_quantity is not None:
+        prov["claimed_quantity"] = ProvenanceTag.AI_EXTRACTED.value
+    if extracted.claimed_uom is not None:
+        prov["claimed_uom"] = ProvenanceTag.AI_EXTRACTED.value
+    if extracted.claimed_pct is not None:
+        prov["claimed_pct"] = ProvenanceTag.AI_EXTRACTED.value
+    if extracted.delay_reason is not None:
+        prov["delay_reason"] = ProvenanceTag.AI_EXTRACTED.value
+    if extracted.language_detected is not None:
+        prov["language_detected"] = ProvenanceTag.AI_EXTRACTED.value
+    return prov
+
+
+def _build_schedule_provenance(extracted: ExtractedClaimFields) -> dict[str, str]:
+    """Feature #33: Tag populated direct schedule fields with SCHEDULE_AUTO_FILLED."""
+    prov: dict[str, str] = {}
+    if extracted.event_date is not None:
+        prov["event_date"] = ProvenanceTag.SCHEDULE_AUTO_FILLED.value
+    if extracted.reported_activity_id is not None:
+        prov["reported_activity_id"] = ProvenanceTag.SCHEDULE_AUTO_FILLED.value
+    if extracted.discipline is not None:
+        prov["discipline"] = ProvenanceTag.SCHEDULE_AUTO_FILLED.value
+    if extracted.action is not None:
+        prov["action"] = ProvenanceTag.SCHEDULE_AUTO_FILLED.value
+    if extracted.event_type is not None:
+        prov["event_type"] = ProvenanceTag.SCHEDULE_AUTO_FILLED.value
+    if extracted.claim_mode is not None:
+        prov["claim_mode"] = ProvenanceTag.SCHEDULE_AUTO_FILLED.value
+    if extracted.asset_tag is not None:
+        prov["asset_tag"] = ProvenanceTag.SCHEDULE_AUTO_FILLED.value
+    if extracted.location is not None:
+        prov["location"] = ProvenanceTag.SCHEDULE_AUTO_FILLED.value
+    if extracted.claimed_quantity is not None:
+        prov["claimed_quantity"] = ProvenanceTag.SCHEDULE_AUTO_FILLED.value
+    if extracted.claimed_uom is not None:
+        prov["claimed_uom"] = ProvenanceTag.SCHEDULE_AUTO_FILLED.value
+    if extracted.claimed_pct is not None:
+        prov["claimed_pct"] = ProvenanceTag.SCHEDULE_AUTO_FILLED.value
+    return prov
+
+
 def _row_to_claim_response(row) -> ClaimResponse:
+    raw_prov = row.get("field_provenance") if isinstance(row, dict) else (row["field_provenance"] if "field_provenance" in row else None)
+    if isinstance(raw_prov, str):
+        try:
+            field_provenance = json.loads(raw_prov)
+        except Exception:
+            field_provenance = {}
+    elif isinstance(raw_prov, dict):
+        field_provenance = raw_prov
+    else:
+        field_provenance = {}
+
     return ClaimResponse(
         event_id=row["event_id"],
         document_id=row["document_id"],
@@ -352,22 +429,26 @@ def _row_to_claim_response(row) -> ClaimResponse:
         event_date=row["event_date"],
         raw_claim_text=row["raw_claim_text"],
         input_channel=row["input_channel"],
-        language_detected=row["language_detected"],
-        reported_activity_id=row["reported_activity_id"],
-        matched_activity_id=row["matched_activity_id"],
-        discipline=row["discipline"],
-        action=row["action"],
-        event_type=row["event_type"],
-        claim_mode=row["claim_mode"],
-        asset_tag=row["asset_tag"],
-        location=row["location"],
-        claimed_quantity=row["claimed_quantity"],
-        claimed_uom=row["claimed_uom"],
-        claimed_pct=row["claimed_pct"],
-        delay_reason=row["delay_reason"],
-        supervisor_id=str(row["supervisor_id"]) if row["supervisor_id"] else None,
-        photo_path=row["photo_path"],
-        status=row["status"],
+        language_detected=row.get("language_detected"),
+        reported_activity_id=row.get("reported_activity_id"),
+        matched_activity_id=row.get("matched_activity_id"),
+        discipline=row.get("discipline"),
+        action=row.get("action"),
+        event_type=row.get("event_type"),
+        claim_mode=row.get("claim_mode", "CUMULATIVE_PCT"),
+        asset_tag=row.get("asset_tag"),
+        location=row.get("location"),
+        claimed_quantity=row.get("claimed_quantity"),
+        claimed_uom=row.get("claimed_uom"),
+        claimed_pct=row.get("claimed_pct"),
+        delay_reason=row.get("delay_reason"),
+        supervisor_id=str(row["supervisor_id"]) if row.get("supervisor_id") else None,
+        photo_path=row.get("photo_path"),
+        status=row.get("status", "EXTRACTED"),
+        clarification_status=row.get("clarification_status") or ClarificationStatus.NONE.value,
+        clarification_question=row.get("clarification_question"),
+        clarification_answer=row.get("clarification_answer"),
+        field_provenance=field_provenance,
         created_at=row["created_at"],
     )
 
@@ -395,6 +476,10 @@ def _insert_execution_event(
     delay_reason: Optional[str],
     supervisor_id: str,
     photo_path: Optional[str] = None,
+    clarification_status: str = "NONE",
+    clarification_question: Optional[str] = None,
+    clarification_answer: Optional[str] = None,
+    field_provenance: Optional[dict[str, str]] = None,
 ) -> None:
     """
     Shared INSERT for every intake path (text, file, schedule-export) --
@@ -407,14 +492,16 @@ def _insert_execution_event(
             input_channel, language_detected, reported_activity_id, discipline,
             action, event_type, claim_mode, asset_tag, location,
             claimed_quantity, claimed_uom, claimed_pct, delay_reason,
-            supervisor_id, photo_path, status
-        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'EXTRACTED')""",
+            supervisor_id, photo_path, status, clarification_status,
+            clarification_question, clarification_answer, field_provenance
+        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'EXTRACTED', %s, %s, %s, %s)""",
         (
             event_id, document_id, schedule_id, event_date_val, raw_claim_text,
             input_channel, language_detected, reported_activity_id, discipline,
             action, event_type, claim_mode, asset_tag, location,
             claimed_quantity, claimed_uom, claimed_pct, delay_reason,
-            supervisor_id, photo_path,
+            supervisor_id, photo_path, clarification_status, clarification_question,
+            clarification_answer, json.dumps(field_provenance or {}),
         ),
     )
 
@@ -476,6 +563,20 @@ def create_text_claim(
         event_id = str(uuid.uuid4())
         event_date_val = extracted.event_date or date.today()
 
+        # Feature #33 Provenance Tagging
+        provenance = _build_ai_provenance(extracted)
+
+        # Feature #29 Adaptive Field Copilot
+        missing_fields = check_missing_required_fields(extracted)
+        if missing_fields:
+            clarification_question = generate_clarification_question(
+                payload.raw_claim_text, missing_fields, extracted.language_detected
+            )
+            clarification_status = ClarificationStatus.PENDING.value
+        else:
+            clarification_question = None
+            clarification_status = ClarificationStatus.NONE.value
+
         _insert_execution_event(
             cur,
             event_id=event_id,
@@ -497,6 +598,10 @@ def create_text_claim(
             claimed_pct=extracted.claimed_pct,
             delay_reason=extracted.delay_reason.value if extracted.delay_reason else None,
             supervisor_id=current_user.id,
+            clarification_status=clarification_status,
+            clarification_question=clarification_question,
+            clarification_answer=None,
+            field_provenance=provenance,
         )
 
         # Provenance (feature #2's "Provenance" requirement): for typed/voice
@@ -526,6 +631,108 @@ def get_claim(
         row = cur.fetchone()
     if not row:
         raise HTTPException(status_code=404, detail="Claim not found")
+    return _row_to_claim_response(row)
+
+
+@router.post("/claims/{event_id}/clarify", response_model=ClaimResponse)
+def clarify_claim(
+    event_id: str,
+    payload: ClarifyClaimRequest,
+    conn=Depends(get_db),
+    current_user: CurrentUser = Depends(require_role("SITE_ENGINEER", "SUPERVISOR")),
+):
+    """
+    Feature #29: Adaptive Field Copilot clarification endpoint.
+    Takes user's free-text answer, merges it with the original raw_claim_text,
+    re-runs extraction, sets clarification_status = 'ANSWERED' and clarification_answer,
+    and updates field_provenance for newly-filled fields.
+    """
+    with conn.cursor() as cur:
+        cur.execute("SELECT * FROM execution_events WHERE event_id = %s", (event_id,))
+        claim = cur.fetchone()
+        if not claim:
+            raise HTTPException(status_code=404, detail="Claim not found")
+
+        orig_text = claim["raw_claim_text"]
+        merged_text = f"{orig_text}\nClarification: {payload.answer}"
+
+        try:
+            extracted = extract_claim_fields(merged_text)
+        except LLMExtractionError as e:
+            conn.rollback()
+            raise HTTPException(
+                status_code=502,
+                detail=f"Clarification extraction failed: {e}. Please retry.",
+            )
+
+        raw_prov = claim.get("field_provenance") if isinstance(claim, dict) else (claim["field_provenance"] if "field_provenance" in claim else None)
+        if isinstance(raw_prov, str):
+            try:
+                existing_prov = json.loads(raw_prov)
+            except Exception:
+                existing_prov = {}
+        elif isinstance(raw_prov, dict):
+            existing_prov = dict(raw_prov)
+        else:
+            existing_prov = {}
+
+        new_prov = _build_ai_provenance(extracted)
+        existing_prov.update(new_prov)
+
+        event_date = extracted.event_date or claim["event_date"]
+        discipline = extracted.discipline.value if extracted.discipline else claim.get("discipline")
+        action = extracted.action or claim.get("action")
+        event_type = extracted.event_type.value if extracted.event_type else claim.get("event_type")
+        claim_mode = extracted.claim_mode.value if extracted.claim_mode else claim.get("claim_mode", "CUMULATIVE_PCT")
+        asset_tag = extracted.asset_tag or claim.get("asset_tag")
+        location = extracted.location or claim.get("location")
+        claimed_quantity = extracted.claimed_quantity if extracted.claimed_quantity is not None else claim.get("claimed_quantity")
+        claimed_uom = extracted.claimed_uom or claim.get("claimed_uom")
+        claimed_pct = extracted.claimed_pct if extracted.claimed_pct is not None else claim.get("claimed_pct")
+        delay_reason = extracted.delay_reason.value if extracted.delay_reason else claim.get("delay_reason")
+
+        cur.execute(
+            """UPDATE execution_events SET
+                event_date = %s,
+                raw_claim_text = %s,
+                discipline = %s,
+                action = %s,
+                event_type = %s,
+                claim_mode = %s,
+                asset_tag = %s,
+                location = %s,
+                claimed_quantity = %s,
+                claimed_uom = %s,
+                claimed_pct = %s,
+                delay_reason = %s,
+                clarification_status = %s,
+                clarification_answer = %s,
+                field_provenance = %s
+               WHERE event_id = %s""",
+            (
+                event_date,
+                merged_text,
+                discipline,
+                action,
+                event_type,
+                claim_mode,
+                asset_tag,
+                location,
+                claimed_quantity,
+                claimed_uom,
+                claimed_pct,
+                delay_reason,
+                ClarificationStatus.ANSWERED.value,
+                payload.answer,
+                json.dumps(existing_prov),
+                event_id,
+            ),
+        )
+        conn.commit()
+
+        cur.execute("SELECT * FROM execution_events WHERE event_id = %s", (event_id,))
+        row = cur.fetchone()
+
     return _row_to_claim_response(row)
 
 
@@ -637,6 +844,20 @@ def create_file_claim(
             event_id = str(uuid.uuid4())
             event_date_val = extracted.event_date or date.today()
 
+            # Feature #33 Provenance Tagging
+            provenance = _build_ai_provenance(extracted)
+
+            # Feature #29 Adaptive Field Copilot
+            missing_fields = check_missing_required_fields(extracted)
+            if missing_fields:
+                clarification_question = generate_clarification_question(
+                    draft.raw_text, missing_fields, extracted.language_detected
+                )
+                clarification_status = ClarificationStatus.PENDING.value
+            else:
+                clarification_question = None
+                clarification_status = ClarificationStatus.NONE.value
+
             _insert_execution_event(
                 cur,
                 event_id=event_id,
@@ -659,6 +880,10 @@ def create_file_claim(
                 delay_reason=extracted.delay_reason.value if extracted.delay_reason else None,
                 supervisor_id=current_user.id,
                 photo_path=photo_path,
+                clarification_status=clarification_status,
+                clarification_question=clarification_question,
+                clarification_answer=None,
+                field_provenance=provenance,
             )
             _insert_source_reference(
                 cur, event_id=event_id, file_name=file.filename, raw_snippet=draft.raw_text
@@ -749,6 +974,9 @@ def create_schedule_export_claims(
                 event_id = str(uuid.uuid4())
                 event_date_val = extracted.event_date or date.today()
 
+                # Feature #33 Provenance tagging for SCHEDULE_AUTO_FILLED
+                provenance = _build_schedule_provenance(extracted)
+
                 _insert_execution_event(
                     cur,
                     event_id=event_id,
@@ -770,6 +998,10 @@ def create_schedule_export_claims(
                     claimed_pct=extracted.claimed_pct,
                     delay_reason=extracted.delay_reason.value if extracted.delay_reason else None,
                     supervisor_id=current_user.id,
+                    clarification_status=ClarificationStatus.NONE.value,
+                    clarification_question=None,
+                    clarification_answer=None,
+                    field_provenance=provenance,
                 )
                 _insert_source_reference(
                     cur, event_id=event_id, file_name=file.filename, raw_snippet=str(row.to_dict())

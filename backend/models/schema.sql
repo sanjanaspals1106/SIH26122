@@ -186,3 +186,9 @@ ALTER TABLE schedule_activities ADD COLUMN IF NOT EXISTS total_float REAL;
 ALTER TABLE schedule_activities ADD COLUMN IF NOT EXISTS is_critical BOOLEAN;
 ALTER TABLE schedule_dependencies ADD COLUMN IF NOT EXISTS lag_days REAL DEFAULT 0.0;
 
+-- Member 2 / New Features (29 & 33) migrations
+ALTER TABLE execution_events ADD COLUMN IF NOT EXISTS clarification_status TEXT DEFAULT 'NONE';
+ALTER TABLE execution_events ADD COLUMN IF NOT EXISTS clarification_question TEXT;
+ALTER TABLE execution_events ADD COLUMN IF NOT EXISTS clarification_answer TEXT;
+ALTER TABLE execution_events ADD COLUMN IF NOT EXISTS field_provenance JSONB DEFAULT '{}';
+

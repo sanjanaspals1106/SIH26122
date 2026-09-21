@@ -60,7 +60,7 @@ _PROVIDER_BASE_URLS = {
 }
 
 _PROVIDER_DEFAULT_MODELS = {
-    "groq": "groq/compound-mini",
+    "groq": "openai/gpt-oss-20b",
     "gemini": "gemini-3.6-flash",
 }
 
@@ -428,7 +428,59 @@ def extract_claim_fields_from_image_batch(
         )
     except LLMExtractionError:
         raise
-    except Exception as e:
-        raise LLMExtractionError(f"Vision LLM request failed: {e}") from e
-
     return _parse_batch_response(response.choices[0].message.content)
+
+
+def check_missing_required_fields(extracted: ExtractedClaimFields) -> list[str]:
+    """
+    Feature #29 Adaptive Field Copilot:
+    Strictly checks for missing-but-required fields:
+    - event_type
+    - discipline
+    - at least one of claimed_pct / claimed_quantity
+
+    asset_tag, location, and delay_reason being null is normal and does NOT trigger follow-up.
+    """
+    missing = []
+    if not extracted.event_type:
+        missing.append("event_type")
+    if not extracted.discipline:
+        missing.append("discipline")
+    if extracted.claimed_pct is None and extracted.claimed_quantity is None:
+        missing.append("claimed_progress")
+    return missing
+
+
+def generate_clarification_question(
+    raw_text: str,
+    missing_fields: list[str],
+    language_detected: Optional[str] = None,
+) -> str:
+    """
+    Prompts the LLM to generate a single, specific follow-up question in the same
+    language the claim was submitted in.
+    """
+    from backend.shared.llm_client import call_llm
+
+    lang = language_detected or "English"
+    fields_desc = ", ".join(missing_fields)
+    prompt = (
+        f"You are a helpful construction site supervisor copilot. A field engineer reported:\n"
+        f"\"{raw_text}\"\n\n"
+        f"The following required information is missing from the report: {fields_desc}.\n"
+        f"Generate a single, polite, concise follow-up question asking the engineer to clarify these missing details.\n"
+        f"IMPORTANT: Phrase the question in the same language as the report (Detected language: {lang}).\n"
+        f"Ask ONLY ONE question. Do not include greetings, explanations, or multiple options."
+    )
+
+    try:
+        question = call_llm(
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.2,
+        )
+        question = question.strip().strip('"')
+        if not question or question == "{}":
+            return f"Could you please specify the {fields_desc.replace('_', ' ')} for this activity?"
+        return question
+    except Exception:
+        return f"Could you please clarify the {fields_desc.replace('_', ' ')} for this activity?"
