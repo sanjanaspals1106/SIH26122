@@ -116,6 +116,19 @@ class UploadPurpose(str, Enum):
     SCANNED_DIARY = "SCANNED_DIARY"
 
 
+class ClarificationStatus(str, Enum):
+    NONE = "NONE"
+    PENDING = "PENDING"
+    ANSWERED = "ANSWERED"
+
+
+class ProvenanceTag(str, Enum):
+    AI_EXTRACTED = "AI_EXTRACTED"
+    SCHEDULE_AUTO_FILLED = "SCHEDULE_AUTO_FILLED"
+    ENGINEER_ENTERED = "ENGINEER_ENTERED"
+    SUPERVISOR_EDITED = "SUPERVISOR_EDITED"
+
+
 class ExecutionClaim(BaseModel):
     event_id: str
     schedule_id: str
@@ -180,6 +193,10 @@ class TextClaimRequest(BaseModel):
     schedule_id: Optional[str] = None  # if omitted, defaults to most recently uploaded schedule
 
 
+class ClarifyClaimRequest(BaseModel):
+    answer: str
+
+
 class ClaimResponse(BaseModel):
     event_id: str
     document_id: Optional[str] = None
@@ -203,6 +220,10 @@ class ClaimResponse(BaseModel):
     supervisor_id: Optional[str] = None
     photo_path: Optional[str] = None
     status: str
+    clarification_status: str = ClarificationStatus.NONE.value
+    clarification_question: Optional[str] = None
+    clarification_answer: Optional[str] = None
+    field_provenance: dict[str, str] = Field(default_factory=dict)
     created_at: datetime
 
 
