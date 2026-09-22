@@ -1,7 +1,8 @@
-﻿import React from 'react';
+﻿import React, { useEffect, useState } from 'react';
 import { cn } from '@/lib/utils';
-import { FileText, ImageIcon, Hash } from 'lucide-react';
-import { ExecutionEvent, SourceReference } from '@/api';
+import { FileText, ImageIcon, Hash, Loader2 } from 'lucide-react';
+import { ExecutionEvent, SourceReference, claimsApi } from '@/api';
+import { ImageLightbox } from '@/components/ImageLightbox';
 
 export interface SourceReferenceCardProps {
   event: ExecutionEvent;
@@ -17,6 +18,34 @@ export function SourceReferenceCard({
   const hasDocId = Boolean(event.document_id);
   const hasPhoto = Boolean(event.photo_path);
   const hasRefs = sourceReferences.length > 0;
+
+  const [photoUrl, setPhotoUrl] = useState<string | null>(null);
+  const [photoError, setPhotoError] = useState(false);
+
+  useEffect(() => {
+    if (!hasPhoto) return;
+    let cancelled = false;
+    let objectUrl: string | null = null;
+    setPhotoError(false);
+    claimsApi
+      .getPhotoBlobUrl(event.event_id)
+      .then((url) => {
+        if (cancelled) {
+          URL.revokeObjectURL(url);
+          return;
+        }
+        objectUrl = url;
+        setPhotoUrl(url);
+      })
+      .catch(() => {
+        if (!cancelled) setPhotoError(true);
+      });
+    return () => {
+      cancelled = true;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [event.event_id, hasPhoto]);
 
   // If completely devoid of source evidence metadata, render nothing to keep UX compact
   if (!hasDocId && !hasPhoto && !hasRefs) {
@@ -59,9 +88,24 @@ export function SourceReferenceCard({
               <ImageIcon className="w-3 h-3 text-accent" />
               Attached Photo:
             </span>
-            <span className="font-mono text-accent truncate max-w-[200px]" title={event.photo_path || ''}>
-              {event.photo_path?.split('/').pop()}
-            </span>
+            <div className="flex items-center gap-2">
+              <span className="font-mono text-accent truncate max-w-[140px]" title={event.photo_path || ''}>
+                {event.photo_path?.split('/').pop()}
+              </span>
+              {photoError ? (
+                <span className="text-[10px] text-muted-foreground italic">unavailable</span>
+              ) : photoUrl ? (
+                <ImageLightbox src={photoUrl} alt={`Evidence photo for claim ${event.event_id}`}>
+                  <img
+                    src={photoUrl}
+                    alt={`Evidence photo thumbnail for claim ${event.event_id}`}
+                    className="w-9 h-9 rounded-md object-cover border border-border hover:opacity-80 transition-opacity"
+                  />
+                </ImageLightbox>
+              ) : (
+                <Loader2 className="w-3.5 h-3.5 animate-spin text-muted-foreground" />
+              )}
+            </div>
           </div>
         )}
 

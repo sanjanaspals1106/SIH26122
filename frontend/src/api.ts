@@ -18,6 +18,56 @@ interface ApiFetchOptions extends RequestInit {
   responseType?: 'json' | 'blob' | 'text';
 }
 
+/** Thrown by apiFetch on a non-2xx response. `.message` is always safe to show
+ * a user (never raw JSON/stack traces); `.status` and `.raw` are for callers
+ * that want to branch on the status code or log the untouched backend body. */
+export class ApiError extends Error {
+  status: number;
+  raw: string;
+  constructor(status: number, message: string, raw: string) {
+    super(message);
+    this.name = 'ApiError';
+    this.status = status;
+    this.raw = raw;
+  }
+}
+
+const FRIENDLY_STATUS_MESSAGES: Record<number, string> = {
+  400: 'The request was invalid.',
+  401: 'Your session has expired. Please sign in again.',
+  403: "You don't have permission to do that.",
+  404: 'The requested item could not be found.',
+  409: 'This conflicts with existing data.',
+  422: 'Some of the submitted information was invalid.',
+  500: 'Something went wrong on the server. Please try again.',
+  502: 'The service is temporarily unavailable. Please try again shortly.',
+  503: 'The service is temporarily unavailable. Please try again shortly.',
+};
+
+function friendlyErrorMessage(status: number, bodyText: string): string {
+  // FastAPI's standard error shape is {"detail": "..."} or {"detail": [...]} for
+  // validation errors -- surface that human-readable detail when present, since
+  // it's already meant to be read (e.g. "Schedule 'x' not found"), but never a
+  // raw stack trace or an unparsed JSON blob.
+  try {
+    const parsed = JSON.parse(bodyText);
+    const detail = parsed?.detail ?? parsed?.error?.message ?? parsed?.message;
+    if (typeof detail === 'string' && detail.trim() && !detail.trim().startsWith('Traceback')) {
+      return detail;
+    }
+    if (Array.isArray(detail) && detail.length) {
+      const first = detail[0];
+      const field = Array.isArray(first?.loc) ? first.loc[first.loc.length - 1] : undefined;
+      if (typeof first?.msg === 'string') {
+        return field ? `${field}: ${first.msg}` : first.msg;
+      }
+    }
+  } catch {
+    // Not JSON (or not the expected shape) -- fall through to the generic message.
+  }
+  return FRIENDLY_STATUS_MESSAGES[status] || `Request failed (${status}). Please try again.`;
+}
+
 async function apiFetch<T>(path: string, options?: ApiFetchOptions): Promise<T> {
   const token = localStorage.getItem('supabase_access_token') || localStorage.getItem('auth_token');
   const headers: Record<string, string> = {
@@ -34,8 +84,22 @@ async function apiFetch<T>(path: string, options?: ApiFetchOptions): Promise<T> 
   });
 
   if (!res.ok) {
-    const errorText = await res.text().catch(() => 'Unknown network error');
-    throw new Error(`API ${res.status}: ${errorText}`);
+    const errorText = await res.text().catch(() => '');
+    // Technical detail stays in the console for debugging; never in the thrown
+    // message a UI component might render directly (ISS-10).
+    console.error(`[api] ${options?.method || 'GET'} ${path} -> ${res.status}`, errorText);
+
+    if (res.status === 401) {
+      // Centralized session-expiry handling (ISS-22): clear the dead token so
+      // no further request is sent with it, and let AuthProvider react (it
+      // listens for this event) to drop `user` and bounce to /login via the
+      // existing ProtectedRoute redirect -- never a raw error left on screen.
+      localStorage.removeItem('supabase_access_token');
+      localStorage.removeItem('auth_token');
+      window.dispatchEvent(new Event('auth:unauthorized'));
+    }
+
+    throw new ApiError(res.status, friendlyErrorMessage(res.status, errorText), errorText);
   }
 
   if (options?.responseType === 'blob') {
@@ -1117,15 +1181,14 @@ export const claimsApi = {
   // found, so this returns `events`, not a single `event`.
   submitFile: async (
     file: File,
-    options?: { purpose?: 'EVIDENCE_PHOTO' | 'SCANNED_DIARY'; rawClaimText?: string },
-    scheduleId: string = 'sched-OIL-2026'
+    options?: { purpose?: 'EVIDENCE_PHOTO' | 'SCANNED_DIARY'; rawClaimText?: string }
   ): Promise<{ events: ExecutionEvent[] }> => {
     if (USE_MOCKS) {
       await sleep(1500);
       const ev: ExecutionEvent = {
         event_id: `evt-${Date.now()}`,
         document_id: `doc-${Date.now()}`,
-        schedule_id: scheduleId,
+        schedule_id: 'sched-OIL-2026', // mock-mode only -- the real branch below never sends/uses a schedule id
         event_date: TODAY,
         raw_claim_text: options?.rawClaimText || `Ingested update from file: ${file.name}`,
         input_channel: 'FILE_UPLOAD',
@@ -1307,6 +1370,19 @@ export const claimsApi = {
     return data.evidence || data || [];
   },
 
+  // GET /api/v1/claims/{event_id}/photo requires an Authorization header, which a
+  // bare <img src> can't send -- fetch it as an authenticated blob instead and hand
+  // back an object URL the caller can put straight in an <img src> or lightbox.
+  // Callers must URL.revokeObjectURL() it when done (see components/ImageLightbox).
+  getPhotoBlobUrl: async (eventId: string): Promise<string> => {
+    if (USE_MOCKS) {
+      await sleep(200);
+      return 'https://images.unsplash.com/photo-1541888946425-d81bb19240f5?w=800&q=80';
+    }
+    const blob = await apiFetch<Blob>(`/api/v1/claims/${eventId}/photo`, { responseType: 'blob' });
+    return URL.createObjectURL(blob);
+  },
+
   getKnowledgeGraph: async (eventId: string): Promise<KnowledgeGraphData> => {
     if (USE_MOCKS) {
       await sleep(400);
@@ -1485,6 +1561,7 @@ export const dashboardApi = {
     actuals: number;
     conflicts: number;
     discipline_breakdown: { discipline: string; name: string; count: number; value: number }[];
+    claims_trend_pct: number | null;
   }> => {
     if (USE_MOCKS) {
       await sleep(300);
@@ -1500,9 +1577,11 @@ export const dashboardApi = {
           { discipline: 'INSTRUMENTATION', name: 'INSTRUMENTATION', count: 12, value: 12 },
           { discipline: 'HSE', name: 'HSE', count: 8, value: 8 },
         ],
+        claims_trend_pct: 12,
       };
     }
-    return apiFetch('/api/v1/dashboard/summary');
+    const data: any = await apiFetch('/api/v1/dashboard/summary');
+    return { ...data, claims_trend_pct: data.claims_trend_pct ?? null };
   },
 
   getDelayReasons: async (): Promise<{ reason: string; count: number }[]> => {
@@ -1743,13 +1822,37 @@ export const activitiesApi = {
     const eventItems = timeline.filter((t: any) => t.type === 'execution_event');
     const decisionItem = timeline.find((t: any) => t.type === 'planner_decision');
 
-    const scheduleId = eventItems.find((ev: any) => ev.schedule_id)?.schedule_id;
-    let activity: ScheduleActivity | null = null;
+    // The history response itself carries the activity's real metadata (schedule_id,
+    // activity_name, discipline, ...) resolved from schedule_activities -- an activity
+    // with zero timeline events still has this, so never derive it only from timeline
+    // events (that's exactly the "empty history looks like a broken activity" bug this
+    // replaces; see backend/routers/activities.py's query_activity_history).
+    const scheduleId: string | undefined = data.schedule_id;
+    let activity: ScheduleActivity | null = scheduleId
+      ? {
+          activity_id: data.activity_id,
+          schedule_id: scheduleId,
+          activity_name: data.activity_name || data.activity_id,
+          wbs_code: data.wbs_code ?? null,
+          discipline: (data.discipline || 'CIVIL') as Discipline,
+          location: data.location || '',
+          asset_tag: null,
+          planned_start: data.planned_start || '',
+          planned_finish: data.planned_finish || '',
+          planned_quantity: null,
+          uom: null,
+          baseline_pct_complete: 0,
+        }
+      : null;
     if (scheduleId) {
+      // Best-effort enrichment for fields the history endpoint doesn't carry
+      // (asset_tag, planned_quantity, uom, baseline_pct_complete). Falls back
+      // to the metadata already built above if this second call fails.
       try {
-        activity = await apiFetch<ScheduleActivity>(`/api/v1/schedules/${scheduleId}/activities/${activityId}`);
+        const enriched = await apiFetch<ScheduleActivity>(`/api/v1/schedules/${scheduleId}/activities/${activityId}`);
+        activity = enriched;
       } catch {
-        activity = null;
+        // keep the activity metadata already derived from the history response
       }
     }
 
@@ -1937,7 +2040,7 @@ export const schedulesApi = {
   },
 
   getWbsTree: async (scheduleIdArg?: string): Promise<WBSTreeResponse> => {
-    const scheduleId = scheduleIdArg ?? (await getActiveScheduleId().catch(() => 'sched-OIL-2026'));
+    const scheduleId = scheduleIdArg ?? (await getActiveScheduleId());
     if (USE_MOCKS) {
       await sleep(400);
       // Group existing mock activities by wbs_code to mirror backend shape
@@ -2022,7 +2125,7 @@ export const wbsApi = {
     return wbsApi.updateSplits(request.event_id, request.allocations as any);
   },
 
-  getTree: async (scheduleId: string = 'sched-OIL-2026'): Promise<WBSTreeResponse> => {
+  getTree: async (scheduleId?: string): Promise<WBSTreeResponse> => {
     return schedulesApi.getWbsTree(scheduleId);
   },
 };

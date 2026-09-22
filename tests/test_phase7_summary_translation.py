@@ -584,3 +584,90 @@ def test_auth_01_supervisor_only():
         assert data["language"] == "en"
 
     app.dependency_overrides.clear()
+
+
+# =========================================================================
+# ISS-05/ISS-06: build_deterministic_aggregate is schedule-scoped -- a
+# second schedule's claims/actuals/conflicts/validation issues/activities
+# must never leak into the requested schedule's AI Execution Summary
+# (and therefore never skew its approval_rate_pct).
+# =========================================================================
+
+
+def _add_second_schedule(db: SQLitePsycopgAdapter, ref_date: date):
+    ref_iso = ref_date.isoformat()
+    d_minus_2 = (ref_date - timedelta(days=2)).isoformat()
+
+    db.execute("INSERT INTO schedules (schedule_id, project_name) VALUES ('SCH-02', 'Other Project')")
+    db.execute(
+        """
+        INSERT INTO schedule_activities (activity_id, schedule_id, activity_name, discipline, is_critical, planned_start, planned_finish)
+        VALUES ('ACT-ELE-01', 'SCH-02', 'Cable Pulling', 'ELECTRICAL', 0, '2026-09-01', '2026-09-10')
+        """
+    )
+    # 3 rejected claims on Schedule B -- if these leaked into Schedule A's
+    # aggregate they'd drag its approval_rate_pct down.
+    db.execute(
+        """
+        INSERT INTO execution_events (event_id, schedule_id, event_date, raw_claim_text, input_channel, discipline, event_type, status, delay_reason)
+        VALUES
+            ('EV-B1', 'SCH-02', %s, 'Cable claim 1', 'TYPED_TEXT', 'ELECTRICAL', 'PROGRESS_UPDATE', 'REJECTED', NULL),
+            ('EV-B2', 'SCH-02', %s, 'Cable claim 2', 'TYPED_TEXT', 'ELECTRICAL', 'PROGRESS_UPDATE', 'REJECTED', NULL),
+            ('EV-B3', 'SCH-02', %s, 'Cable claim 3', 'TYPED_TEXT', 'ELECTRICAL', 'PROGRESS_UPDATE', 'REJECTED', NULL)
+        """,
+        (d_minus_2, d_minus_2, d_minus_2),
+    )
+    db.execute(
+        """
+        INSERT INTO approved_actuals (actual_id, decision_id, event_id, schedule_id, activity_id, actual_start, actual_pct_complete)
+        VALUES ('AA-B1', 'DEC-B1', 'EV-B1', 'SCH-02', 'ACT-ELE-01', %s, 20.0)
+        """,
+        (d_minus_2,),
+    )
+    db.execute(
+        """
+        INSERT INTO conflict_records (conflict_id, schedule_id, activity_id, reporting_period, event_id_a, event_id_b, value_a, value_b, variance_pct, status)
+        VALUES ('CONF-B1', 'SCH-02', 'ACT-ELE-01', %s, 'EV-B1', 'EV-B2', 20.0, 10.0, 10.0, 'OPEN')
+        """,
+        (d_minus_2,),
+    )
+    db.execute(
+        """
+        INSERT INTO validation_issues (issue_id, event_id, rule_code, severity, description)
+        VALUES ('VAL-B1', 'EV-B1', 'RULE-E01', 'ERROR', 'Cable claim missing evidence')
+        """
+    )
+    db.commit()
+
+
+def test_aggregate_schedule_isolation():
+    ref_date = date.today()
+    db = create_test_db()
+    populate_standard_fixtures(db, ref_date)
+    _add_second_schedule(db, ref_date)
+
+    agg_a = build_deterministic_aggregate(
+        period="last_7_days", discipline="ALL", conn=db, reference_date=ref_date, schedule_id="SCH-01",
+    )
+    agg_b = build_deterministic_aggregate(
+        period="last_7_days", discipline="ALL", conn=db, reference_date=ref_date, schedule_id="SCH-02",
+    )
+
+    # Schedule A's claim/activity counts are unaffected by Schedule B's data
+    # (3 claims from populate_standard_fixtures fall in the 7-day window: EV-01, EV-02, EV-03).
+    assert agg_a["claims"]["total_claims"] == 3
+    assert agg_a["activities"]["total"] == 3
+    assert agg_a["conflicts"]["total_conflicts"] == 1
+    assert agg_a["validation_issues"]["total_issues"] == 1
+
+    # Schedule B is isolated to its own 3 rejected claims, 1 activity, 1 conflict, 1 validation issue
+    assert agg_b["claims"]["total_claims"] == 3
+    assert agg_b["claims"]["by_status"].get("REJECTED") == 3
+    assert agg_b["activities"]["total"] == 1
+    assert agg_b["conflicts"]["total_conflicts"] == 1
+    assert agg_b["validation_issues"]["total_issues"] == 1
+
+    # And the unscoped legacy call path (no schedule_id argument) still combines both,
+    # documenting why every live endpoint must always pass schedule_id explicitly.
+    combined = build_deterministic_aggregate(period="last_7_days", discipline="ALL", conn=db, reference_date=ref_date)
+    assert combined["claims"]["total_claims"] == 6

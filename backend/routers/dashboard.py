@@ -1,18 +1,19 @@
 import logging
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from typing import Any, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from backend.shared.auth import UserProfile, require_role
 from backend.shared.db import get_connection
+from backend.shared.schedule_context import resolve_schedule_id
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/v1/dashboard", tags=["dashboard"])
 
 
-def query_delay_reason_aggregates(conn: Optional[Any] = None) -> dict:
+def query_delay_reason_aggregates(conn: Optional[Any] = None, schedule_id: Optional[str] = None) -> dict:
     """
     Query execution_events joined with planner_decisions to aggregate delay reasons
     for approved claims.
@@ -24,6 +25,12 @@ def query_delay_reason_aggregates(conn: Optional[Any] = None) -> dict:
     3. Exclude NULL, empty string, and whitespace-only delay reasons.
     4. Group using TRIM(delay_reason).
     5. Sort by count DESC, delay_reason ASC.
+
+    schedule_id: when given, restricts to that schedule's claims only (see
+    module docstring / ISS-05 — a caller with no schedule_id argument at all
+    gets the pre-existing unscoped aggregate, used by unit tests that seed a
+    single-schedule fixture; the live /summary and /delay-reasons endpoints
+    always pass the resolved active schedule so results never mix schedules).
     """
     query = """
         SELECT
@@ -41,15 +48,18 @@ def query_delay_reason_aggregates(conn: Optional[Any] = None) -> dict:
         AND pd.action IN ('APPROVE', 'EDIT')
         AND ee.delay_reason IS NOT NULL
         AND TRIM(ee.delay_reason) != ''
-        GROUP BY TRIM(ee.delay_reason)
-        ORDER BY count DESC, delay_reason ASC
     """
+    params: tuple = ()
+    if schedule_id is not None:
+        query += " AND ee.schedule_id = %s"
+        params = (schedule_id,)
+    query += " GROUP BY TRIM(ee.delay_reason) ORDER BY count DESC, delay_reason ASC"
 
     if conn is not None:
-        rows = conn.execute(query).fetchall()
+        rows = conn.execute(query, params).fetchall()
     else:
         with get_connection() as c:
-            rows = c.execute(query).fetchall()
+            rows = c.execute(query, params).fetchall()
 
     delay_reasons: List[dict] = [
         {
@@ -72,7 +82,7 @@ def health():
     return {"router": "dashboard", "status": "ok"}
 
 
-def query_dashboard_summary(conn: Optional[Any] = None) -> dict:
+def query_dashboard_summary(conn: Optional[Any] = None, schedule_id: Optional[str] = None) -> dict:
     """
     Phase 3 Live Operational Dashboard Summary.
 
@@ -88,6 +98,17 @@ def query_dashboard_summary(conn: Optional[Any] = None) -> dict:
        (status = 'OPEN' or status IS NULL or status != 'RESOLVED').
     5. Discipline Breakdown: Distribution of schedule_activities grouped by discipline,
        providing live volume distribution for the discipline chart.
+    6. claims_trend_pct: total_claims (by event_date) in the last 7 days vs. the 7
+       days before that, both windows scoped to the same schedule. None (not 0)
+       when the prior window has no claims at all -- a percentage change against
+       zero is meaningless, so the caller must show "no previous-period data"
+       rather than a fabricated number (ISS-11).
+
+    schedule_id: when given, every KPI above is restricted to that schedule.
+    A caller with no schedule_id argument at all gets the pre-existing
+    unscoped aggregate (used by unit tests seeding a single-schedule
+    fixture); the live /summary endpoint always passes the resolved active
+    schedule so results never mix schedules (ISS-05).
     """
     def _execute(query: str, params: tuple = ()):
         if conn is not None:
@@ -95,10 +116,16 @@ def query_dashboard_summary(conn: Optional[Any] = None) -> dict:
         with get_connection() as c:
             return c.execute(query, params)
 
+    scope_sql = "" if schedule_id is None else " AND schedule_id = %s"
+    scope_params: tuple = () if schedule_id is None else (schedule_id,)
+
     # 1. Total Claims
     total_claims = 0
     try:
-        row = _execute("SELECT COUNT(*) AS total FROM execution_events").fetchone()
+        row = _execute(
+            "SELECT COUNT(*) AS total FROM execution_events WHERE 1=1" + scope_sql,
+            scope_params,
+        ).fetchone()
         if row:
             total_claims = int(row["total"] if isinstance(row, dict) or hasattr(row, "keys") else row[0])
     except Exception as e:
@@ -111,9 +138,11 @@ def query_dashboard_summary(conn: Optional[Any] = None) -> dict:
             """
             SELECT COUNT(*) AS pending
             FROM execution_events
-            WHERE status IS NULL
-               OR UPPER(TRIM(status)) NOT IN ('APPROVED', 'EDITED', 'REJECTED')
+            WHERE (status IS NULL
+               OR UPPER(TRIM(status)) NOT IN ('APPROVED', 'EDITED', 'REJECTED'))
             """
+            + scope_sql,
+            scope_params,
         ).fetchone()
         if row:
             pending_review = int(row["pending"] if isinstance(row, dict) or hasattr(row, "keys") else row[0])
@@ -123,7 +152,10 @@ def query_dashboard_summary(conn: Optional[Any] = None) -> dict:
     # 3. Actuals
     actuals = 0
     try:
-        row = _execute("SELECT COUNT(*) AS total FROM approved_actuals").fetchone()
+        row = _execute(
+            "SELECT COUNT(*) AS total FROM approved_actuals WHERE 1=1" + scope_sql,
+            scope_params,
+        ).fetchone()
         if row:
             actuals = int(row["total"] if isinstance(row, dict) or hasattr(row, "keys") else row[0])
     except Exception as e:
@@ -136,10 +168,12 @@ def query_dashboard_summary(conn: Optional[Any] = None) -> dict:
             """
             SELECT COUNT(*) AS total
             FROM conflict_records
-            WHERE status IS NULL
+            WHERE (status IS NULL
                OR UPPER(TRIM(status)) = 'OPEN'
-               OR UPPER(TRIM(status)) != 'RESOLVED'
+               OR UPPER(TRIM(status)) != 'RESOLVED')
             """
+            + scope_sql,
+            scope_params,
         ).fetchone()
         if row:
             conflicts = int(row["total"] if isinstance(row, dict) or hasattr(row, "keys") else row[0])
@@ -157,9 +191,10 @@ def query_dashboard_summary(conn: Optional[Any] = None) -> dict:
             FROM schedule_activities
             WHERE discipline IS NOT NULL
               AND TRIM(discipline) != ''
-            GROUP BY UPPER(TRIM(discipline))
-            ORDER BY count DESC, discipline ASC
             """
+            + scope_sql
+            + " GROUP BY UPPER(TRIM(discipline)) ORDER BY count DESC, discipline ASC",
+            scope_params,
         ).fetchall()
         for r in rows:
             disc = str(r["discipline"] if isinstance(r, dict) or hasattr(r, "keys") else r[0])
@@ -173,25 +208,59 @@ def query_dashboard_summary(conn: Optional[Any] = None) -> dict:
     except Exception as e:
         logger.warning("Could not aggregate discipline breakdown: %s", e)
 
+    # 6. Week-over-week claims trend (real data only -- None, never a guess).
+    # Date bounds are computed in Python (not SQL FILTER/INTERVAL, which are
+    # Postgres-only and silently no-op under the SQLite fixtures some unit
+    # tests use) so the same plain >=/< comparison works against both.
+    claims_trend_pct: Optional[float] = None
+    try:
+        today = date.today()
+        current_start = (today - timedelta(days=7)).isoformat()
+        previous_start = (today - timedelta(days=14)).isoformat()
+
+        current_row = _execute(
+            "SELECT COUNT(*) AS n FROM execution_events WHERE event_date >= %s" + scope_sql,
+            (current_start,) + scope_params,
+        ).fetchone()
+        previous_row = _execute(
+            "SELECT COUNT(*) AS n FROM execution_events WHERE event_date >= %s AND event_date < %s" + scope_sql,
+            (previous_start, current_start) + scope_params,
+        ).fetchone()
+
+        def _n(row):
+            return int(row["n"] if isinstance(row, dict) or hasattr(row, "keys") else row[0])
+
+        if current_row is not None and previous_row is not None:
+            current_week = _n(current_row)
+            previous_week = _n(previous_row)
+            if previous_week > 0:
+                claims_trend_pct = round((current_week - previous_week) / previous_week * 100, 1)
+    except Exception as e:
+        logger.warning("Could not compute claims trend: %s", e)
+
     return {
         "total_claims": total_claims,
         "pending_review": pending_review,
         "actuals": actuals,
         "conflicts": conflicts,
         "discipline_breakdown": discipline_breakdown,
+        "claims_trend_pct": claims_trend_pct,
     }
 
 
 @router.get("/summary")
 def get_dashboard_summary(
+    schedule_id: Optional[str] = Query(default=None, description="Defaults to the active schedule"),
     current_user: UserProfile = Depends(require_role("SUPERVISOR")),
 ):
     """
-    Live dashboard summary KPIs and discipline volume breakdown.
+    Live dashboard summary KPIs and discipline volume breakdown, scoped to
+    the active schedule (or an explicit, validated schedule_id).
     Restricted to SUPERVISOR role.
     """
+    resolved_schedule_id = resolve_schedule_id(schedule_id)
     try:
-        return query_dashboard_summary()
+        return query_dashboard_summary(schedule_id=resolved_schedule_id)
     except Exception as e:
         logger.error("Failed to query dashboard summary: %s", e)
         raise HTTPException(
@@ -200,17 +269,19 @@ def get_dashboard_summary(
         )
 
 
-
 @router.get("/delay-reasons")
 def get_delay_reasons(
+    schedule_id: Optional[str] = Query(default=None, description="Defaults to the active schedule"),
     current_user: UserProfile = Depends(require_role("SUPERVISOR")),
 ):
     """
-    Aggregate execution_events.delay_reason across APPROVED/EDIT claims.
+    Aggregate execution_events.delay_reason across APPROVED/EDIT claims,
+    scoped to the active schedule (or an explicit, validated schedule_id).
     Restricted to SUPERVISOR role.
     """
+    resolved_schedule_id = resolve_schedule_id(schedule_id)
     try:
-        return query_delay_reason_aggregates()
+        return query_delay_reason_aggregates(schedule_id=resolved_schedule_id)
     except Exception as e:
         logger.error("Failed to query delay reasons for dashboard: %s", e)
         raise HTTPException(

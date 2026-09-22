@@ -124,6 +124,22 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     restoreSession();
 
+    // Centralized 401 handling (ISS-22): api.ts's apiFetch clears the dead
+    // token and fires this event on any 401 from any page's request. Drop
+    // `user` here so ProtectedRoute's existing redirect-to-/login kicks in
+    // immediately, instead of leaving a signed-out user staring at a page
+    // that keeps silently failing every request.
+    const handleUnauthorized = () => {
+      if (isSupabaseConfigured && supabase) {
+        supabase.auth.signOut().catch(() => {});
+      }
+      localStorage.removeItem(TOKEN_KEY);
+      localStorage.removeItem(DEV_EMAIL_KEY);
+      localStorage.removeItem('user');
+      if (!cancelled) setUser(null);
+    };
+    window.addEventListener('auth:unauthorized', handleUnauthorized);
+
     if (isSupabaseConfigured && supabase) {
       const { data: subscription } = supabase.auth.onAuthStateChange((_event, session) => {
         if (session?.access_token) {
@@ -136,12 +152,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       });
       return () => {
         cancelled = true;
+        window.removeEventListener('auth:unauthorized', handleUnauthorized);
         subscription.subscription.unsubscribe();
       };
     }
 
     return () => {
       cancelled = true;
+      window.removeEventListener('auth:unauthorized', handleUnauthorized);
     };
   }, []);
 

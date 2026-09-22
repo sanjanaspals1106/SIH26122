@@ -78,7 +78,7 @@ def get_llm_provider() -> str:
 def get_default_model(provider: Optional[str] = None) -> str:
     _load_env_if_needed()
     prov = (provider or get_llm_provider()).lower()
-    return os.environ.get("LLM_MODEL", _PROVIDER_DEFAULT_MODELS.get(prov, "groq/compound-mini"))
+    return os.environ.get("LLM_MODEL", _PROVIDER_DEFAULT_MODELS.get(prov, _PROVIDER_DEFAULT_MODELS["groq"]))
 
 
 def _get_client() -> Optional[OpenAI]:

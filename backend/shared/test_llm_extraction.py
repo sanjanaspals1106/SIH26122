@@ -179,6 +179,7 @@ def _skip_on_quota_exhaustion(exc: LLMExtractionError):
     raise exc
 
 
+@pytest.mark.live_llm
 def test_batch_extraction_real_multi_activity_text():
     """Real-model smoke test: a genuinely multi-activity report must
     produce one claim per activity, not collapse them into one (the
@@ -198,6 +199,7 @@ def test_batch_extraction_real_multi_activity_text():
     assert ids == {"CIV-PS3-TR-0180", "PIP-PS3-WLD-024"}
 
 
+@pytest.mark.live_llm
 def test_batch_extraction_real_irrelevant_text_returns_empty():
     """Genuinely content-free/irrelevant text should come back as an empty
     list (model ran fine, nothing to extract) rather than an error or a

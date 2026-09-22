@@ -1,10 +1,18 @@
 import sqlite3
+from contextlib import contextmanager
+from datetime import date, timedelta
+from unittest.mock import patch
+
 import pytest
 from fastapi import HTTPException
+from fastapi.testclient import TestClient
 
+from backend.main import app
+from backend.routers.dashboard import query_dashboard_summary
 from backend.routers.graph import build_activity_graph
 from backend.routers.schedule import query_impact_preview
-from tests.test_phase5_knowledge_graph import create_test_db
+from backend.shared.auth import UserProfile, get_current_user
+from tests.test_phase5_knowledge_graph import SQLitePsycopgAdapter, create_test_db
 
 
 def setup_overlapping_schedules():
@@ -194,3 +202,318 @@ def test_impact_ambiguity_raises_409():
         query_impact_preview("ACT-001", delay_days=5, schedule_id=None, conn=db)
     assert exc_info.value.status_code == 409
     assert "exists in multiple schedules" in exc_info.value.detail
+
+
+# ── Dashboard isolation (ISS-05) ────────────────────────────────────────────
+
+def test_dashboard_summary_isolation_sched_a():
+    """Dashboard summary scoped to Schedule A counts only Schedule A's claims/actuals/disciplines."""
+    db = setup_overlapping_schedules()
+    summary_a = query_dashboard_summary(conn=db, schedule_id="SCHED_A")
+
+    assert summary_a["total_claims"] == 1
+    assert summary_a["actuals"] == 1
+    disciplines = {d["discipline"] for d in summary_a["discipline_breakdown"]}
+    assert disciplines == {"CIVIL"}
+    civil_count = next(d["count"] for d in summary_a["discipline_breakdown"] if d["discipline"] == "CIVIL")
+    assert civil_count == 2  # ACT-001 + ACT-002, both Schedule A
+    assert "PIPING" not in disciplines
+
+
+def test_dashboard_summary_isolation_sched_b():
+    """Dashboard summary scoped to Schedule B counts only Schedule B's claims/actuals/disciplines."""
+    db = setup_overlapping_schedules()
+    summary_b = query_dashboard_summary(conn=db, schedule_id="SCHED_B")
+
+    assert summary_b["total_claims"] == 1
+    assert summary_b["actuals"] == 1
+    disciplines = {d["discipline"] for d in summary_b["discipline_breakdown"]}
+    assert disciplines == {"PIPING"}
+    piping_count = next(d["count"] for d in summary_b["discipline_breakdown"] if d["discipline"] == "PIPING")
+    assert piping_count == 2  # ACT-001 + ACT-003, both Schedule B
+    assert "CIVIL" not in disciplines
+
+
+def test_dashboard_summary_unscoped_combines_both_schedules():
+    """
+    Documents the pre-existing unscoped behavior (no schedule_id argument at
+    all): callers that don't pass schedule_id get every schedule's data
+    combined. The live /summary and /delay-reasons endpoints never call the
+    function this way -- they always resolve and pass a schedule_id -- this
+    guards against a future regression reintroducing an unscoped call path.
+    """
+    db = setup_overlapping_schedules()
+    combined = query_dashboard_summary(conn=db)
+    assert combined["total_claims"] == 2
+    assert combined["actuals"] == 2
+
+
+def _insert_event(db, *, event_id, schedule_id, event_date, matched_activity_id="ACT-001"):
+    db.execute(
+        """
+        INSERT INTO execution_events (event_id, schedule_id, event_date, raw_claim_text, input_channel, matched_activity_id, status)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        """,
+        (event_id, schedule_id, event_date, f"Claim {event_id}", "TYPED_TEXT", matched_activity_id, "EXTRACTED"),
+    )
+
+
+def test_dashboard_claims_trend_isolated_per_schedule():
+    """
+    Week-over-week claims_trend_pct (ISS-11) is computed only from the
+    requested schedule's events -- a spike in Schedule B's current week must
+    not shift Schedule A's trend, and vice versa.
+    """
+    db = create_test_db()
+    today = date.today()
+    this_week = (today - timedelta(days=2)).isoformat()
+    last_week = (today - timedelta(days=9)).isoformat()
+
+    # Schedule A: 1 claim last week, 2 this week -> +100%
+    _insert_event(db, event_id="A-LAST", schedule_id="SCHED_A", event_date=last_week)
+    _insert_event(db, event_id="A-NOW-1", schedule_id="SCHED_A", event_date=this_week)
+    _insert_event(db, event_id="A-NOW-2", schedule_id="SCHED_A", event_date=this_week)
+
+    # Schedule B: 4 claims last week, 1 this week -> -75%
+    for i in range(4):
+        _insert_event(db, event_id=f"B-LAST-{i}", schedule_id="SCHED_B", event_date=last_week)
+    _insert_event(db, event_id="B-NOW", schedule_id="SCHED_B", event_date=this_week)
+
+    summary_a = query_dashboard_summary(conn=db, schedule_id="SCHED_A")
+    summary_b = query_dashboard_summary(conn=db, schedule_id="SCHED_B")
+
+    assert summary_a["claims_trend_pct"] == 100.0
+    assert summary_b["claims_trend_pct"] == -75.0
+
+
+def test_dashboard_claims_trend_none_without_prior_period_data():
+    """No claims in the prior 7-14 day window -> claims_trend_pct is None, never a fabricated number."""
+    db = create_test_db()
+    today = date.today()
+    this_week = (today - timedelta(days=1)).isoformat()
+    _insert_event(db, event_id="ONLY-EVENT", schedule_id="SCHED_A", event_date=this_week)
+
+    summary_a = query_dashboard_summary(conn=db, schedule_id="SCHED_A")
+    assert summary_a["claims_trend_pct"] is None
+
+
+# ── Daily Digest isolation (ISS-05) ─────────────────────────────────────────
+
+class _CursorCM:
+    """Wraps a sqlite3.Cursor so `with conn.cursor() as cur:` works (sqlite3
+    cursors, unlike psycopg3's, aren't themselves context managers)."""
+
+    def __init__(self, cursor):
+        self._cursor = cursor
+
+    def __enter__(self):
+        return self._cursor
+
+    def __exit__(self, *args):
+        pass
+
+
+class _DigestTestConn:
+    """Minimal psycopg3-shaped connection adapter (`.cursor()`, `%s`
+    placeholders, itself usable as `with get_connection() as conn:`) for
+    exercising routers/decisions.py's inline `get_connection()` calls
+    against a real in-memory SQLite DB instead of Supabase."""
+
+    def __init__(self, sqlite_conn):
+        self._conn = sqlite_conn
+
+    def cursor(self):
+        return _CursorCM(_TranslatingCursor(self._conn.cursor()))
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        pass
+
+    def commit(self):
+        self._conn.commit()
+
+
+class _TranslatingCursor:
+    def __init__(self, cursor):
+        self._cursor = cursor
+
+    def execute(self, query, params=None):
+        clean_q = query.replace("%s", "?")
+        if params is not None:
+            self._cursor.execute(clean_q, params)
+        else:
+            self._cursor.execute(clean_q)
+        return self
+
+    def fetchall(self):
+        return self._cursor.fetchall()
+
+    def fetchone(self):
+        return self._cursor.fetchone()
+
+
+def _make_digest_test_db():
+    conn = sqlite3.connect(":memory:", check_same_thread=False)
+    conn.row_factory = sqlite3.Row
+    conn.execute(
+        """
+        CREATE TABLE execution_events (
+            event_id TEXT PRIMARY KEY, schedule_id TEXT NOT NULL, event_date TEXT,
+            discipline TEXT, priority_score REAL, created_at TEXT, status TEXT
+        )
+        """
+    )
+    conn.execute(
+        "INSERT INTO execution_events (event_id, schedule_id, event_date, status, created_at) VALUES (?, ?, ?, ?, ?)",
+        ("EVT-A1", "SCHED_A", "2026-09-02", "VALIDATED", "2026-09-02 09:00:00"),
+    )
+    conn.execute(
+        "INSERT INTO execution_events (event_id, schedule_id, event_date, status, created_at) VALUES (?, ?, ?, ?, ?)",
+        ("EVT-B1", "SCHED_B", "2026-09-03", "VALIDATED", "2026-09-03 09:00:00"),
+    )
+    conn.commit()
+    return conn
+
+
+def _supervisor():
+    return UserProfile(id="22222222-2222-2222-2222-222222222222", full_name="Bob", role="SUPERVISOR")
+
+
+def test_digest_isolation_explicit_schedule_id():
+    """GET /api/v1/digest?schedule_id=... only returns that schedule's claims."""
+    sqlite_conn = _make_digest_test_db()
+    fake_conn = _DigestTestConn(sqlite_conn)
+    client = TestClient(app)
+    app.dependency_overrides[get_current_user] = _supervisor
+
+    @contextmanager
+    def _fake_get_connection():
+        yield fake_conn
+
+    class _FakeSchedule:
+        def __init__(self, schedule_id):
+            self.schedule_id = schedule_id
+
+    try:
+        with patch("backend.routers.decisions.get_connection", _fake_get_connection), \
+             patch("backend.shared.schedule_context.get_schedule", lambda sid: _FakeSchedule(sid)):
+            resp_a = client.get("/api/v1/digest?schedule_id=SCHED_A", headers={"Authorization": "Bearer x"})
+            assert resp_a.status_code == 200
+            ids_a = {row["event_id"] for row in resp_a.json()}
+            assert ids_a == {"EVT-A1"}
+
+            resp_b = client.get("/api/v1/digest?schedule_id=SCHED_B", headers={"Authorization": "Bearer x"})
+            assert resp_b.status_code == 200
+            ids_b = {row["event_id"] for row in resp_b.json()}
+            assert ids_b == {"EVT-B1"}
+    finally:
+        app.dependency_overrides.pop(get_current_user, None)
+
+
+# ── Feature 31 Evidence Fusion isolation (ISS-05) ───────────────────────────
+
+def _make_evidence_fusion_test_db():
+    """Real in-memory SQLite backing evaluate_evidence_fusion's actual
+    queries (execution_events, evidence_links, claim_activity_splits,
+    source_documents) -- not a hand-rolled pattern-matching fake, since this
+    exercises several distinct real queries."""
+    conn = sqlite3.connect(":memory:", check_same_thread=False)
+    conn.row_factory = sqlite3.Row
+    conn.execute(
+        """
+        CREATE TABLE execution_events (
+            event_id TEXT PRIMARY KEY, schedule_id TEXT NOT NULL, event_date TEXT,
+            document_type TEXT, input_channel TEXT, matched_activity_id TEXT,
+            claim_mode TEXT, claimed_pct REAL, claimed_quantity REAL, claimed_uom TEXT
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE evidence_links (
+            link_id TEXT PRIMARY KEY, event_id_a TEXT, event_id_b TEXT,
+            relation_type TEXT, confidence REAL, rationale TEXT, created_at TEXT
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE claim_activity_splits (
+            split_id TEXT PRIMARY KEY, event_id TEXT, activity_id TEXT,
+            split_basis TEXT, split_pct REAL
+        )
+        """
+    )
+    conn.commit()
+    return SQLitePsycopgAdapter(conn)
+
+
+def _insert_fusion_event(db, *, event_id, schedule_id, event_date, document_type,
+                          matched_activity_id, claimed_pct):
+    db.execute(
+        """
+        INSERT INTO execution_events
+            (event_id, schedule_id, event_date, document_type, input_channel,
+             matched_activity_id, claim_mode, claimed_pct)
+        VALUES (?, ?, ?, ?, 'TYPED_TEXT', ?, 'CUMULATIVE_PCT', ?)
+        """,
+        (event_id, schedule_id, event_date, document_type, matched_activity_id, claimed_pct),
+    )
+
+
+def test_evidence_fusion_links_within_same_schedule():
+    """Two cross-channel, same-activity, same-date, agreeing claims in the
+    SAME schedule produce a CORROBORATES evidence_links row (sanity check
+    the fixture models the real classify path before testing isolation)."""
+    from backend.routers.checks import evaluate_evidence_fusion
+
+    db = _make_evidence_fusion_test_db()
+    _insert_fusion_event(
+        db, event_id="EV-1", schedule_id="SCHED_A", event_date="2026-09-01",
+        document_type="DPR", matched_activity_id="ACT-001", claimed_pct=50.0,
+    )
+    _insert_fusion_event(
+        db, event_id="EV-2", schedule_id="SCHED_A", event_date="2026-09-01",
+        document_type="QC_INSPECTION", matched_activity_id="ACT-001", claimed_pct=50.0,
+    )
+    event_row = dict(db.execute("SELECT * FROM execution_events WHERE event_id = 'EV-1'").fetchone())
+
+    links = evaluate_evidence_fusion(
+        conn=db, event_id="EV-1", schedule_id="SCHED_A", event_row=event_row, splits=[],
+    )
+    assert len(links) == 1
+    assert links[0]["relation_type"] == "CORROBORATES"
+    assert {links[0]["event_id_a"], links[0]["event_id_b"]} == {"EV-1", "EV-2"}
+
+    persisted = db.execute("SELECT * FROM evidence_links").fetchall()
+    assert len(persisted) == 1
+
+
+def test_evidence_fusion_never_links_across_schedules():
+    """The identical setup, but EV-2 belongs to a DIFFERENT schedule -- even
+    though it's otherwise a perfect corroboration match (same activity_id,
+    same date, agreeing pct, different channel), no evidence_links row is
+    created, because evaluate_evidence_fusion's candidate query is scoped
+    to schedule_id."""
+    from backend.routers.checks import evaluate_evidence_fusion
+
+    db = _make_evidence_fusion_test_db()
+    _insert_fusion_event(
+        db, event_id="EV-1", schedule_id="SCHED_A", event_date="2026-09-01",
+        document_type="DPR", matched_activity_id="ACT-001", claimed_pct=50.0,
+    )
+    _insert_fusion_event(
+        db, event_id="EV-2", schedule_id="SCHED_B", event_date="2026-09-01",
+        document_type="QC_INSPECTION", matched_activity_id="ACT-001", claimed_pct=50.0,
+    )
+    event_row = dict(db.execute("SELECT * FROM execution_events WHERE event_id = 'EV-1'").fetchone())
+
+    links = evaluate_evidence_fusion(
+        conn=db, event_id="EV-1", schedule_id="SCHED_A", event_row=event_row, splits=[],
+    )
+    assert links == []
+
+    persisted = db.execute("SELECT * FROM evidence_links").fetchall()
+    assert len(persisted) == 0
