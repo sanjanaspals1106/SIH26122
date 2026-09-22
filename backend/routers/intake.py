@@ -55,6 +55,7 @@ from pathlib import Path
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
+from fastapi.responses import FileResponse
 
 from backend.shared.auth import UserProfile as CurrentUser, require_role
 from backend.shared.db import get_db
@@ -636,6 +637,44 @@ def get_claim(
     return _row_to_claim_response(row)
 
 
+@router.get("/claims/{event_id}/photo")
+def get_claim_photo(
+    event_id: str,
+    conn=Depends(get_db),
+    current_user: CurrentUser = Depends(require_role("SITE_ENGINEER", "SUPERVISOR")),
+):
+    """
+    Serves the evidence photo attached to a claim (execution_events.photo_path)
+    so the Review Workspace / Activity History UI can actually render the image
+    instead of only showing its filename (ISS-07 evidence round-trip / ISS-20
+    lightbox). Both roles may view it -- evidence review isn't role-restricted
+    the way approval decisions are.
+    """
+    with conn.cursor() as cur:
+        cur.execute("SELECT * FROM execution_events WHERE event_id = %s", (event_id,))
+        row = cur.fetchone()
+    if row is None:
+        raise HTTPException(status_code=404, detail="Claim not found")
+
+    photo_path = row["photo_path"]
+    if not photo_path:
+        raise HTTPException(status_code=404, detail="This claim has no attached photo")
+
+    # Defense in depth: photo_path is server-generated at upload time (see
+    # create_file_claim), but never trust a stored path to stay inside
+    # UPLOAD_DIR without checking -- refuse to serve anything that resolves
+    # outside it rather than risk an arbitrary file read.
+    resolved = Path(photo_path).resolve()
+    try:
+        resolved.relative_to(UPLOAD_DIR.resolve())
+    except ValueError:
+        raise HTTPException(status_code=404, detail="Evidence photo not found")
+    if not resolved.is_file():
+        raise HTTPException(status_code=404, detail="Evidence photo file is missing from storage")
+
+    return FileResponse(resolved)
+
+
 @router.post("/claims/{event_id}/clarify", response_model=ClaimResponse)
 def clarify_claim(
     event_id: str,
@@ -742,11 +781,23 @@ def clarify_claim(
 def list_claims(
     status: Optional[str] = Query(default=None),
     discipline: Optional[str] = Query(default=None),
+    schedule_id: Optional[str] = Query(default=None, description="Defaults to the active schedule"),
     conn=Depends(get_db),
     current_user: CurrentUser = Depends(require_role("SITE_ENGINEER", "SUPERVISOR")),
 ):
-    query = "SELECT * FROM execution_events WHERE 1=1"
-    params = []
+    """
+    ISS-05: scoped to the active schedule by default (or an explicit
+    schedule_id) -- this backs the Review Workspace queue, so an
+    unscoped list here is exactly the kind of cross-schedule leak that
+    feature must never show. No schedule at all yet -> empty list, same
+    as "no claims exist", not a 404 (this is a collection endpoint).
+    """
+    resolved_schedule_id = schedule_id or _get_active_schedule_id(conn)
+    if not resolved_schedule_id:
+        return []
+
+    query = "SELECT * FROM execution_events WHERE schedule_id = %s"
+    params: list = [resolved_schedule_id]
     if status:
         query += " AND status = %s"
         params.append(status)
@@ -811,7 +862,10 @@ def create_file_claim(
         # attached to a claim the caller already typed out.
         document_type = "QC_INSPECTION"
         UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
-        saved_name = f"{uuid.uuid4()}_{file.filename}"
+        # Path(...).name strips any directory components from the
+        # user-supplied filename so it can never escape UPLOAD_DIR.
+        safe_filename = Path(file.filename or "upload").name
+        saved_name = f"{uuid.uuid4()}_{safe_filename}"
         saved_path = UPLOAD_DIR / saved_name
         saved_path.write_bytes(contents)
         photo_path = str(saved_path)

@@ -89,6 +89,7 @@ export default function Dashboard() {
       count: number;
       value: number;
     }[];
+    claims_trend_pct: number | null;
   } | null>(null);
 
   const [delayReasons, setDelayReasons] = useState<
@@ -220,6 +221,7 @@ export default function Dashboard() {
             actuals: 0,
             conflicts: 0,
             discipline_breakdown: [],
+            claims_trend_pct: null,
           })),
 
         dashboardApi.getDelayReasons(),
@@ -380,14 +382,17 @@ export default function Dashboard() {
         value: isLoading
           ? '...'
           : String(totalClaimsCount),
-        delta: t(
-          'dashboard.kpiTotalClaimsDelta',
-          {
-            defaultValue:
-              '+12% vs last week',
-          }
-        ),
-        deltaPositive: true,
+        delta: isLoading
+          ? ''
+          : summary?.claims_trend_pct == null
+          ? t('dashboard.kpiTotalClaimsDeltaUnavailable', {
+              defaultValue: 'No previous-period data',
+            })
+          : t('dashboard.kpiTotalClaimsDelta', {
+              pct: summary.claims_trend_pct > 0 ? `+${summary.claims_trend_pct}` : String(summary.claims_trend_pct),
+              defaultValue: `${summary.claims_trend_pct > 0 ? '+' : ''}${summary.claims_trend_pct}% vs last week`,
+            }),
+        deltaPositive: summary?.claims_trend_pct == null ? null : summary.claims_trend_pct > 0,
         icon: FileSpreadsheet,
         accent:
           'text-[#14B8A6] dark:text-[#22D3EE]',

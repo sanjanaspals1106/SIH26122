@@ -22,6 +22,17 @@ from backend.shared.db import get_db
 from backend.shared.schemas import ClaimMode, Discipline, EventType, ExtractedClaimFields, InputChannel
 
 
+def _live_llm(fn):
+    """
+    Marks a test that calls the real configured LLM_PROVIDER over the
+    network (see pytest.ini: excluded from the default deterministic run,
+    opt in with `pytest -m live_llm`). A plain no-op when this file is
+    executed standalone without pytest installed (see the `pytest = None`
+    fallback above) so that mode isn't broken by the decorator.
+    """
+    return pytest.mark.live_llm(fn) if pytest is not None else fn
+
+
 def _skip_if_quota_exhausted(response):
     """
     Many tests below exercise a real LLM call (typed-text intake, PDF/TXT
@@ -157,9 +168,10 @@ class FakeCursor:
             matched = [e for e in self.db.execution_events if e["event_id"] in target_ids]
             self.last_results = matched
 
-        elif "SELECT * FROM EXECUTION_EVENTS WHERE 1=1" in q_upper:
-            res = list(self.db.execution_events)
-            param_idx = 0
+        elif "SELECT * FROM EXECUTION_EVENTS WHERE SCHEDULE_ID = %S" in q_upper:
+            schedule_id = params[0]
+            res = [e for e in self.db.execution_events if e.get("schedule_id") == schedule_id]
+            param_idx = 1
             if "AND STATUS = %S" in q_upper:
                 val = params[param_idx]
                 param_idx += 1
@@ -215,6 +227,7 @@ def test_health_checks(client):
     assert r2.json()["status"] == "ok"
 
 
+@_live_llm
 def test_auth_gating(client):
     """Intake requires SITE_ENGINEER role; unauthorized access is rejected."""
     # 1. No auth headers -> 401 Unauthorized
@@ -236,6 +249,7 @@ def test_auth_gating(client):
     assert data["supervisor_id"] == "eng-1"
 
 
+@_live_llm
 def test_text_claim_typed_and_voice(client, fake_db):
     """Test TYPED_TEXT and VOICE input channels."""
     headers = {"X-Dev-User-Id": "eng-1", "X-Dev-Role": "SITE_ENGINEER"}
@@ -267,6 +281,7 @@ def test_text_claim_typed_and_voice(client, fake_db):
     assert len(fake_db.source_references) >= 2
 
 
+@_live_llm
 def test_file_claim_txt(client, fake_db):
     """Upload plain text DPR file. /claims/file always returns a LIST (a
     single-activity file yields a 1-item list) since a file can legitimately
@@ -288,6 +303,7 @@ def test_file_claim_txt(client, fake_db):
     assert any(doc["document_type"] == "DPR" for doc in fake_db.source_documents)
 
 
+@_live_llm
 def test_file_claim_pdf_multi_activity(client, fake_db):
     """
     Upload a PDF whose text (extracted via PyMuPDF) describes FOUR distinct
@@ -329,6 +345,7 @@ def test_file_claim_pdf_multi_activity(client, fake_db):
         assert c["claimed_pct"] is not None
 
 
+@_live_llm
 def test_file_claim_evidence_photo(client, fake_db):
     """Upload photo with purpose=EVIDENCE_PHOTO + raw_claim_text -> stores
     photo_path, unchanged single-claim contract (the photo is evidence
@@ -350,6 +367,59 @@ def test_file_claim_evidence_photo(client, fake_db):
     assert "inspection_photo.png" in data[0]["photo_path"]
 
 
+@_live_llm
+def test_get_claim_photo_round_trip(client, fake_db):
+    """
+    ISS-07/ISS-20: an uploaded evidence photo can actually be fetched back
+    over HTTP (not just its filename shown as text) -- GET
+    /api/v1/claims/{event_id}/photo returns the original image bytes.
+    """
+    headers = {"X-Dev-User-Id": "eng-1", "X-Dev-Role": "SITE_ENGINEER"}
+    dummy_image = b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x06\x00\x00\x00\x1f\x15c4"
+
+    upload = client.post(
+        "/api/v1/claims/file",
+        files={"file": ("inspection_photo.png", io.BytesIO(dummy_image), "image/png")},
+        data={"purpose": "EVIDENCE_PHOTO", "raw_claim_text": "Joint 3 visual inspection verified"},
+        headers=headers,
+    )
+    _skip_if_quota_exhausted(upload)
+    assert upload.status_code == 200
+    event_id = upload.json()[0]["event_id"]
+
+    r = client.get(f"/api/v1/claims/{event_id}/photo", headers=headers)
+    assert r.status_code == 200
+    assert r.content == dummy_image
+    assert r.headers["content-type"] in ("image/png", "application/octet-stream")
+
+
+def test_get_claim_photo_404_when_claim_has_no_photo(client, fake_db):
+    headers = {"X-Dev-User-Id": "eng-1", "X-Dev-Role": "SITE_ENGINEER"}
+    r = client.post(
+        "/api/v1/claims/text",
+        json={"raw_claim_text": "Excavation 50% complete", "input_channel": "TYPED_TEXT"},
+        headers=headers,
+    )
+    _skip_if_quota_exhausted(r)
+    assert r.status_code == 200
+    event_id = r.json()["event_id"]
+
+    photo_resp = client.get(f"/api/v1/claims/{event_id}/photo", headers=headers)
+    assert photo_resp.status_code == 404
+
+
+def test_get_claim_photo_404_for_nonexistent_claim(client, fake_db):
+    headers = {"X-Dev-User-Id": "eng-1", "X-Dev-Role": "SITE_ENGINEER"}
+    r = client.get("/api/v1/claims/does-not-exist/photo", headers=headers)
+    assert r.status_code == 404
+
+
+def test_get_claim_photo_requires_auth(client, fake_db):
+    r = client.get("/api/v1/claims/some-event/photo")
+    assert r.status_code == 401
+
+
+@_live_llm
 def test_file_claim_scanned_diary(client, fake_db):
     """
     Upload a scanned diary image with purpose=SCANNED_DIARY. The dummy PNG
@@ -625,6 +695,7 @@ def test_schedule_export_claims(client, fake_db):
     assert any(doc["document_type"] == "SCHEDULE_EXPORT_PROGRESS" for doc in fake_db.source_documents)
 
 
+@_live_llm
 def test_get_and_list_claims(client, fake_db):
     """Test claim retrieval and filtering."""
     headers_eng = {"X-Dev-User-Id": "eng-1", "X-Dev-Role": "SITE_ENGINEER"}
@@ -651,6 +722,45 @@ def test_get_and_list_claims(client, fake_db):
     # Non-existent claim -> 404
     r_404 = client.get("/api/v1/claims/non-existent-id", headers=headers_sup)
     assert r_404.status_code == 404
+
+
+def test_list_claims_scoped_to_active_schedule(client, fake_db):
+    """
+    ISS-05: GET /api/v1/claims (the Review Workspace queue's data source)
+    must only return the active schedule's claims, never another
+    schedule's -- seeded directly into FakeDB so this doesn't depend on
+    the live LLM at all.
+    """
+    headers_sup = {"X-Dev-User-Id": "sup-1", "X-Dev-Role": "SUPERVISOR"}
+
+    fake_db.execution_events.append({
+        "event_id": "EV-ACTIVE", "document_id": None, "schedule_id": "test-sched-1",
+        "event_date": "2026-09-01", "raw_claim_text": "Active schedule claim",
+        "input_channel": "TYPED_TEXT", "language_detected": "English",
+        "reported_activity_id": None, "matched_activity_id": None, "discipline": "CIVIL",
+        "action": "progress", "event_type": "PROGRESS_UPDATE", "claim_mode": "CUMULATIVE_PCT",
+        "asset_tag": None, "location": None, "claimed_quantity": None, "claimed_uom": None,
+        "claimed_pct": 50.0, "delay_reason": None, "supervisor_id": "eng-1", "photo_path": None,
+        "status": "EXTRACTED", "clarification_status": "NONE", "clarification_question": None,
+        "clarification_answer": None, "field_provenance": "{}", "created_at": datetime.now(timezone.utc),
+    })
+    fake_db.execution_events.append({
+        "event_id": "EV-OTHER", "document_id": None, "schedule_id": "some-other-schedule",
+        "event_date": "2026-09-01", "raw_claim_text": "Other schedule claim",
+        "input_channel": "TYPED_TEXT", "language_detected": "English",
+        "reported_activity_id": None, "matched_activity_id": None, "discipline": "CIVIL",
+        "action": "progress", "event_type": "PROGRESS_UPDATE", "claim_mode": "CUMULATIVE_PCT",
+        "asset_tag": None, "location": None, "claimed_quantity": None, "claimed_uom": None,
+        "claimed_pct": 50.0, "delay_reason": None, "supervisor_id": "eng-1", "photo_path": None,
+        "status": "EXTRACTED", "clarification_status": "NONE", "clarification_question": None,
+        "clarification_answer": None, "field_provenance": "{}", "created_at": datetime.now(timezone.utc),
+    })
+
+    r_list = client.get("/api/v1/claims", headers=headers_sup)
+    assert r_list.status_code == 200
+    event_ids = {c["event_id"] for c in r_list.json()}
+    assert "EV-ACTIVE" in event_ids
+    assert "EV-OTHER" not in event_ids
 
 
 def test_missing_schedule_conflict(client, fake_db):
@@ -722,6 +832,7 @@ def test_llm_extraction_schema_and_invariants():
     assert c3.discipline == Discipline.HSE
 
 
+@_live_llm
 def test_real_sample_data_intake(client, fake_db):
     """
     End-to-end intake against the actual repo sample files in sample_data/
@@ -816,6 +927,7 @@ def test_real_sample_data_intake(client, fake_db):
 
 
 
+@_live_llm
 def test_copilot_clarification_flow(client, fake_db):
     """Feature #29: Copilot triggers PENDING on missing fields, then clarify resolves to ANSWERED."""
     headers = {"X-Dev-User-Id": "eng-1", "X-Dev-Role": "SITE_ENGINEER"}
@@ -847,6 +959,7 @@ def test_copilot_clarification_flow(client, fake_db):
             assert isinstance(clarified_data["field_provenance"], dict)
 
 
+@_live_llm
 def test_field_provenance_tags(client, fake_db):
     """Feature #33: Verify AI_EXTRACTED on text claims and SCHEDULE_AUTO_FILLED on schedule exports."""
     headers = {"X-Dev-User-Id": "eng-1", "X-Dev-Role": "SITE_ENGINEER"}

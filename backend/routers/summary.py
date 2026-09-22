@@ -41,6 +41,7 @@ from backend.shared.actuals import get_execution_state
 from backend.shared.auth import UserProfile, require_role
 from backend.shared.db import get_connection
 from backend.shared.discipline_normalize import normalize_discipline
+from backend.shared.schedule_context import resolve_schedule_id
 from backend.shared.llm_extraction import (
     LLMExtractionError,
     _create_completion,
@@ -147,9 +148,18 @@ def build_deterministic_aggregate(
     discipline: str = "ALL",
     conn: Optional[Any] = None,
     reference_date: Optional[date] = None,
+    schedule_id: Optional[str] = None,
 ) -> dict:
     """
     Compile verified project facts strictly from database records without an LLM.
+
+    schedule_id: when given, every section (claims, approved progress,
+    conflicts, validation issues, activities) is restricted to that
+    schedule -- a caller with no schedule_id argument at all gets the
+    pre-existing unscoped aggregate (used by unit tests seeding a
+    single-schedule fixture). The live endpoints (routers/reports.py,
+    this module's own /api/v1/summary) always resolve and pass the active
+    schedule so AI Execution Summary numbers never mix schedules (ISS-05).
     """
     start_d, end_d = resolve_period_dates(period, start_date, end_date, reference_date)
     start_iso = start_d.isoformat()
@@ -191,6 +201,9 @@ def build_deterministic_aggregate(
         WHERE event_date >= %s AND event_date <= %s
     """
     c_params = [start_iso, end_iso]
+    if schedule_id is not None:
+        claims_query += " AND schedule_id = %s"
+        c_params.append(schedule_id)
     if disc_norm != "ALL":
         claims_query += " AND UPPER(TRIM(discipline)) = %s"
         c_params.append(disc_norm)
@@ -228,6 +241,9 @@ def build_deterministic_aggregate(
         WHERE ee.event_date >= %s AND ee.event_date <= %s
     """
     a_params = [start_iso, end_iso]
+    if schedule_id is not None:
+        actuals_query += " AND ee.schedule_id = %s"
+        a_params.append(schedule_id)
     if disc_norm != "ALL":
         actuals_query += " AND UPPER(TRIM(ee.discipline)) = %s"
         a_params.append(disc_norm)
@@ -243,16 +259,8 @@ def build_deterministic_aggregate(
     avg_approved_pct = round(sum(pct_values) / len(pct_values), 1) if pct_values else 0.0
 
     # 3. Conflicts (conflict_records within period)
-    conflicts_query = """
-        SELECT
-            cr.conflict_id,
-            cr.status,
-            cr.activity_id
-        FROM conflict_records cr
-        WHERE cr.reporting_period >= %s AND cr.reporting_period <= %s
-    """
-    cf_params = [start_iso, end_iso]
-    if disc_norm != "ALL":
+    needs_activity_join = disc_norm != "ALL"
+    if needs_activity_join:
         conflicts_query = """
             SELECT
                 cr.conflict_id,
@@ -262,9 +270,26 @@ def build_deterministic_aggregate(
             JOIN schedule_activities sa
               ON sa.activity_id = cr.activity_id AND sa.schedule_id = cr.schedule_id
             WHERE cr.reporting_period >= %s AND cr.reporting_period <= %s
-              AND UPPER(TRIM(sa.discipline)) = %s
         """
+        cf_params = [start_iso, end_iso]
+        if schedule_id is not None:
+            conflicts_query += " AND cr.schedule_id = %s"
+            cf_params.append(schedule_id)
+        conflicts_query += " AND UPPER(TRIM(sa.discipline)) = %s"
         cf_params.append(disc_norm)
+    else:
+        conflicts_query = """
+            SELECT
+                cr.conflict_id,
+                cr.status,
+                cr.activity_id
+            FROM conflict_records cr
+            WHERE cr.reporting_period >= %s AND cr.reporting_period <= %s
+        """
+        cf_params = [start_iso, end_iso]
+        if schedule_id is not None:
+            conflicts_query += " AND cr.schedule_id = %s"
+            cf_params.append(schedule_id)
 
     conflict_rows = [_row_to_dict(r) for r in _execute(conflicts_query, tuple(cf_params)).fetchall()]
     conflicts_by_status: Dict[str, int] = {}
@@ -283,6 +308,9 @@ def build_deterministic_aggregate(
         WHERE ee.event_date >= %s AND ee.event_date <= %s
     """
     v_params = [start_iso, end_iso]
+    if schedule_id is not None:
+        validation_query += " AND ee.schedule_id = %s"
+        v_params.append(schedule_id)
     if disc_norm != "ALL":
         validation_query += " AND UPPER(TRIM(ee.discipline)) = %s"
         v_params.append(disc_norm)
@@ -294,8 +322,9 @@ def build_deterministic_aggregate(
         val_by_severity[sev] = val_by_severity.get(sev, 0) + 1
 
     # 5. Activities & Canonical Execution States (Phase 1C Rule E)
-    # Scope to the active (most recently created) schedule so re-uploaded baselines
-    # are not double counted.
+    # Scope to the given schedule_id, or -- when none was passed -- the active
+    # (most recently created) schedule, so re-uploaded baselines are not
+    # double counted.
     act_query = """
         SELECT
             sa.activity_id,
@@ -310,9 +339,16 @@ def build_deterministic_aggregate(
         FROM schedule_activities sa
         LEFT JOIN approved_actuals aa
           ON aa.schedule_id = sa.schedule_id AND aa.activity_id = sa.activity_id
-        WHERE sa.schedule_id = (SELECT schedule_id FROM schedules ORDER BY created_at DESC LIMIT 1)
+        WHERE sa.schedule_id = %s
     """
-    act_params = []
+    act_schedule_id = schedule_id
+    if act_schedule_id is None:
+        _latest = _execute("SELECT schedule_id FROM schedules ORDER BY created_at DESC LIMIT 1").fetchone()
+        act_schedule_id = (
+            _latest["schedule_id"] if _latest and (isinstance(_latest, dict) or hasattr(_latest, "keys"))
+            else (_latest[0] if _latest else None)
+        )
+    act_params = [act_schedule_id]
     if disc_norm != "ALL":
         act_query += " AND UPPER(TRIM(sa.discipline)) = %s"
         act_params.append(disc_norm)
@@ -593,10 +629,16 @@ def get_execution_summary(
         default="en",
         description="Target language: 'en', 'hi', or 'te'",
     ),
+    schedule_id: Optional[str] = Query(default=None, description="Defaults to the active schedule"),
     current_user: UserProfile = Depends(require_role("SUPERVISOR")),
 ):
     """
-    Phase 7 AI Execution Summary & Dynamic Translation.
+    Phase 7 AI Execution Summary & Dynamic Translation. Superseded by
+    routers/reports.py's /api/v1/reports/execution-summary (Feature 35),
+    which the frontend actually calls -- this route stays live/scoped
+    rather than removed, since it's still reachable, tested, and could be
+    hit directly (ISS-05: ""no accessible production endpoint that can
+    aggregate schedules incorrectly"").
     1. Compiles verified deterministic aggregate from database.
     2. Generates canonical English summary using shared LLM (with safe fallback).
     3. If language is 'hi' or 'te', performs dynamic translation with process-local caching.
@@ -606,12 +648,15 @@ def get_execution_summary(
     if target_lang not in SUPPORTED_LANGUAGES:
         target_lang = "en"
 
+    resolved_schedule_id = resolve_schedule_id(schedule_id)
+
     # Step 1: Deterministic aggregate
     aggregate = build_deterministic_aggregate(
         period=period,
         start_date=start_date,
         end_date=end_date,
         discipline=discipline,
+        schedule_id=resolved_schedule_id,
     )
 
     # Step 2: Canonical English summary

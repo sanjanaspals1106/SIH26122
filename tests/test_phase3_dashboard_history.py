@@ -159,6 +159,19 @@ def create_phase3_test_db() -> SQLitePsycopgAdapter:
     return SQLitePsycopgAdapter(conn)
 
 
+def _seed_activity(db: SQLitePsycopgAdapter, activity_id: str, schedule_id: str = "SCH-1") -> None:
+    """query_activity_history now resolves activity metadata from
+    schedule_activities first (ISS-23) -- every HIST test activity must
+    exist there, or the lookup correctly 404s."""
+    db.execute(
+        """
+        INSERT INTO schedule_activities (activity_id, schedule_id, activity_name, discipline, location, planned_start)
+        VALUES (?, ?, ?, 'CIVIL', 'Test Zone', '2026-08-01')
+        """,
+        (activity_id, schedule_id, f"Test Activity {activity_id}"),
+    )
+
+
 # ==============================================================================
 # DASH-01: Total Claims is Database-Derived
 # ==============================================================================
@@ -315,6 +328,7 @@ def test_dash_06_empty_database_safety():
 
 def test_hist_01_multiple_historical_records_returned():
     db = create_phase3_test_db()
+    _seed_activity(db, "ACT-M")
     # 2 execution events for ACT-M
     db.execute(
         """
@@ -347,6 +361,7 @@ def test_hist_01_multiple_historical_records_returned():
 
 def test_hist_02_chronological_ordering():
     db = create_phase3_test_db()
+    _seed_activity(db, "ACT-ORDER")
     # Insert out of order
     db.execute(
         """
@@ -380,6 +395,7 @@ def test_hist_02_chronological_ordering():
 
 def test_hist_03_execution_events_included():
     db = create_phase3_test_db()
+    _seed_activity(db, "ACT-DETAIL")
     db.execute(
         """
         INSERT INTO execution_events (event_id, schedule_id, raw_claim_text, matched_activity_id, claimed_pct, delay_reason, created_at)
@@ -404,6 +420,7 @@ def test_hist_03_execution_events_included():
 
 def test_hist_04_decisions_included():
     db = create_phase3_test_db()
+    _seed_activity(db, "ACT-DEC")
     db.execute(
         """
         INSERT INTO execution_events (event_id, schedule_id, raw_claim_text, matched_activity_id, created_at)
@@ -438,6 +455,7 @@ def test_hist_04_decisions_included():
 
 def test_hist_05_approved_actual_included():
     db = create_phase3_test_db()
+    _seed_activity(db, "ACT-ACTUAL")
     db.execute(
         """
         INSERT INTO execution_events (event_id, schedule_id, raw_claim_text, matched_activity_id, created_at)
@@ -474,6 +492,7 @@ def test_hist_05_approved_actual_included():
 
 def test_hist_06_source_references_preserved():
     db = create_phase3_test_db()
+    _seed_activity(db, "ACT-SRC")
     db.execute(
         """
         INSERT INTO execution_events (event_id, schedule_id, raw_claim_text, matched_activity_id, created_at)

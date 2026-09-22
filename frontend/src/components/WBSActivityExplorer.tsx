@@ -121,7 +121,7 @@ interface WBSActivityExplorerProps {
 }
 
 export default function WBSActivityExplorer({
-  scheduleId = 'sched-OIL-2026',
+  scheduleId,
   className,
 }: WBSActivityExplorerProps) {
   const { t } = useTranslation();

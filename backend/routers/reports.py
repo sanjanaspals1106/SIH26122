@@ -30,6 +30,7 @@ from backend.routers.summary import (
 )
 from backend.shared.auth import UserProfile, require_role
 from backend.shared.db import get_connection
+from backend.shared.schedule_context import resolve_schedule_id
 
 logger = logging.getLogger(__name__)
 
@@ -135,6 +136,7 @@ def execution_summary(
     end: Optional[str] = Query(default=None, description="YYYY-MM-DD; default today"),
     discipline: Optional[str] = Query(default=None, description="discipline, or all/omitted for all"),
     language: str = Query(default="en", description="display language: en, hi, te"),
+    schedule_id: Optional[str] = Query(default=None, description="Defaults to the active schedule"),
     current_user: UserProfile = Depends(require_role("SUPERVISOR")),
 ):
     try:
@@ -145,10 +147,12 @@ def execution_summary(
     if start_d > end_d:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="start must be on or before end")
 
+    resolved_schedule_id = resolve_schedule_id(schedule_id)
     disc = (discipline or "all").strip()
     aggregate = build_deterministic_aggregate(
         period="custom", start_date=start_d.isoformat(), end_date=end_d.isoformat(),
         discipline="ALL" if disc.lower() == "all" else disc,
+        schedule_id=resolved_schedule_id,
     )
     disc_key = aggregate["discipline"]
     agg_hash = _aggregate_hash(aggregate)

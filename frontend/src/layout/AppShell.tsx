@@ -1,9 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { Outlet, Navigate, useLocation, Link, useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
+import { useQuery } from '@tanstack/react-query';
 import { useAuth } from '@/auth/AuthProvider';
 import { useTheme } from '@/theme/ThemeProvider';
 import LanguageSwitcher from '@/components/LanguageSwitcher';
+import { digestApi } from '@/api';
 import {
   LayoutDashboard,
   ClipboardList,
@@ -53,9 +55,24 @@ export default function AppShell() {
 
   const isSupervisor = user.role === 'SUPERVISOR';
 
+  // Live pending/actionable count for the sidebar badges (ISS-19). Claims with
+  // status REVIEW_REQUIRED or VALIDATED are the ones a Supervisor still needs
+  // to act on -- same definition Dashboard.tsx's KPI card uses. A 60s refetch
+  // interval keeps this current without polling aggressively.
+  const { data: pendingClaims } = useQuery({
+    queryKey: ['sidebar-pending-count'],
+    queryFn: () => digestApi.getAll(),
+    enabled: isSupervisor,
+    staleTime: 30_000,
+    refetchInterval: 60_000,
+  });
+  const pendingCount = (pendingClaims || []).filter(
+    (c) => c.status === 'REVIEW_REQUIRED' || c.status === 'VALIDATED'
+  ).length;
+
   const supervisorNavItems = [
-    { label: t('nav.dailyDigest'),     path: '/digest',    icon: ClipboardList },
-    { label: t('nav.reviewWorkspace'), path: '/review',    icon: Layers },
+    { label: t('nav.dailyDigest'),     path: '/digest',    icon: ClipboardList, badge: pendingCount },
+    { label: t('nav.reviewWorkspace'), path: '/review',    icon: Layers, badge: pendingCount },
     { label: t('nav.dashboard'),       path: '/dashboard', icon: LayoutDashboard },
     { label: t('nav.activityHistory'), path: '/history',   icon: Clock },
     { label: t('nav.impactPreview'),   path: '/impact',    icon: Activity },
@@ -64,7 +81,7 @@ export default function AppShell() {
   ];
 
   const siteEngineerNavItems = [
-    { label: t('nav.claimIntake'), path: '/intake', icon: PlusCircle },
+    { label: t('nav.claimIntake'), path: '/intake', icon: PlusCircle, badge: 0 },
   ];
 
   const navItems = isSupervisor ? supervisorNavItems : siteEngineerNavItems;
@@ -182,7 +199,21 @@ export default function AppShell() {
                   )}
                 />
                 {!isCollapsed && (
-                  <span className="whitespace-nowrap">{item.label}</span>
+                  <span className="whitespace-nowrap flex-1">{item.label}</span>
+                )}
+                {!!item.badge && (
+                  <span
+                    className={cn(
+                      'flex items-center justify-center rounded-full text-[10px] font-bold leading-none shrink-0',
+                      isCollapsed
+                        ? 'absolute -top-0.5 -right-0.5 min-w-[16px] h-4 px-1'
+                        : 'min-w-[20px] h-5 px-1.5',
+                      isActive ? 'bg-white text-[#FF7A18]' : 'bg-[#FF7A18] text-white'
+                    )}
+                    aria-label={`${item.badge} pending`}
+                  >
+                    {item.badge > 99 ? '99+' : item.badge}
+                  </span>
                 )}
                 {/* Collapsed tooltip / active pip */}
                 {isCollapsed && isActive && (

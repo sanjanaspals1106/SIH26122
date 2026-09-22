@@ -291,7 +291,7 @@ def test_supervisor_access_succeeds(monkeypatch):
 
     monkeypatch.setattr(
         "backend.routers.dashboard.query_delay_reason_aggregates",
-        lambda conn=None: {
+        lambda conn=None, schedule_id=None: {
             "delay_reasons": [
                 {"delay_reason": "MATERIAL", "count": 2},
                 {"delay_reason": "WEATHER", "count": 1},
@@ -367,3 +367,96 @@ def test_response_shape_matches_contract():
     assert isinstance(data["total_approved_delay_claims"], int)
     assert data["total_approved_delay_claims"] == 0
     assert data["delay_reasons"] == []
+
+
+# =========================================================================
+# 13. Active-schedule resolution (ISS-02 / ISS-05): no query param resolves
+#     the one canonical active schedule; an explicit schedule_id is
+#     validated; neither ever silently falls back to a stale/guessed id.
+# =========================================================================
+
+class _FakeSchedule:
+    def __init__(self, schedule_id: str):
+        self.schedule_id = schedule_id
+
+
+def _as_supervisor():
+    return UserProfile(
+        id="22222222-2222-2222-2222-222222222222",
+        full_name="Bob Supervisor",
+        role="SUPERVISOR",
+    )
+
+
+def test_summary_resolves_active_schedule_when_none_given(monkeypatch):
+    client = TestClient(app)
+    app.dependency_overrides[get_current_user] = _as_supervisor
+
+    captured = {}
+    monkeypatch.setattr("backend.shared.schedule_context.get_active_schedule", lambda: _FakeSchedule("SCHED_ACTIVE"))
+    monkeypatch.setattr(
+        "backend.routers.dashboard.query_dashboard_summary",
+        lambda conn=None, schedule_id=None: captured.setdefault("schedule_id", schedule_id) or {
+            "total_claims": 0, "pending_review": 0, "actuals": 0, "conflicts": 0,
+            "discipline_breakdown": [], "claims_trend_pct": None,
+        },
+    )
+    try:
+        resp = client.get("/api/v1/dashboard/summary", headers={"Authorization": "Bearer mocked-sup-token"})
+        assert resp.status_code == 200
+        assert captured["schedule_id"] == "SCHED_ACTIVE"
+    finally:
+        app.dependency_overrides.pop(get_current_user, None)
+
+
+def test_summary_404_when_no_active_schedule_exists(monkeypatch):
+    client = TestClient(app)
+    app.dependency_overrides[get_current_user] = _as_supervisor
+
+    monkeypatch.setattr("backend.shared.schedule_context.get_active_schedule", lambda: None)
+    try:
+        resp = client.get("/api/v1/dashboard/summary", headers={"Authorization": "Bearer mocked-sup-token"})
+        assert resp.status_code == 404
+    finally:
+        app.dependency_overrides.pop(get_current_user, None)
+
+
+def test_summary_404_for_invalid_explicit_schedule_id(monkeypatch):
+    """An explicit but nonexistent schedule_id must 404, never silently fall back to the active schedule."""
+    client = TestClient(app)
+    app.dependency_overrides[get_current_user] = _as_supervisor
+
+    monkeypatch.setattr("backend.shared.schedule_context.get_active_schedule", lambda: _FakeSchedule("SCHED_ACTIVE"))
+    monkeypatch.setattr("backend.shared.schedule_context.get_schedule", lambda sid: None)
+    try:
+        resp = client.get(
+            "/api/v1/dashboard/summary?schedule_id=sched-OIL-2026",
+            headers={"Authorization": "Bearer mocked-sup-token"},
+        )
+        assert resp.status_code == 404
+    finally:
+        app.dependency_overrides.pop(get_current_user, None)
+
+
+def test_summary_uses_valid_explicit_schedule_id(monkeypatch):
+    client = TestClient(app)
+    app.dependency_overrides[get_current_user] = _as_supervisor
+
+    captured = {}
+    monkeypatch.setattr("backend.shared.schedule_context.get_schedule", lambda sid: _FakeSchedule(sid))
+    monkeypatch.setattr(
+        "backend.routers.dashboard.query_dashboard_summary",
+        lambda conn=None, schedule_id=None: captured.setdefault("schedule_id", schedule_id) or {
+            "total_claims": 0, "pending_review": 0, "actuals": 0, "conflicts": 0,
+            "discipline_breakdown": [], "claims_trend_pct": None,
+        },
+    )
+    try:
+        resp = client.get(
+            "/api/v1/dashboard/summary?schedule_id=SCHED_REAL",
+            headers={"Authorization": "Bearer mocked-sup-token"},
+        )
+        assert resp.status_code == 200
+        assert captured["schedule_id"] == "SCHED_REAL"
+    finally:
+        app.dependency_overrides.pop(get_current_user, None)

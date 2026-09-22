@@ -26,6 +26,7 @@ from backend.shared.actuals import upsert_approved_actual, _execute_upsert
 from backend.shared.audit import write_audit_log
 from backend.shared.auth import UserProfile, require_role
 from backend.shared.db import get_connection
+from backend.shared.schedule_context import resolve_schedule_id
 from backend.shared.schemas import DecisionRequest
 
 logger = logging.getLogger(__name__)
@@ -366,10 +367,11 @@ def list_decisions(
 @router.get("/digest")
 def get_digest(
     date: Optional[str] = None,
+    schedule_id: Optional[str] = None,
     current_user: UserProfile = Depends(require_role("SUPERVISOR")),
 ):
     """
-    GET /api/v1/digest?date=...
+    GET /api/v1/digest?date=...&schedule_id=...
     Claims for a given day, flat and unfiltered by status -- the frontend
     groups by discipline and derives its own per-status counts (review
     queue vs. already-decided) client-side from this one list, the same way
@@ -377,24 +379,31 @@ def get_digest(
     HOLD are the ones actually actionable from here; APPROVED/EDITED/
     REJECTED are included too so the day's full picture (KPI counts) is
     visible, not just the open queue.
+
+    ISS-05: scoped to the active schedule (or an explicit schedule_id) --
+    otherwise another schedule's claims would appear in this Supervisor's
+    daily digest.
     """
+    resolved_schedule_id = resolve_schedule_id(schedule_id)
     with get_connection() as conn:
         with conn.cursor() as cur:
             if date:
                 cur.execute(
                     """
                     SELECT * FROM execution_events
-                    WHERE event_date = %s
+                    WHERE schedule_id = %s AND event_date = %s
                     ORDER BY discipline ASC, priority_score DESC NULLS LAST, created_at ASC
                     """,
-                    (date,),
+                    (resolved_schedule_id, date),
                 )
             else:
                 cur.execute(
                     """
                     SELECT * FROM execution_events
+                    WHERE schedule_id = %s
                     ORDER BY discipline ASC, priority_score DESC NULLS LAST, created_at ASC
-                    """
+                    """,
+                    (resolved_schedule_id,),
                 )
             rows = [dict(r) for r in cur.fetchall()]
 
@@ -403,6 +412,7 @@ def get_digest(
 
 class BulkApproveRequest(BaseModel):
     event_ids: Optional[List[str]] = None
+    schedule_id: Optional[str] = None
 
 
 @router.post("/digest/bulk-approve")
@@ -415,24 +425,29 @@ def bulk_approve(
     Approve multiple eligible claims at once. Only VALIDATED claims are
     eligible (no open flags, confidence above threshold -- both already
     guaranteed by M4's /check only ever producing VALIDATED when clean).
-    If event_ids is omitted, every currently-VALIDATED claim is attempted.
+    If event_ids is omitted, every currently-VALIDATED claim in the active
+    schedule is attempted -- ISS-05: always schedule-scoped, so this can
+    never reach into another schedule's claims even when the caller omits
+    event_ids (an explicit list is also still scoped, as defense in depth).
 
     Failure behavior: independent per-claim commits, not atomic. One bad
     claim does not roll back the others.
     """
+    resolved_schedule_id = resolve_schedule_id(request.schedule_id)
     with get_connection() as conn:
         with conn.cursor() as cur:
             if request.event_ids is not None:
                 cur.execute(
                     """
                     SELECT event_id FROM execution_events
-                    WHERE status = 'VALIDATED' AND event_id = ANY(%s)
+                    WHERE status = 'VALIDATED' AND schedule_id = %s AND event_id = ANY(%s)
                     """,
-                    (request.event_ids,),
+                    (resolved_schedule_id, request.event_ids),
                 )
             else:
                 cur.execute(
-                    "SELECT event_id FROM execution_events WHERE status = 'VALIDATED'"
+                    "SELECT event_id FROM execution_events WHERE status = 'VALIDATED' AND schedule_id = %s",
+                    (resolved_schedule_id,),
                 )
             candidate_ids = [r["event_id"] for r in cur.fetchall()]
 
