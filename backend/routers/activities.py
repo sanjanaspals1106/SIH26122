@@ -1,7 +1,9 @@
 import logging
+from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+from pydantic import BaseModel
 
 from backend.shared.auth import UserProfile, require_role
 from backend.shared.db import get_connection
@@ -25,9 +27,17 @@ def _resolve_activity(activity_id: str, schedule_id: Optional[str], conn: Option
     activity with zero events must still 200 with its real metadata, and a
     genuinely nonexistent activity_id must 404 rather than a silent empty
     timeline. Ambiguity (the same activity_id in more than one schedule, no
-    schedule_id given) is a 409, same convention as routers/graph.py and
-    routers/schedule.py's impact-preview.
+    schedule_id given) resolves to the active schedule if present, or 409 if truly ambiguous.
     """
+    if not schedule_id:
+        try:
+            from backend.shared.schedule_repository import get_active_schedule
+            active = get_active_schedule()
+            if active:
+                schedule_id = active.schedule_id
+        except Exception:
+            pass
+
     query = "SELECT * FROM schedule_activities WHERE activity_id = %s"
     params: List[Any] = [activity_id]
     if schedule_id:
@@ -35,6 +45,10 @@ def _resolve_activity(activity_id: str, schedule_id: Optional[str], conn: Option
         params.append(schedule_id)
 
     rows = _execute(conn, query, tuple(params)).fetchall()
+    if not rows and schedule_id:
+        fallback_rows = _execute(conn, "SELECT * FROM schedule_activities WHERE activity_id = %s", (activity_id,)).fetchall()
+        if len(fallback_rows) == 1:
+            return dict(fallback_rows[0])
     if not rows:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -237,6 +251,8 @@ def query_activity_history(
                 "claimed_quantity": float(event["claimed_quantity"]) if event["claimed_quantity"] is not None else None,
                 "delay_reason": str(event["delay_reason"]) if event["delay_reason"] is not None else None,
                 "status": str(event["status"]) if event["status"] is not None else None,
+                "photo_path": str(event["photo_path"]) if event.get("photo_path") else None,
+                "document_id": str(event["document_id"]) if event.get("document_id") else None,
                 "timestamp": ts,
                 "source_references": refs_by_event.get(e_id, []),
             }
@@ -303,6 +319,381 @@ def query_activity_history(
         "timeline": timeline,
     }
 
+
+
+class ActivitySummary(BaseModel):
+    activity_id: str
+    activity_name: str
+    schedule_id: str
+    discipline: str
+    location: str
+    asset_tag: Optional[str] = None
+    wbs_code: Optional[str] = None
+    planned_start: Optional[str] = None
+    planned_finish: Optional[str] = None
+    planned_quantity: Optional[float] = None
+    uom: Optional[str] = None
+    baseline_pct_complete: Optional[float] = 0.0
+    actual_start: Optional[str] = None
+    actual_finish: Optional[str] = None
+    actual_pct_complete: Optional[float] = None
+    execution_state: str
+    is_critical: Optional[bool] = None
+    total_float: Optional[float] = None
+    has_changes: bool
+    event_count: int
+    last_changed_at: Optional[str] = None
+
+
+class ActivityMetrics(BaseModel):
+    total: int
+    in_progress: int
+    completed: int
+    not_started: int
+    critical: int
+    changed: int
+
+
+class ActivityListResponse(BaseModel):
+    items: List[ActivitySummary]
+    total: int
+    page: int
+    page_size: int
+    schedule_id: str
+    metrics: ActivityMetrics
+
+
+_BASE_ACTIVITIES_CTE = """
+WITH lifecycle_events AS (
+    SELECT schedule_id, COALESCE(matched_activity_id, reported_activity_id) as activity_id, COALESCE(created_at, event_date) as ts
+    FROM execution_events
+    WHERE matched_activity_id IS NOT NULL OR reported_activity_id IS NOT NULL
+    UNION ALL
+    SELECT ee.schedule_id, pd.selected_activity_id as activity_id, pd.decided_at as ts
+    FROM planner_decisions pd
+    JOIN execution_events ee ON ee.event_id = pd.event_id
+    UNION ALL
+    SELECT schedule_id, activity_id, created_at as ts
+    FROM approved_actuals
+),
+lifecycle_agg AS (
+    SELECT schedule_id, activity_id, COUNT(*) as event_count, MAX(ts) as last_changed_at
+    FROM lifecycle_events
+    GROUP BY schedule_id, activity_id
+),
+latest_actuals AS (
+    SELECT schedule_id, activity_id, actual_start, actual_finish, actual_pct_complete
+    FROM (
+        SELECT schedule_id, activity_id, actual_start, actual_finish, actual_pct_complete,
+               ROW_NUMBER() OVER (PARTITION BY schedule_id, activity_id ORDER BY created_at DESC, actual_id DESC) as rn
+        FROM approved_actuals
+    ) ranked
+    WHERE rn = 1
+),
+base_activities AS (
+    SELECT
+        sa.activity_id,
+        sa.activity_name,
+        sa.schedule_id,
+        sa.discipline,
+        sa.location,
+        sa.asset_tag,
+        sa.wbs_code,
+        sa.planned_start,
+        sa.planned_finish,
+        sa.planned_quantity,
+        sa.uom,
+        sa.baseline_pct_complete,
+        sa.is_critical,
+        sa.total_float,
+        la.actual_start,
+        la.actual_finish,
+        la.actual_pct_complete,
+        CASE
+            WHEN la.actual_pct_complete >= 100.0 THEN 'COMPLETED'
+            WHEN la.actual_start IS NOT NULL AND TRIM(CAST(la.actual_start AS TEXT)) != '' THEN 'IN_PROGRESS'
+            ELSE 'NOT_STARTED'
+        END AS execution_state,
+        COALESCE(lag.event_count, 0) AS event_count,
+        CASE WHEN COALESCE(lag.event_count, 0) > 0 THEN TRUE ELSE FALSE END AS has_changes,
+        lag.last_changed_at
+    FROM schedule_activities sa
+    LEFT JOIN latest_actuals la ON la.schedule_id = sa.schedule_id AND la.activity_id = sa.activity_id
+    LEFT JOIN lifecycle_agg lag ON lag.schedule_id = sa.schedule_id AND lag.activity_id = sa.activity_id
+    WHERE sa.schedule_id = %s
+)
+"""
+
+
+def _format_iso(val: Any) -> Optional[str]:
+    if val is None:
+        return None
+    if isinstance(val, (datetime, )):
+        return val.isoformat()
+    return str(val)
+
+
+def query_activities(
+    schedule_id: Optional[str] = None,
+    search: Optional[str] = None,
+    discipline: Optional[str] = None,
+    location: Optional[str] = None,
+    wbs_code: Optional[str] = None,
+    execution_state: Optional[str] = None,
+    is_critical: Optional[str] = None,
+    float_range: Optional[str] = None,
+    has_changes: Optional[bool] = None,
+    change_recency: Optional[str] = None,
+    page: int = 1,
+    page_size: int = 25,
+    sort_by: str = "activity_id",
+    sort_order: str = "asc",
+    conn: Optional[Any] = None,
+) -> dict:
+    if not schedule_id:
+        try:
+            from backend.shared.schedule_repository import get_active_schedule
+            active = get_active_schedule()
+            if active:
+                schedule_id = active.schedule_id
+        except Exception:
+            pass
+
+    if not schedule_id:
+        try:
+            row = _execute(conn, "SELECT schedule_id FROM schedule_activities ORDER BY schedule_id LIMIT 1").fetchone()
+            if row:
+                schedule_id = str(row["schedule_id"] if isinstance(row, dict) else row[0])
+        except Exception:
+            pass
+
+    empty_metrics = {"total": 0, "in_progress": 0, "completed": 0, "not_started": 0, "critical": 0, "changed": 0}
+    if not schedule_id:
+        return {
+            "items": [],
+            "total": 0,
+            "page": page,
+            "page_size": page_size,
+            "schedule_id": "",
+            "metrics": empty_metrics,
+        }
+
+    where_clauses = ["1=1"]
+    params: List[Any] = [schedule_id]
+
+    if search and search.strip():
+        s_term = f"%{search.strip()}%"
+        where_clauses.append(
+            "(LOWER(ba.activity_id) LIKE LOWER(%s) OR LOWER(ba.activity_name) LIKE LOWER(%s) OR (ba.asset_tag IS NOT NULL AND LOWER(ba.asset_tag) LIKE LOWER(%s)))"
+        )
+        params.extend([s_term, s_term, s_term])
+
+    if discipline and discipline.upper() != "ALL":
+        where_clauses.append("UPPER(ba.discipline) = UPPER(%s)")
+        params.append(discipline)
+
+    if location and location.upper() != "ALL":
+        where_clauses.append("LOWER(ba.location) = LOWER(%s)")
+        params.append(location)
+
+    if wbs_code and wbs_code.upper() != "ALL":
+        where_clauses.append("ba.wbs_code LIKE %s")
+        params.append(f"{wbs_code}%")
+
+    if execution_state and execution_state.upper() != "ALL":
+        where_clauses.append("ba.execution_state = %s")
+        params.append(execution_state.upper())
+
+    if is_critical and is_critical.upper() != "ALL":
+        crit_val = is_critical.upper()
+        if crit_val in ("CRITICAL", "TRUE", "1"):
+            where_clauses.append("ba.is_critical IS TRUE")
+        elif crit_val in ("NON_CRITICAL", "FALSE", "0"):
+            where_clauses.append("ba.is_critical IS FALSE")
+        elif crit_val in ("UNKNOWN", "NULL"):
+            where_clauses.append("ba.is_critical IS NULL")
+
+    if float_range and float_range.upper() != "ALL":
+        fr = float_range.upper()
+        if fr in ("ZERO", "0"):
+            where_clauses.append("ba.total_float = 0")
+        elif fr in ("1_TO_5", "1-5"):
+            where_clauses.append("(ba.total_float > 0 AND ba.total_float <= 5)")
+        elif fr in ("GT_5", ">5"):
+            where_clauses.append("ba.total_float > 5")
+        elif fr in ("UNKNOWN", "NULL"):
+            where_clauses.append("ba.total_float IS NULL")
+
+    if has_changes is not None:
+        if has_changes:
+            where_clauses.append("ba.has_changes IS TRUE")
+        else:
+            where_clauses.append("ba.has_changes IS FALSE")
+
+    if change_recency and change_recency.upper() != "ALL":
+        cr = change_recency.upper()
+        now_utc = datetime.now(timezone.utc)
+        if cr == "TODAY":
+            start_of_today = now_utc.replace(hour=0, minute=0, second=0, microsecond=0).isoformat()
+            where_clauses.append("ba.last_changed_at >= %s")
+            params.append(start_of_today)
+        elif cr == "LAST_7_DAYS":
+            seven_days_ago = (now_utc - timedelta(days=7)).isoformat()
+            where_clauses.append("ba.last_changed_at >= %s")
+            params.append(seven_days_ago)
+        elif cr == "LAST_30_DAYS":
+            thirty_days_ago = (now_utc - timedelta(days=30)).isoformat()
+            where_clauses.append("ba.last_changed_at >= %s")
+            params.append(thirty_days_ago)
+        elif cr == "NO_CHANGES":
+            where_clauses.append("ba.has_changes IS FALSE")
+
+    where_str = " AND ".join(where_clauses)
+
+    # 1. Compute scope-aware metrics
+    metrics_query = f"""
+    {_BASE_ACTIVITIES_CTE}
+    SELECT
+        COUNT(*) as total,
+        COALESCE(SUM(CASE WHEN ba.execution_state = 'IN_PROGRESS' THEN 1 ELSE 0 END), 0) as in_progress,
+        COALESCE(SUM(CASE WHEN ba.execution_state = 'COMPLETED' THEN 1 ELSE 0 END), 0) as completed,
+        COALESCE(SUM(CASE WHEN ba.execution_state = 'NOT_STARTED' THEN 1 ELSE 0 END), 0) as not_started,
+        COALESCE(SUM(CASE WHEN ba.is_critical IS TRUE THEN 1 ELSE 0 END), 0) as critical,
+        COALESCE(SUM(CASE WHEN ba.has_changes IS TRUE THEN 1 ELSE 0 END), 0) as changed
+    FROM base_activities ba
+    WHERE {where_str}
+    """
+    m_row = _execute(conn, metrics_query, tuple(params)).fetchone()
+    if m_row:
+        metrics = {
+            "total": int(m_row["total"] if isinstance(m_row, dict) else m_row[0]),
+            "in_progress": int(m_row["in_progress"] if isinstance(m_row, dict) else m_row[1]),
+            "completed": int(m_row["completed"] if isinstance(m_row, dict) else m_row[2]),
+            "not_started": int(m_row["not_started"] if isinstance(m_row, dict) else m_row[3]),
+            "critical": int(m_row["critical"] if isinstance(m_row, dict) else m_row[4]),
+            "changed": int(m_row["changed"] if isinstance(m_row, dict) else m_row[5]),
+        }
+    else:
+        metrics = empty_metrics
+
+    # 2. Build sorting & pagination
+    SORT_EXPRESSIONS = {
+        "activity_id": "ba.activity_id",
+        "activity_name": "ba.activity_name",
+        "planned_start": "ba.planned_start",
+        "planned_finish": "ba.planned_finish",
+        "actual_pct_complete": "COALESCE(ba.actual_pct_complete, 0)",
+        "baseline_pct_complete": "COALESCE(ba.baseline_pct_complete, 0)",
+        "total_float": "ba.total_float",
+    }
+    dir_str = "DESC" if str(sort_order).lower() == "desc" else "ASC"
+    if sort_by == "last_changed_at":
+        if dir_str == "DESC":
+            order_clause = "CASE WHEN ba.last_changed_at IS NULL THEN 1 ELSE 0 END, ba.last_changed_at DESC, ba.activity_id ASC"
+        else:
+            order_clause = "CASE WHEN ba.last_changed_at IS NULL THEN 0 ELSE 1 END, ba.last_changed_at ASC, ba.activity_id ASC"
+    else:
+        col_expr = SORT_EXPRESSIONS.get(sort_by, "ba.activity_id")
+        order_clause = f"{col_expr} {dir_str}, ba.activity_id ASC"
+
+    valid_page = max(1, page)
+    valid_page_size = max(1, min(page_size, 500))
+    offset = (valid_page - 1) * valid_page_size
+
+    items_query = f"""
+    {_BASE_ACTIVITIES_CTE}
+    SELECT ba.*
+    FROM base_activities ba
+    WHERE {where_str}
+    ORDER BY {order_clause}
+    LIMIT %s OFFSET %s
+    """
+    item_rows = _execute(conn, items_query, tuple(params + [valid_page_size, offset])).fetchall()
+
+    items: List[dict] = []
+    for r in item_rows:
+        row_dict = dict(r)
+        items.append({
+            "activity_id": str(row_dict["activity_id"]),
+            "activity_name": str(row_dict["activity_name"]),
+            "schedule_id": str(row_dict["schedule_id"]),
+            "discipline": str(row_dict["discipline"]),
+            "location": str(row_dict["location"]),
+            "asset_tag": str(row_dict["asset_tag"]) if row_dict.get("asset_tag") is not None else None,
+            "wbs_code": str(row_dict["wbs_code"]) if row_dict.get("wbs_code") is not None else None,
+            "planned_start": _format_iso(row_dict.get("planned_start")),
+            "planned_finish": _format_iso(row_dict.get("planned_finish")),
+            "planned_quantity": float(row_dict["planned_quantity"]) if row_dict.get("planned_quantity") is not None else None,
+            "uom": str(row_dict["uom"]) if row_dict.get("uom") is not None else None,
+            "baseline_pct_complete": float(row_dict["baseline_pct_complete"]) if row_dict.get("baseline_pct_complete") is not None else 0.0,
+            "actual_start": _format_iso(row_dict.get("actual_start")),
+            "actual_finish": _format_iso(row_dict.get("actual_finish")),
+            "actual_pct_complete": float(row_dict["actual_pct_complete"]) if row_dict.get("actual_pct_complete") is not None else None,
+            "execution_state": str(row_dict.get("execution_state") or "NOT_STARTED"),
+            "is_critical": bool(row_dict["is_critical"]) if row_dict.get("is_critical") is not None else None,
+            "total_float": float(row_dict["total_float"]) if row_dict.get("total_float") is not None else None,
+            "has_changes": bool(row_dict.get("has_changes")),
+            "event_count": int(row_dict.get("event_count") or 0),
+            "last_changed_at": _format_iso(row_dict.get("last_changed_at")),
+        })
+
+    return {
+        "items": items,
+        "total": metrics["total"],
+        "page": valid_page,
+        "page_size": valid_page_size,
+        "schedule_id": schedule_id,
+        "metrics": metrics,
+    }
+
+
+@router.get("", response_model=ActivityListResponse)
+def list_activities(
+    schedule_id: Optional[str] = None,
+    search: Optional[str] = None,
+    discipline: Optional[str] = None,
+    location: Optional[str] = None,
+    wbs_code: Optional[str] = None,
+    execution_state: Optional[str] = None,
+    is_critical: Optional[str] = None,
+    float_range: Optional[str] = None,
+    has_changes: Optional[bool] = None,
+    change_recency: Optional[str] = None,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(25, ge=1, le=500),
+    sort_by: str = Query("activity_id"),
+    sort_order: str = Query("asc"),
+    current_user: UserProfile = Depends(require_role("SUPERVISOR")),
+):
+    """
+    List schedule activities with canonical execution state, multi-source lifecycle aggregation,
+    and characteristic filters. Restricted to SUPERVISOR role.
+    """
+    try:
+        return query_activities(
+            schedule_id=schedule_id,
+            search=search,
+            discipline=discipline,
+            location=location,
+            wbs_code=wbs_code,
+            execution_state=execution_state,
+            is_critical=is_critical,
+            float_range=float_range,
+            has_changes=has_changes,
+            change_recency=change_recency,
+            page=page,
+            page_size=page_size,
+            sort_by=sort_by,
+            sort_order=sort_order,
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("Failed to list activities: %s", e)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to list activities",
+        )
 
 
 @router.get("/{activity_id}/history")

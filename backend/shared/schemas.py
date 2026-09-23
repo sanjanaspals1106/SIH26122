@@ -8,9 +8,9 @@ from __future__ import annotations
 
 from datetime import date, datetime
 from enum import Enum
-from typing import Optional
+from typing import Any, Optional
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 class Schedule(BaseModel):
@@ -191,10 +191,24 @@ class TextClaimRequest(BaseModel):
     raw_claim_text: str
     input_channel: InputChannel = InputChannel.TYPED_TEXT
     schedule_id: Optional[str] = None  # if omitted, defaults to most recently uploaded schedule
+    evidence_filename: Optional[str] = None
+    evidence_base64: Optional[str] = None
 
 
 class ClarifyClaimRequest(BaseModel):
     answer: str
+
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_clarification_input(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            ans = data.get("answer")
+            if ans is None:
+                # Tolerant fallback if a legacy caller sent clarification_answer
+                ans = data.get("clarification_answer")
+            if ans is not None:
+                return {**data, "answer": str(ans).strip()}
+        return data
 
 
 class ClaimResponse(BaseModel):

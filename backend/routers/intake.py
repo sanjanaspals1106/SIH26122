@@ -100,6 +100,7 @@ UPLOAD_DIR = Path(
     os.getenv("UPLOAD_DIR") or (Path(__file__).resolve().parents[1] / "uploads")
 )
 
+
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png"}
 TABULAR_EXTENSIONS = {".csv", ".xlsx", ".xls"}
 _IMAGE_MIME_TYPES = {".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png"}
@@ -460,7 +461,7 @@ def _insert_execution_event(
     cur,
     *,
     event_id: str,
-    document_id: str,
+    document_id: Optional[str] = None,
     schedule_id: str,
     event_date_val: date,
     raw_claim_text: str,
@@ -539,15 +540,37 @@ def create_text_claim(
     #    file-based claims. file_name is NOT NULL in the schema, so use the
     #    input_channel as a synthetic placeholder for text-based claims
     #    rather than violating the constraint or loosening it unilaterally.
-    text_hash = hashlib.sha256(payload.raw_claim_text.encode("utf-8")).hexdigest()
-    document_id = str(uuid.uuid4())
+    photo_path: Optional[str] = None
+    ref_file_name: Optional[str] = None
+    document_id: Optional[str] = None
+
+    if payload.evidence_base64:
+        try:
+            import base64
+            evidence_bytes = base64.b64decode(payload.evidence_base64)
+            text_hash = hashlib.sha256(evidence_bytes).hexdigest()
+            doc_file_name = Path(payload.evidence_filename or "evidence.bin").name
+            doc_type = "QC_INSPECTION"
+            UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+            saved_name = f"{uuid.uuid4()}_{doc_file_name}"
+            saved_path = UPLOAD_DIR / saved_name
+            saved_path.write_bytes(evidence_bytes)
+            photo_path = str(saved_path)
+            ref_file_name = doc_file_name
+            document_id = str(uuid.uuid4())
+        except Exception as e:
+            logger.warning(f"Could not process evidence_base64: {e}")
+            photo_path = None
+            ref_file_name = None
+            document_id = None
 
     with conn.cursor() as cur:
-        cur.execute(
-            """INSERT INTO source_documents (document_id, file_name, document_type, uploader_id, file_hash)
-               VALUES (%s, %s, %s, %s, %s)""",
-            (document_id, f"[{payload.input_channel.value}]", "CHAT_LOG", current_user.id, text_hash),
-        )
+        if document_id:
+            cur.execute(
+                """INSERT INTO source_documents (document_id, file_name, document_type, uploader_id, file_hash)
+                   VALUES (%s, %s, %s, %s, %s)""",
+                (document_id, doc_file_name, doc_type, current_user.id, text_hash),
+            )
 
         # 2. Run extraction. A genuine extraction failure (bad/missing LLM
         #    config, network error, malformed model output) must not
@@ -601,19 +624,17 @@ def create_text_claim(
             claimed_pct=extracted.claimed_pct,
             delay_reason=extracted.delay_reason.value if extracted.delay_reason else None,
             supervisor_id=current_user.id,
+            photo_path=photo_path,
             clarification_status=clarification_status,
             clarification_question=clarification_question,
             clarification_answer=None,
             field_provenance=provenance,
         )
 
-        # Provenance (feature #2's "Provenance" requirement): for typed/voice
-        # claims there's no source file, so the raw claim text itself is the
-        # snippet -- kept consistent with the file-intake endpoints below,
-        # which record source_references the same way.
-        _insert_source_reference(
-            cur, event_id=event_id, file_name=None, raw_snippet=payload.raw_claim_text
-        )
+        if document_id and photo_path:
+            _insert_source_reference(
+                cur, event_id=event_id, file_name=ref_file_name, raw_snippet=payload.raw_claim_text
+            )
 
         conn.commit()
 
@@ -731,6 +752,8 @@ def clarify_claim(
         claimed_uom = extracted.claimed_uom or claim.get("claimed_uom")
         claimed_pct = extracted.claimed_pct if extracted.claimed_pct is not None else claim.get("claimed_pct")
         delay_reason = extracted.delay_reason.value if extracted.delay_reason else claim.get("delay_reason")
+        reported_activity_id = extracted.reported_activity_id or claim.get("reported_activity_id")
+        language_detected = extracted.language_detected or claim.get("language_detected")
 
         cur.execute(
             """UPDATE execution_events SET
@@ -748,7 +771,9 @@ def clarify_claim(
                 delay_reason = %s,
                 clarification_status = %s,
                 clarification_answer = %s,
-                field_provenance = %s
+                field_provenance = %s,
+                reported_activity_id = %s,
+                language_detected = %s
                WHERE event_id = %s""",
             (
                 event_date,
@@ -766,6 +791,8 @@ def clarify_claim(
                 ClarificationStatus.ANSWERED.value,
                 payload.answer,
                 json.dumps(existing_prov),
+                reported_activity_id,
+                language_detected,
                 event_id,
             ),
         )
@@ -857,9 +884,8 @@ def create_file_claim(
     input_channel = InputChannel.FILE_UPLOAD
     drafts: list[ClaimDraft]
 
-    if ext in IMAGE_EXTENSIONS and purpose == UploadPurpose.EVIDENCE_PHOTO and raw_claim_text:
-        # Original EVIDENCE_PHOTO contract, unchanged: the photo is proof
-        # attached to a claim the caller already typed out.
+    if purpose == UploadPurpose.EVIDENCE_PHOTO and raw_claim_text:
+        # The file (photo or document) is proof/evidence attached to an already-typed claim.
         document_type = "QC_INSPECTION"
         UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
         # Path(...).name strips any directory components from the
@@ -869,6 +895,7 @@ def create_file_claim(
         saved_path = UPLOAD_DIR / saved_name
         saved_path.write_bytes(contents)
         photo_path = str(saved_path)
+        input_channel = InputChannel.TYPED_TEXT
         drafts = [ClaimDraft(raw_text=raw_claim_text, extracted=_extract_single_or_raise(raw_claim_text))]
     else:
         try:

@@ -976,6 +976,12 @@ def match_claim_endpoint(
                     detail=f"Execution claim '{event_id}' not found.",
                 )
 
+            if event_row.get("clarification_status") == "PENDING":
+                raise HTTPException(
+                    status_code=400,
+                    detail="Cannot match claim while clarification is pending. Engineer must submit clarification first.",
+                )
+
             claim = ExecutionClaim(**event_row)
 
             # 2. Load schedule activities for schedule_id
