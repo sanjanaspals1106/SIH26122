@@ -12,6 +12,8 @@ import {
   RotateCcw,
   Sparkles,
   Send,
+  Paperclip,
+  X,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
@@ -38,6 +40,12 @@ export default function ClaimIntake() {
   // Text Tab State
   const [textValue, setTextValue] = useState('');
   const [textError, setTextError] = useState<string | null>(null);
+
+  // Evidence Attachment State for Typed Claims (P0-1)
+  const [evidenceFile, setEvidenceFile] = useState<File | null>(null);
+  const [evidenceError, setEvidenceError] = useState<string | null>(null);
+  const [evidencePreviewUrl, setEvidencePreviewUrl] = useState<string | null>(null);
+  const evidenceInputRef = useRef<HTMLInputElement>(null);
 
   // Voice Tab — Web Speech API
   const [isRecording, setIsRecording] = useState(false);
@@ -174,9 +182,48 @@ export default function ClaimIntake() {
     setSelectedFile(file);
   };
 
+  const handleEvidenceSelect = (file: File | null) => {
+    if (evidencePreviewUrl) {
+      URL.revokeObjectURL(evidencePreviewUrl);
+      setEvidencePreviewUrl(null);
+    }
+    if (!file) {
+      setEvidenceFile(null);
+      setEvidenceError(null);
+      return;
+    }
+    const ext = `.${file.name.split('.').pop()?.toLowerCase()}`;
+    if (!ACCEPTED_FILE_EXTS.includes(ext)) {
+      setEvidenceError(t('intake.errFileType'));
+      setEvidenceFile(null);
+      return;
+    }
+    if (file.size > MAX_FILE_SIZE_BYTES) {
+      setEvidenceError('Evidence file exceeds 25MB maximum size limit.');
+      setEvidenceFile(null);
+      return;
+    }
+    setEvidenceError(null);
+    setEvidenceFile(file);
+    if (file.type.startsWith('image/') || ['.jpg', '.jpeg', '.png'].includes(ext)) {
+      setEvidencePreviewUrl(URL.createObjectURL(file));
+    }
+  };
+
+  const removeEvidenceFile = () => {
+    if (evidencePreviewUrl) {
+      URL.revokeObjectURL(evidencePreviewUrl);
+      setEvidencePreviewUrl(null);
+    }
+    setEvidenceFile(null);
+    setEvidenceError(null);
+    if (evidenceInputRef.current) evidenceInputRef.current.value = '';
+  };
+
   const handleResetForm = () => {
     setTextValue('');
     setTextError(null);
+    removeEvidenceFile();
     setVoiceTranscript('');
     removeAudioFile();
     setSelectedFile(null);
@@ -211,7 +258,18 @@ export default function ClaimIntake() {
       );
 
       setPipelineStep(4); // Complete
-      setCreatedEvents([...events]);
+      // Refresh events from backend to capture updated matched_activity_id and check state
+      const refreshedEvents = await Promise.all(
+        events.map(async (ev) => {
+          try {
+            const fresh = await claimsApi.getEvent(ev.event_id);
+            return { ...ev, ...fresh };
+          } catch {
+            return ev;
+          }
+        })
+      );
+      setCreatedEvents(refreshedEvents);
     } catch (err: any) {
       setPipelineError(err.message || t('intake.pipelineFailed'));
     } finally {
@@ -267,7 +325,10 @@ export default function ClaimIntake() {
 
     try {
       let events: ExecutionEvent[];
-      if (file) {
+      if (file && activeTab === 'text') {
+        const res = await claimsApi.submitText(claimText, file);
+        events = [res.event];
+      } else if (file) {
         const res = await claimsApi.submitFile(file);
         events = res.events;
       } else {
@@ -302,7 +363,9 @@ export default function ClaimIntake() {
       return;
     }
     setTextError(null);
-    runPipeline(trimmed);
+    setEvidenceError(null);
+
+    runPipeline(trimmed, evidenceFile);
   };
 
   const handleSubmitVoice = () => {
@@ -423,6 +486,110 @@ export default function ClaimIntake() {
                     {textError && (
                       <p id="claim-text-error" role="alert" className="text-xs text-destructive font-semibold">
                         {textError}
+                      </p>
+                    )}
+                  </div>
+
+                  {/* P0-1: Evidence Attachment Section for Typed Claim */}
+                  <div className="space-y-2 pt-2 border-t border-slate-200/80 dark:border-[#214766]">
+                    <div className="flex items-center justify-between">
+                      <Label htmlFor="evidence-file-input" className="text-xs font-bold text-[#071A2D] dark:text-[#C5D2DE] flex items-center gap-1.5">
+                        <Paperclip className="w-3.5 h-3.5 text-[#FF7A18]" />
+                        <span>Supporting Site Evidence <span className="text-muted-foreground font-normal">(Optional)</span></span>
+                      </Label>
+                      <span className="text-[10px] text-muted-foreground font-mono">
+                        Defaults to placeholder if omitted
+                      </span>
+                    </div>
+
+                    <input
+                      type="file"
+                      ref={evidenceInputRef}
+                      id="evidence-file-input"
+                      accept=".jpg,.jpeg,.png,.pdf,.xlsx,.xls,.csv,.txt,.xer"
+                      onChange={(e) => handleEvidenceSelect(e.target.files?.[0] || null)}
+                      className="hidden"
+                    />
+
+                    {!evidenceFile ? (
+                      <div
+                        role="button"
+                        tabIndex={0}
+                        aria-label="Click or drag file to attach supporting site evidence"
+                        onClick={() => evidenceInputRef.current?.click()}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter' || e.key === ' ') {
+                            e.preventDefault();
+                            evidenceInputRef.current?.click();
+                          }
+                        }}
+                        className={cn(
+                          'border-2 border-dashed rounded-xl p-4 text-center cursor-pointer transition-all space-y-1.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FF7A18]',
+                          'border-slate-300 dark:border-[#214766] hover:border-[#FF7A18] bg-slate-50/50 dark:bg-[#0A2238]/60'
+                        )}
+                      >
+                        <div className="flex items-center justify-center gap-2 text-slate-400">
+                          <Upload className="w-4 h-4 text-[#FF7A18]" />
+                          <span className="text-xs text-[#071A2D] dark:text-[#F5F7FA] font-bold">
+                            Attach Evidence (Optional: Site Photo, Inspection Report, QC Cert)
+                          </span>
+                        </div>
+                        <div className="text-[10px] text-muted-foreground">
+                          Supports JPG, PNG, PDF, CSV, XLSX · Blank 'File not uploaded' placeholder used if omitted
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="p-3 rounded-xl border border-orange-500/30 bg-orange-500/5 dark:bg-orange-950/20 space-y-2">
+                        <div className="flex items-center justify-between gap-3">
+                          <div className="flex items-center gap-2.5 truncate">
+                            {evidencePreviewUrl ? (
+                              <img
+                                src={evidencePreviewUrl}
+                                alt="Evidence preview"
+                                className="w-10 h-10 rounded-lg object-cover border border-orange-200 dark:border-orange-900/50 shrink-0"
+                              />
+                            ) : (
+                              <div className="w-10 h-10 rounded-lg bg-orange-100 dark:bg-orange-950/60 border border-orange-300 dark:border-orange-800/60 flex items-center justify-center shrink-0 text-[#FF7A18]">
+                                <FileText className="w-5 h-5" />
+                              </div>
+                            )}
+                            <div className="truncate">
+                              <div className="text-xs font-bold text-[#071A2D] dark:text-[#F5F7FA] truncate">
+                                {evidenceFile.name}
+                              </div>
+                              <div className="text-[10px] text-muted-foreground font-mono">
+                                {(evidenceFile.size / 1024).toFixed(1)} KB · {evidenceFile.type || 'Document'}
+                              </div>
+                            </div>
+                          </div>
+
+                          <div className="flex items-center gap-1.5 shrink-0">
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              onClick={() => evidenceInputRef.current?.click()}
+                              className="h-7 text-[11px] px-2"
+                            >
+                              Replace
+                            </Button>
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="sm"
+                              onClick={removeEvidenceFile}
+                              className="h-7 text-[11px] px-2 text-destructive hover:bg-destructive/10"
+                            >
+                              <X className="w-3.5 h-3.5" />
+                            </Button>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    {evidenceError && (
+                      <p role="alert" className="text-xs text-destructive font-semibold">
+                        {evidenceError}
                       </p>
                     )}
                   </div>

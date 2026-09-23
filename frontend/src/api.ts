@@ -276,6 +276,8 @@ export interface ScheduleActivity {
   planned_quantity: number | null;
   uom: string | null;
   baseline_pct_complete: number;
+  total_float?: number | null;
+  is_critical?: boolean | null;
 }
 
 export interface ScheduleDependency {
@@ -1130,13 +1132,16 @@ function normalizeEvent(raw: any, rank?: number): ExecutionEvent {
 }
 
 export const claimsApi = {
-  submitText: async (text: string): Promise<{ event: ExecutionEvent }> => {
+  submitText: async (
+    text: string,
+    evidenceFile?: File | null
+  ): Promise<{ event: ExecutionEvent }> => {
     if (USE_MOCKS) {
       await sleep(1000);
       const extracted = extractMockClaimFields(text);
       const ev: ExecutionEvent = {
         event_id: `evt-${Date.now()}`,
-        document_id: null,
+        document_id: evidenceFile ? `doc-${Date.now()}` : null,
         schedule_id: 'sched-OIL-2026',
         event_date: TODAY,
         raw_claim_text: text,
@@ -1155,7 +1160,7 @@ export const claimsApi = {
         claimed_pct: extracted.claimed_pct,
         delay_reason: null,
         supervisor_id: null,
-        photo_path: null,
+        photo_path: evidenceFile ? `/uploads/${evidenceFile.name}` : null,
         status: 'EXTRACTED',
         created_at: new Date().toISOString(),
         clarification_status: extracted.clarification_status,
@@ -1163,6 +1168,13 @@ export const claimsApi = {
       };
       MOCK_DYNAMIC_EVENTS.set(ev.event_id, ev);
       return { event: ev };
+    }
+    if (evidenceFile) {
+      const res = await claimsApi.submitFile(evidenceFile, {
+        purpose: 'EVIDENCE_PHOTO',
+        rawClaimText: text,
+      });
+      return { event: res.events[0] };
     }
     // Do NOT send schedule_id — let the backend resolve the latest active schedule.
     // Sending 'sched-OIL-2026' (the old hardcoded default) causes M3 to load
@@ -1289,7 +1301,7 @@ export const claimsApi = {
     }
     const data = await apiFetch(`/api/v1/claims/${eventId}/clarify`, {
       method: 'POST',
-      body: JSON.stringify({ clarification_answer: answer }),
+      body: JSON.stringify({ answer }),
     });
     return { event: data as any };
   },
@@ -1699,6 +1711,8 @@ export interface ActivityTimelineItem {
   claimed_quantity?: number | null;
   delay_reason?: string | null;
   status?: string | null;
+  photo_path?: string | null;
+  document_id?: string | null;
   source_references?: {
     reference_id: string;
     file_name: string | null;
@@ -1722,8 +1736,194 @@ export interface ActivityTimelineItem {
   actual_quantity?: number | null;
 }
 
+export type ExecutionState = 'NOT_STARTED' | 'IN_PROGRESS' | 'COMPLETED';
+
+export interface ActivitySummary {
+  activity_id: string;
+  activity_name: string;
+  schedule_id: string;
+  discipline: Discipline;
+  location: string;
+  asset_tag: string | null;
+  wbs_code: string | null;
+  planned_start: string | null;
+  planned_finish: string | null;
+  planned_quantity: number | null;
+  uom: string | null;
+  baseline_pct_complete: number;
+  actual_start: string | null;
+  actual_finish: string | null;
+  actual_pct_complete: number | null;
+  execution_state: ExecutionState;
+  is_critical: boolean | null;
+  total_float: number | null;
+  has_changes: boolean;
+  event_count: number;
+  last_changed_at: string | null;
+}
+
+export interface ActivityMetrics {
+  total: number;
+  in_progress: number;
+  completed: number;
+  not_started: number;
+  critical: number;
+  changed: number;
+}
+
+export interface ActivityListResponse {
+  items: ActivitySummary[];
+  total: number;
+  page: number;
+  page_size: number;
+  schedule_id: string;
+  metrics: ActivityMetrics;
+}
+
+export interface ActivityFilterParams {
+  schedule_id?: string;
+  search?: string;
+  discipline?: string;
+  location?: string;
+  wbs_code?: string;
+  execution_state?: string;
+  is_critical?: string;
+  float_range?: string;
+  has_changes?: boolean;
+  change_recency?: string;
+  page?: number;
+  page_size?: number;
+  sort_by?: string;
+  sort_order?: 'asc' | 'desc';
+}
+
 export const activitiesApi = {
-  getHistory: async (activityId: string): Promise<{
+  getActivities: async (params?: ActivityFilterParams): Promise<ActivityListResponse> => {
+    if (USE_MOCKS) {
+      await sleep(300);
+      let filtered = MOCK_ACTIVITIES.map((a): ActivitySummary => {
+        const isCrit = a.is_critical ?? null;
+        const totalFloat = a.total_float ?? null;
+        // Canonical execution state logic:
+        // actual_pct_complete >= 100 -> COMPLETED, else if actual_start -> IN_PROGRESS, else NOT_STARTED
+        const actualStart = a.activity_id === 'PIP-PS3-SPO-015' ? '2026-08-16' : null;
+        const actualPct = a.activity_id === 'PIP-PS3-SPO-015' ? 62 : null;
+        let execState: ExecutionState = 'NOT_STARTED';
+        if (actualPct !== null && actualPct >= 100) execState = 'COMPLETED';
+        else if (actualStart) execState = 'IN_PROGRESS';
+
+        const hasChg = a.activity_id === 'PIP-PS3-SPO-015';
+        return {
+          activity_id: a.activity_id,
+          activity_name: a.activity_name,
+          schedule_id: a.schedule_id,
+          discipline: a.discipline,
+          location: a.location,
+          asset_tag: a.asset_tag,
+          wbs_code: a.wbs_code,
+          planned_start: a.planned_start,
+          planned_finish: a.planned_finish,
+          planned_quantity: a.planned_quantity,
+          uom: a.uom,
+          baseline_pct_complete: a.baseline_pct_complete,
+          actual_start: actualStart,
+          actual_finish: null,
+          actual_pct_complete: actualPct,
+          execution_state: execState,
+          is_critical: isCrit,
+          total_float: totalFloat,
+          has_changes: hasChg,
+          event_count: hasChg ? 3 : 0,
+          last_changed_at: hasChg ? new Date().toISOString() : null,
+        };
+      });
+
+      if (params?.search) {
+        const s = params.search.toLowerCase();
+        filtered = filtered.filter(
+          (a) =>
+            a.activity_id.toLowerCase().includes(s) ||
+            a.activity_name.toLowerCase().includes(s) ||
+            (a.asset_tag && a.asset_tag.toLowerCase().includes(s))
+        );
+      }
+      if (params?.discipline && params.discipline !== 'ALL') {
+        filtered = filtered.filter((a) => a.discipline.toUpperCase() === params.discipline!.toUpperCase());
+      }
+      if (params?.location && params.location !== 'ALL') {
+        filtered = filtered.filter((a) => a.location.toLowerCase() === params.location!.toLowerCase());
+      }
+      if (params?.wbs_code && params.wbs_code !== 'ALL') {
+        filtered = filtered.filter((a) => a.wbs_code && a.wbs_code.startsWith(params.wbs_code!));
+      }
+      if (params?.execution_state && params.execution_state !== 'ALL') {
+        filtered = filtered.filter((a) => a.execution_state === params.execution_state);
+      }
+      if (params?.is_critical && params.is_critical !== 'ALL') {
+        if (params.is_critical === 'CRITICAL') filtered = filtered.filter((a) => a.is_critical === true);
+        else if (params.is_critical === 'NON_CRITICAL') filtered = filtered.filter((a) => a.is_critical === false);
+        else if (params.is_critical === 'UNKNOWN') filtered = filtered.filter((a) => a.is_critical === null);
+      }
+      if (params?.float_range && params.float_range !== 'ALL') {
+        if (params.float_range === 'ZERO') filtered = filtered.filter((a) => a.total_float === 0);
+        else if (params.float_range === '1_TO_5') filtered = filtered.filter((a) => a.total_float !== null && a.total_float > 0 && a.total_float <= 5);
+        else if (params.float_range === 'GT_5') filtered = filtered.filter((a) => a.total_float !== null && a.total_float > 5);
+        else if (params.float_range === 'UNKNOWN') filtered = filtered.filter((a) => a.total_float === null);
+      }
+      if (params?.has_changes !== undefined) {
+        filtered = filtered.filter((a) => a.has_changes === params.has_changes);
+      }
+
+      const total = filtered.length;
+      const in_progress = filtered.filter((a) => a.execution_state === 'IN_PROGRESS').length;
+      const completed = filtered.filter((a) => a.execution_state === 'COMPLETED').length;
+      const not_started = filtered.filter((a) => a.execution_state === 'NOT_STARTED').length;
+      const critical = filtered.filter((a) => a.is_critical === true).length;
+      const changed = filtered.filter((a) => a.has_changes).length;
+
+      const page = params?.page || 1;
+      const pageSize = params?.page_size || 25;
+      const paginated = filtered.slice((page - 1) * pageSize, page * pageSize);
+
+      return {
+        items: paginated,
+        total,
+        page,
+        page_size: pageSize,
+        schedule_id: 'sched-OIL-2026',
+        metrics: {
+          total,
+          in_progress,
+          completed,
+          not_started,
+          critical,
+          changed,
+        },
+      };
+    }
+
+    const query = new URLSearchParams();
+    if (params) {
+      if (params.schedule_id) query.set('schedule_id', params.schedule_id);
+      if (params.search) query.set('search', params.search);
+      if (params.discipline) query.set('discipline', params.discipline);
+      if (params.location) query.set('location', params.location);
+      if (params.wbs_code) query.set('wbs_code', params.wbs_code);
+      if (params.execution_state) query.set('execution_state', params.execution_state);
+      if (params.is_critical) query.set('is_critical', params.is_critical);
+      if (params.float_range) query.set('float_range', params.float_range);
+      if (params.has_changes !== undefined) query.set('has_changes', String(params.has_changes));
+      if (params.change_recency) query.set('change_recency', params.change_recency);
+      if (params.page) query.set('page', String(params.page));
+      if (params.page_size) query.set('page_size', String(params.page_size));
+      if (params.sort_by) query.set('sort_by', params.sort_by);
+      if (params.sort_order) query.set('sort_order', params.sort_order);
+    }
+    const qs = query.toString();
+    return apiFetch<ActivityListResponse>(`/api/v1/activities${qs ? `?${qs}` : ''}`);
+  },
+
+  getHistory: async (activityId: string, scheduleIdArg?: string): Promise<{
     activity: ScheduleActivity | null;
     timeline: ActivityTimelineItem[];
     history: {
@@ -1817,7 +2017,8 @@ export const activitiesApi = {
         ],
       };
     }
-    const data: any = await apiFetch(`/api/v1/activities/${activityId}/history`);
+    const historyQs = scheduleIdArg ? `?schedule_id=${encodeURIComponent(scheduleIdArg)}` : '';
+    const data: any = await apiFetch(`/api/v1/activities/${encodeURIComponent(activityId)}/history${historyQs}`);
     const timeline: ActivityTimelineItem[] = data.timeline || [];
     const eventItems = timeline.filter((t: any) => t.type === 'execution_event');
     const decisionItem = timeline.find((t: any) => t.type === 'planner_decision');

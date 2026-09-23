@@ -38,13 +38,15 @@ export default function LoginScreen() {
 
   if (isAuthenticated && user) {
     const defaultRoute = user.role === 'SUPERVISOR' ? '/digest' : '/intake';
-    const fromPath = (location.state as any)?.from?.pathname;
+    const fromLocation = (location.state as any)?.from;
+    const fromPath = fromLocation?.pathname;
+    const fullFrom = fromLocation ? `${fromLocation.pathname}${fromLocation.search || ''}` : null;
     let targetRoute = defaultRoute;
     if (fromPath && fromPath !== '/' && fromPath !== '/login') {
       if (user.role === 'SITE_ENGINEER' && fromPath === '/intake') {
-        targetRoute = '/intake';
+        targetRoute = fullFrom || '/intake';
       } else if (user.role === 'SUPERVISOR' && fromPath !== '/intake') {
-        targetRoute = fromPath;
+        targetRoute = fullFrom || fromPath;
       }
     }
     return <Navigate to={targetRoute} replace />;
