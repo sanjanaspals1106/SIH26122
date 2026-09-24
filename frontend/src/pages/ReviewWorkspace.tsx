@@ -45,6 +45,7 @@ import { AskWhyPanel } from '@/components/AskWhyPanel';
 import { WBSSplitEditor } from '@/components/WBSSplitEditor';
 import { EvidencePanel } from '@/components/EvidencePanel';
 import { KnowledgeGraph } from '@/components/KnowledgeGraph';
+import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { EmptyState } from '@/components/ui/empty-state';
 import { ErrorState } from '@/components/ui/error-state';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -953,11 +954,16 @@ export default function ReviewWorkspace() {
           </div>
         </div>
 
-        {bottomTab === 'evidence' ? (
-          <EvidencePanel eventId={event.event_id} />
-        ) : (
-          <KnowledgeGraph eventId={event.event_id} />
-        )}
+        <ErrorBoundary
+          label={bottomTab === 'evidence' ? 'Evidence panel' : 'Knowledge graph'}
+          resetKey={`${event.event_id}:${bottomTab}`}
+        >
+          {bottomTab === 'evidence' ? (
+            <EvidencePanel eventId={event.event_id} />
+          ) : (
+            <KnowledgeGraph eventId={event.event_id} />
+          )}
+        </ErrorBoundary>
       </div>
     </div>
   );
