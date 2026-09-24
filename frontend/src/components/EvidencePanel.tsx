@@ -28,7 +28,7 @@ export const EvidencePanel: React.FC<EvidencePanelProps> = ({ eventId }) => {
       setLoading(true);
       setError(null);
       const docs = await claimsApi.getEvidence(eventId);
-      setEvidenceList(docs || []);
+      setEvidenceList(Array.isArray(docs) ? docs : []);
     } catch (err: any) {
       setError(err?.message || 'Failed to load evidence records');
       setEvidenceList([]);
@@ -45,15 +45,15 @@ export const EvidencePanel: React.FC<EvidencePanelProps> = ({ eventId }) => {
     if (!searchQuery.trim()) return true;
     const q = searchQuery.toLowerCase();
     return (
-      doc.file_name.toLowerCase().includes(q) ||
-      doc.document_type.toLowerCase().includes(q) ||
+      (doc.file_name ?? '').toLowerCase().includes(q) ||
+      (doc.document_type ?? '').toLowerCase().includes(q) ||
       (doc.snippet_text && doc.snippet_text.toLowerCase().includes(q)) ||
       (doc.page_or_cell_ref && doc.page_or_cell_ref.toLowerCase().includes(q))
     );
   });
 
-  const getDocTypeIcon = (type: string) => {
-    switch (type.toUpperCase()) {
+  const getDocTypeIcon = (type?: string | null) => {
+    switch ((type ?? '').toUpperCase()) {
       case 'INSPECTION_PHOTO':
       case 'PHOTO':
       case 'IMAGE':
@@ -150,7 +150,7 @@ export const EvidencePanel: React.FC<EvidencePanelProps> = ({ eventId }) => {
                         {doc.file_name}
                       </h4>
                       <span className="text-[10px] uppercase font-bold tracking-wider text-muted-foreground">
-                        {doc.document_type.replace(/_/g, ' ')}
+                        {(doc.document_type ?? '').replace(/_/g, ' ')}
                       </span>
                     </div>
                   </div>

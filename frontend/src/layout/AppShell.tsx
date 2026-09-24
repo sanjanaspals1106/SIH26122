@@ -29,6 +29,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import GlobalIndustrialBackground from '@/components/GlobalIndustrialBackground';
+import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { IS_MOCK_MODE } from '@/api';
 
 const SIDEBAR_COLLAPSED_KEY = 'setu_sidebar_collapsed_v1';
@@ -332,7 +333,10 @@ export default function AppShell() {
 
         {/* Main Content Viewport */}
         <main className="flex-1 p-4 sm:p-6 lg:p-8 max-w-7xl w-full mx-auto">
-          <Outlet />
+          {/* Keeps the sidebar/header alive if a page crashes; resets on navigation. */}
+          <ErrorBoundary label="This page" resetKey={location.pathname + location.search}>
+            <Outlet />
+          </ErrorBoundary>
         </main>
       </div>
     </div>

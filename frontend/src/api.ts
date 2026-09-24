@@ -1112,6 +1112,29 @@ function extractMockClaimFields(text: string): {
 // The UI works with a list of reasons, a rank and an escalation flag.
 const ESCALATION_SCORE_THRESHOLD = 100; // >= one critical-severity issue (base 100) or worse
 
+// GET /claims/{id}/evidence returns evidence *links* (link_id, relation_type, rationale,
+// opposite_* context describing the other claim/document), not documents. Map them onto
+// EvidenceDocument so the panel always has the fields it renders. Rows that are already
+// document-shaped (mock data) pass through unchanged.
+function normalizeEvidence(raw: any): EvidenceDocument {
+  const ctx = raw?.opposite_context || {};
+  const docType = raw?.document_type || raw?.opposite_document_type || raw?.opposite_channel || 'LINKED_CLAIM';
+  return {
+    evidence_id: raw?.evidence_id || raw?.link_id || `${raw?.event_id_a ?? ''}:${raw?.event_id_b ?? ''}`,
+    event_id: raw?.event_id || raw?.event_id_a || '',
+    document_type: docType,
+    relation: raw?.relation ?? raw?.relation_type ?? null,
+    file_name: raw?.file_name || ctx.file_name || raw?.opposite_document_type || 'Linked claim',
+    page_or_cell_ref: raw?.page_or_cell_ref ?? (ctx.event_date ? `Claim dated ${ctx.event_date}` : null),
+    snippet_text: raw?.snippet_text ?? raw?.rationale ?? ctx.raw_claim_text ?? null,
+    ocr_confidence: raw?.ocr_confidence ?? null, // link `confidence` is not OCR confidence
+    gps_lat: raw?.gps_lat ?? null,
+    gps_lon: raw?.gps_lon ?? null,
+    timestamp: raw?.timestamp ?? raw?.created_at ?? null,
+    source_url: raw?.source_url ?? null,
+  };
+}
+
 function normalizeEvent(raw: any, rank?: number): ExecutionEvent {
   if (!raw || typeof raw !== 'object') return raw;
   const reasons =
@@ -1379,7 +1402,8 @@ export const claimsApi = {
       ];
     }
     const data: any = await apiFetch(`/api/v1/claims/${eventId}/evidence`);
-    return data.evidence || data || [];
+    const rows: any[] = Array.isArray(data) ? data : data?.evidence || data?.evidence_links || [];
+    return rows.map(normalizeEvidence);
   },
 
   // GET /api/v1/claims/{event_id}/photo requires an Authorization header, which a
