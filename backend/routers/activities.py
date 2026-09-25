@@ -29,7 +29,7 @@ def _resolve_activity(activity_id: str, schedule_id: Optional[str], conn: Option
     timeline. Ambiguity (the same activity_id in more than one schedule, no
     schedule_id given) resolves to the active schedule if present, or 409 if truly ambiguous.
     """
-    if not schedule_id:
+    if not schedule_id and conn is None:
         try:
             from backend.shared.schedule_repository import get_active_schedule
             active = get_active_schedule()
@@ -232,27 +232,28 @@ def query_activity_history(
     timeline: List[dict] = []
 
     for event in event_rows:
+        ev = dict(event)
         ts = None
-        if event["created_at"] is not None:
-            ts = str(event["created_at"])
-        elif event["event_date"] is not None:
-            ts = str(event["event_date"])
+        if ev["created_at"] is not None:
+            ts = str(ev["created_at"])
+        elif ev["event_date"] is not None:
+            ts = str(ev["event_date"])
 
-        e_id = str(event["event_id"])
+        e_id = str(ev["event_id"])
         timeline.append(
             {
                 "type": "execution_event",
                 "event_id": e_id,
-                "schedule_id": str(event["schedule_id"]) if event["schedule_id"] is not None else None,
-                "event_date": str(event["event_date"]) if event["event_date"] is not None else None,
-                "raw_claim_text": str(event["raw_claim_text"] or ""),
-                "claim_mode": str(event["claim_mode"]) if event["claim_mode"] is not None else "CUMULATIVE_PCT",
-                "claimed_pct": float(event["claimed_pct"]) if event["claimed_pct"] is not None else None,
-                "claimed_quantity": float(event["claimed_quantity"]) if event["claimed_quantity"] is not None else None,
-                "delay_reason": str(event["delay_reason"]) if event["delay_reason"] is not None else None,
-                "status": str(event["status"]) if event["status"] is not None else None,
-                "photo_path": str(event["photo_path"]) if event.get("photo_path") else None,
-                "document_id": str(event["document_id"]) if event.get("document_id") else None,
+                "schedule_id": str(ev["schedule_id"]) if ev["schedule_id"] is not None else None,
+                "event_date": str(ev["event_date"]) if ev["event_date"] is not None else None,
+                "raw_claim_text": str(ev["raw_claim_text"] or ""),
+                "claim_mode": str(ev["claim_mode"]) if ev["claim_mode"] is not None else "CUMULATIVE_PCT",
+                "claimed_pct": float(ev["claimed_pct"]) if ev["claimed_pct"] is not None else None,
+                "claimed_quantity": float(ev["claimed_quantity"]) if ev["claimed_quantity"] is not None else None,
+                "delay_reason": str(ev["delay_reason"]) if ev["delay_reason"] is not None else None,
+                "status": str(ev["status"]) if ev["status"] is not None else None,
+                "photo_path": str(ev["photo_path"]) if ev.get("photo_path") else None,
+                "document_id": str(ev["document_id"]) if ev.get("document_id") else None,
                 "timestamp": ts,
                 "source_references": refs_by_event.get(e_id, []),
             }
@@ -307,15 +308,16 @@ def query_activity_history(
         )
     )
 
+    act_dict = dict(activity_row)
     return {
         "activity_id": str(activity_id),
         "schedule_id": resolved_schedule_id,
-        "activity_name": str(activity_row["activity_name"]) if activity_row.get("activity_name") is not None else None,
-        "discipline": str(activity_row["discipline"]) if activity_row.get("discipline") is not None else None,
-        "location": str(activity_row["location"]) if activity_row.get("location") is not None else None,
-        "wbs_code": str(activity_row["wbs_code"]) if activity_row.get("wbs_code") is not None else None,
-        "planned_start": str(activity_row["planned_start"]) if activity_row.get("planned_start") is not None else None,
-        "planned_finish": str(activity_row["planned_finish"]) if activity_row.get("planned_finish") is not None else None,
+        "activity_name": str(act_dict["activity_name"]) if act_dict.get("activity_name") is not None else None,
+        "discipline": str(act_dict["discipline"]) if act_dict.get("discipline") is not None else None,
+        "location": str(act_dict["location"]) if act_dict.get("location") is not None else None,
+        "wbs_code": str(act_dict["wbs_code"]) if act_dict.get("wbs_code") is not None else None,
+        "planned_start": str(act_dict["planned_start"]) if act_dict.get("planned_start") is not None else None,
+        "planned_finish": str(act_dict["planned_finish"]) if act_dict.get("planned_finish") is not None else None,
         "timeline": timeline,
     }
 

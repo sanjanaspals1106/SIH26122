@@ -38,6 +38,9 @@ def _warm_active_index() -> None:
     """Rebuild the in-memory FAISS index for the active schedule and load the embedding
     model off the request path (the index does not survive a restart), so the first
     /match after startup is not slow."""
+    if os.getenv("WARM_FAISS_ON_STARTUP", "false").lower() != "true":
+        print("FAISS warm-up skipped on startup (set WARM_FAISS_ON_STARTUP=true to enable)")
+        return
     try:
         from backend.shared import schedule_index
         from backend.shared.schedule_repository import get_active_schedule
