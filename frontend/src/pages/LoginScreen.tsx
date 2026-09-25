@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useAuth } from '@/auth/AuthProvider';
 import { useTheme } from '@/theme/ThemeProvider';
-import { Navigate, useLocation } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
@@ -26,31 +26,16 @@ import {
 import GlobalIndustrialBackground from '@/components/GlobalIndustrialBackground';
 
 export default function LoginScreen() {
-  const { login, isAuthenticated, user, error, clearError, isLoading } = useAuth();
+  const { login, logout, isAuthenticated, user, error, clearError, isLoading } = useAuth();
   const { theme, toggleTheme } = useTheme();
   const { t } = useTranslation();
   const location = useLocation();
+  const navigate = useNavigate();
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [fieldError, setFieldError] = useState('');
-
-  if (isAuthenticated && user) {
-    const defaultRoute = user.role === 'SUPERVISOR' ? '/digest' : '/intake';
-    const fromLocation = (location.state as any)?.from;
-    const fromPath = fromLocation?.pathname;
-    const fullFrom = fromLocation ? `${fromLocation.pathname}${fromLocation.search || ''}` : null;
-    let targetRoute = defaultRoute;
-    if (fromPath && fromPath !== '/' && fromPath !== '/login') {
-      if (user.role === 'SITE_ENGINEER' && fromPath === '/intake') {
-        targetRoute = fullFrom || '/intake';
-      } else if (user.role === 'SUPERVISOR' && fromPath !== '/intake') {
-        targetRoute = fullFrom || fromPath;
-      }
-    }
-    return <Navigate to={targetRoute} replace />;
-  }
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -63,6 +48,21 @@ export default function LoginScreen() {
 
     try {
       await login(email.trim(), password);
+      const rawUser = localStorage.getItem('user');
+      const parsedUser = rawUser ? JSON.parse(rawUser) : null;
+      const defaultRoute = parsedUser?.role === 'SUPERVISOR' ? '/digest' : '/intake';
+      const fromLocation = (location.state as any)?.from;
+      const fromPath = fromLocation?.pathname;
+      const fullFrom = fromLocation ? `${fromLocation.pathname}${fromLocation.search || ''}` : null;
+      let targetRoute = defaultRoute;
+      if (fromPath && fromPath !== '/' && fromPath !== '/login') {
+        if (parsedUser?.role === 'SITE_ENGINEER' && fromPath === '/intake') {
+          targetRoute = fullFrom || '/intake';
+        } else if (parsedUser?.role === 'SUPERVISOR' && fromPath !== '/intake') {
+          targetRoute = fullFrom || fromPath;
+        }
+      }
+      navigate(targetRoute, { replace: true });
     } catch {
       // Error state handled in AuthContext
     }
@@ -198,6 +198,34 @@ export default function LoginScreen() {
 
           {/* Form body */}
           <div className="px-8 py-7 space-y-5">
+            {/* Active session indicator if already logged in */}
+            {isAuthenticated && user && (
+              <div className="p-3.5 rounded-xl flex items-center justify-between text-xs bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800 text-emerald-800 dark:text-emerald-200 font-semibold">
+                <div>
+                  <span>Active Session: <strong>{user.full_name}</strong></span>
+                  <span className="block text-[10px] text-emerald-600 dark:text-emerald-400 uppercase font-mono">{user.role}</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Button
+                    type="button"
+                    size="sm"
+                    onClick={() => navigate(user.role === 'SUPERVISOR' ? '/digest' : '/intake')}
+                    className="h-7 text-xs bg-emerald-600 hover:bg-emerald-700 text-white cursor-pointer"
+                  >
+                    Go to App →
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    onClick={() => logout()}
+                    className="h-7 text-xs border-emerald-300 dark:border-emerald-700 text-slate-700 dark:text-slate-200 cursor-pointer"
+                  >
+                    Sign Out
+                  </Button>
+                </div>
+              </div>
+            )}
             {/* Mock Mode banner */}
             {IS_MOCK_MODE && (
               <div
